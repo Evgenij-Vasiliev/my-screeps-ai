@@ -12,6 +12,7 @@ module.exports.loop = function () {
    * ОЧИСТКА ПАМЯТИ (Garbage Collection)
    * Удаляем данные умерших крипов, чтобы не раздувать Memory.creeps
    */
+
   for (let name in Memory.creeps) {
     if (!Game.creeps[name]) {
       delete Memory.creeps[name];
@@ -34,6 +35,16 @@ module.exports.loop = function () {
    * Проходим по каждой роли из нашего плана
    */
   _.forEach(rolesConfig, roleData => {
+    const sources = Game.spawns["Spawn5"].room.find(FIND_SOURCES);
+    const miners = _.filter(
+      Game.creeps,
+      creep => creep.memory.role === "test_miner",
+    );
+    const busySources = _.map(miners, miner => miner.memory.sourceId);
+    const freeSource = _.find(
+      sources,
+      source => !busySources.includes(source.id),
+    );
     // 1. Считаем, сколько живых крипов этой роли сейчас в игре
     const creepsWithRole = _.filter(
       Game.creeps,
