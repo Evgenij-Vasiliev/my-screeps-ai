@@ -30,15 +30,27 @@ module.exports = {
      * Поиск ближайшего источника для пополнения запасов.
      */
     if (!creep.memory.working) {
-      const source = creep.pos.findClosestByRange(FIND_SOURCES);
-      if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+      // Получаем список всех источников в комнате
+      const sources = creep.room.find(FIND_SOURCES);
+
+      // Выбираем цель: если в памяти есть индекс — берем его, иначе — ближайший (для старых крипов)
+      const targetSource =
+        creep.memory.sourceIndex !== undefined
+          ? sources[creep.memory.sourceIndex]
+          : creep.pos.findClosestByRange(FIND_SOURCES);
+
+      if (targetSource) {
+        if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(targetSource, {
+            visualizePathStyle: { stroke: "#ffaa00" },
+          });
+        }
       }
     } else {
-    /**
-     * 4. РЕЖИМ УЛУЧШЕНИЯ (Upgrade Mode)
-     * Работа с контроллером комнаты.
-     */
+      /**
+       * 4. РЕЖИМ УЛУЧШЕНИЯ (Upgrade Mode)
+       * Работа с контроллером комнаты.
+       */
       const target = creep.room.controller;
       if (creep.upgradeController(target) === ERR_NOT_IN_RANGE) {
         // Рисуем синюю линию пути к контроллеру для отличия от других ролей

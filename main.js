@@ -1,6 +1,5 @@
 /**
  * ПОДКЛЮЧЕНИЕ МОДУЛЕЙ
- * Каждая роль вынесена в отдельный файл для удобства редактирования
  */
 const roleHarvester = require("./role.harvester");
 const roleUpgrader = require("./role.upgrader");
@@ -10,9 +9,7 @@ const roleRepairer = require("./role.repairer");
 module.exports.loop = function () {
   /**
    * ОЧИСТКА ПАМЯТИ (Garbage Collection)
-   * Удаляем данные умерших крипов, чтобы не раздувать Memory.creeps
    */
-
   for (let name in Memory.creeps) {
     if (!Game.creeps[name]) {
       delete Memory.creeps[name];
@@ -20,54 +17,66 @@ module.exports.loop = function () {
   }
 
   /**
+   * ПРОВЕРКА ЗАНЯТОСТИ ИСТОЧНИКОВ (Slot Booking)
+   * Мы создаем отчет: сколько крипов уже закреплено за каждым источником.
+   */
+  let sourceUsage = { 0: 0, 1: 0 };
+
+  for (let name in Game.creeps) {
+    let creep = Game.creeps[name];
+    // Если у крипа в памяти уже есть номер источника, учитываем его в отчете
+    if (creep.memory.sourceIndex !== undefined) {
+      sourceUsage[creep.memory.sourceIndex]++;
+    }
+  }
+
+  /**
    * ПЛАН НАСЕЛЕНИЯ (Roles Config)
-   * Здесь мы задаем "Госплан": какую роль и в каком количестве нам нужно держать в комнате
    */
   const rolesConfig = [
-    { role: "test_harvester", count: 1 },
-    { role: "test_upgrader", count: 1 },
-    { role: "test_builder", count: 1 },
-    { role: "test_repairer", count: 1 },
+    { role: "test_harvester", count: 8 },
+    { role: "test_upgrader", count: 0 },
+    { role: "test_builder", count: 0 },
+    { role: "test_repairer", count: 0 },
   ];
 
   /**
    * ОСНОВНОЙ ЦИКЛ УПРАВЛЕНИЯ
-   * Проходим по каждой роли из нашего плана
    */
   _.forEach(rolesConfig, roleData => {
-    const sources = Game.spawns["Spawn5"].room.find(FIND_SOURCES);
-    const miners = _.filter(
-      Game.creeps,
-      creep => creep.memory.role === "test_miner",
-    );
-    const busySources = _.map(miners, miner => miner.memory.sourceId);
-    const freeSource = _.find(
-      sources,
-      source => !busySources.includes(source.id),
-    );
     // 1. Считаем, сколько живых крипов этой роли сейчас в игре
     const creepsWithRole = _.filter(
       Game.creeps,
       creep => creep.memory.role === roleData.role,
     );
 
-    // 2. АВТОСПАВН: Если план не выполнен — заказываем нового крипа
+    // 2. АВТОСПАВН: Если крипов меньше, чем нужно по плану
     if (creepsWithRole.length < roleData.count) {
+      // ВЫБОР ЛУЧШЕГО ИСТОЧНИКА:
+      // Если на нулевом меньше или столько же людей, чем на первом — выбираем 0, иначе 1.
+      let bestIndex = sourceUsage[0] <= sourceUsage[1] ? 0 : 1;
+
+      // ЗАКАЗ КРИПА:
       Game.spawns["Spawn5"].spawnCreep(
-        [WORK, CARRY, MOVE], // Тело крипа
-        `${roleData.role}_${Game.time}`, // Уникальное имя (Роль + Время)
+        [WORK, CARRY, MOVE],
+        `${roleData.role}_${Game.time}`,
         {
           memory: {
             role: roleData.role,
-            working: false, // Начальное состояние — "готов к работе"
+            working: false,
+            // Передаем выбранный индекс в память новорожденному
+            sourceIndex: bestIndex,
           },
         },
       );
+
+      // Важно: сразу обновляем наш отчет, чтобы следующий крип в этом же тике
+      // (если он будет) увидел актуальную нагрузку.
+      sourceUsage[bestIndex]++;
     }
 
     /**
      * 3. ЗАПУСК ЛОГИКИ (Brain Execution)
-     * Для каждого найденного крипа вызываем соответствующий модуль поведения
      */
     _.forEach(creepsWithRole, creep => {
       if (creep.memory.role === "test_harvester") {

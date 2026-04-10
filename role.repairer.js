@@ -29,14 +29,26 @@ module.exports = {
      * 3. РЕЖИМ СБОРА (Harvesting Mode)
      */
     if (!creep.memory.working) {
-      const source = creep.pos.findClosestByRange(FIND_SOURCES);
-      if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+      // Получаем список всех источников в комнате
+      const sources = creep.room.find(FIND_SOURCES);
+
+      // Выбираем цель: если в памяти есть индекс — берем его, иначе — ближайший (для старых крипов)
+      const targetSource =
+        creep.memory.sourceIndex !== undefined
+          ? sources[creep.memory.sourceIndex]
+          : creep.pos.findClosestByRange(FIND_SOURCES);
+
+      if (targetSource) {
+        if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(targetSource, {
+            visualizePathStyle: { stroke: "#ffaa00" },
+          });
+        }
       }
     } else {
-    /**
-     * 4. РЕЖИМ РЕМОНТА (Repair Mode)
-     */
+      /**
+       * 4. РЕЖИМ РЕМОНТА (Repair Mode)
+       */
       // Ищем поврежденные структуры, ИСКЛЮЧАЯ стены и рампарты
       const targets = creep.room.find(FIND_STRUCTURES, {
         filter: structure =>
@@ -55,10 +67,10 @@ module.exports = {
           });
         }
       } else {
-      /**
-       * ЗАПАСНОЙ ВАРИАНТ (Fallthrough Logic)
-       * Если всё в комнате починено — помогаем строителю.
-       */
+        /**
+         * ЗАПАСНОЙ ВАРИАНТ (Fallthrough Logic)
+         * Если всё в комнате починено — помогаем строителю.
+         */
         roleBuilder.run(creep);
       }
     }
