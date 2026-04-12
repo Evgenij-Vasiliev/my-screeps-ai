@@ -29,40 +29,26 @@ module.exports = {
      * 3. РЕЖИМ СБОРА (Harvesting Mode)
      */
     if (!creep.memory.working) {
-      // Получаем список всех источников в комнате
-      const sources = creep.room.find(FIND_SOURCES);
-
-      // Выбираем цель: если в памяти есть индекс — берем его, иначе — ближайший (для старых крипов)
-      const targetSource =
-        creep.memory.sourceIndex !== undefined
-          ? sources[creep.memory.sourceIndex]
-          : creep.pos.findClosestByRange(FIND_SOURCES);
-
-      if (targetSource) {
-        if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(targetSource, {
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
-        }
+      const source = creep.pos.findClosestByRange(FIND_SOURCES);
+      if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
       }
     } else {
       /**
        * 4. РЕЖИМ РЕМОНТА (Repair Mode)
        */
-      // Ищем поврежденные структуры, ИСКЛЮЧАЯ стены и рампарты
-      const targets = creep.room.find(FIND_STRUCTURES, {
+      // Ищем БЛИЖАЙШУЮ структуру, требующую ремонта (кроме стен и рампартов)
+      const target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
         filter: structure =>
           structure.hits < structure.hitsMax &&
           structure.structureType !== STRUCTURE_WALL &&
           structure.structureType !== STRUCTURE_RAMPART,
       });
 
-      if (targets.length > 0) {
-        // Если есть что чинить — берем ближайшую поврежденную цель
-        // (Для оптимизации можно использовать findClosestByRange)
-        if (creep.repair(targets[0]) === ERR_NOT_IN_RANGE) {
-          // Зеленая линия пути к цели ремонта
-          creep.moveTo(targets[0], {
+      if (target) {
+        // Если нашли цель — чиним
+        if (creep.repair(target) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(target, {
             visualizePathStyle: { stroke: "#00ff00" },
           });
         }
