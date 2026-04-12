@@ -49,14 +49,13 @@ module.exports = {
       /**
        * 4. РЕЖИМ СТРОЙКИ (Building Mode)
        */
-      // Ищем все намеченные площадки для строительства (Construction Sites)
-      const targets = creep.room.find(FIND_CONSTRUCTION_SITES);
+      // Находим БЛИЖАЙШУЮ площадку вместо первой в списке
+      const target = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
 
-      if (targets.length > 0) {
-        // Если есть что строить — берем первую цель из списка
-        if (creep.build(targets[0]) === ERR_NOT_IN_RANGE) {
-          // Желтая линия пути к стройке
-          creep.moveTo(targets[0], {
+      if (target) {
+        // Если стройка найдена — строим
+        if (creep.build(target) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(target, {
             visualizePathStyle: { stroke: "#ffff00" },
           });
         }
