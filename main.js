@@ -5,13 +5,14 @@ const roleHarvester = require("./role.harvester");
 const roleUpgrader = require("./role.upgrader");
 const roleBuilder = require("./role.builder");
 const roleRepairer = require("./role.repairer");
+const roleMiner = require("./role.miner"); // 1. ПОДКЛЮЧАЕМ НОВЫЙ МОДУЛЬ
 
 module.exports.loop = function () {
   /**
    * 1. ОЧИСТКА ПАМЯТИ
    */
   for (let name in Memory.creeps) {
-    if (!Game.creeps[name]) {
+    if (!Game.creeps) {
       delete Memory.creeps[name];
     }
   }
@@ -31,8 +32,10 @@ module.exports.loop = function () {
    * 3. ПЛАН НАСЕЛЕНИЯ
    */
   const rolesConfig = [
+    // 2. ДОБАВЛЯЕМ МАЙНЕРОВ В ПЛАН (пока 2, по одному на источник)
+    { role: "test_miner", count: 2 },
     { role: "test_harvester", count: 4 },
-    { role: "test_builder", count: 4 }, // Поставил 4 для теста стройки контейнеров
+    { role: "test_builder", count: 4 },
     { role: "test_upgrader", count: 1 },
     { role: "test_repairer", count: 1 },
   ];
@@ -50,22 +53,35 @@ module.exports.loop = function () {
       const spawn = Game.spawns["Spawn5"];
       if (spawn && !spawn.spawning) {
         const bestIndex = sourceUsage[0] <= sourceUsage[1] ? 0 : 1;
-        spawn.spawnCreep([WORK, CARRY, MOVE], `${roleData.role}_${Game.time}`, {
-          memory: {
-            role: roleData.role,
-            sourceIndex: bestIndex,
-            working: false,
-          },
+
+        // 3. ОПРЕДЕЛЯЕМ ТЕЛО И ПАМЯТЬ ДЛЯ МАЙНЕРА
+        // Если роль - майнер, даем ему 5 WORK (как мы обсуждали). Иначе - стандартное тело.
+        let body = [WORK, CARRY, MOVE];
+        let memory = {
+          role: roleData.role,
+          sourceIndex: bestIndex,
+          working: false,
+        };
+
+        if (roleData.role === "test_miner") {
+          body = [WORK, WORK, WORK, WORK, WORK, MOVE];
+          // Для майнера важно найти ID источника прямо сейчас
+          const sources = spawn.room.find(FIND_SOURCES);
+          memory.sourceId = sources[bestIndex].id;
+        }
+
+        spawn.spawnCreep(body, `${roleData.role}_${Game.time}`, {
+          memory: memory,
         });
+
         sourceUsage[bestIndex]++;
-        break; // Один тик — один крип, чтобы не перегружать спавн
+        break;
       }
     }
   }
 
   /**
-   * 5. ЦИКЛ ЛОГИКИ (Brain Execution)
-   * Теперь этот цикл перебирает ВСЕХ живых крипов, независимо от конфига выше.
+   * 5. ЦИКЛ ЛОГИКИ
    */
   for (let name in Game.creeps) {
     const creep = Game.creeps[name];
@@ -73,5 +89,6 @@ module.exports.loop = function () {
     if (creep.memory.role === "test_upgrader") roleUpgrader.run(creep);
     if (creep.memory.role === "test_builder") roleBuilder.run(creep);
     if (creep.memory.role === "test_repairer") roleRepairer.run(creep);
+    if (creep.memory.role === "test_miner") roleMiner.run(creep); // 4. ЗАПУСКАЕМ МОЗГ МАЙНЕРА
   }
 };
