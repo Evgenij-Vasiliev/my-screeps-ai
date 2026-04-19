@@ -1,9 +1,43 @@
 /**
  * ЛОГИКА ТРАНСПОРТЕРA (Hauler Role)
  */
-var roleHauler = {
+const roleHauler = {
   /** @param {Creep} creep **/
   run: function (creep) {
+    /**
+     * 0. АНТИ-БЛОКИРОВКА (Уступаем место майнеру)
+     */
+    // Проверяем, не стоим ли мы на контейнере
+    const containerUnderCreep = creep.pos
+      .lookFor(LOOK_STRUCTURES)
+      .find(s => s.structureType === STRUCTURE_CONTAINER);
+
+    if (containerUnderCreep) {
+      // Ищем майнера вплотную к нам
+      const minerNear = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+        filter: c => c.memory.role === "test_miner",
+      })[0];
+
+      // Если майнер рядом и он ЕЩЕ НЕ на контейнере — отходим
+      if (minerNear && !minerNear.pos.isEqualTo(containerUnderCreep.pos)) {
+        const directions = [
+          TOP,
+          TOP_RIGHT,
+          RIGHT,
+          BOTTOM_RIGHT,
+          BOTTOM,
+          BOTTOM_LEFT,
+          LEFT,
+          TOP_LEFT,
+        ];
+        const randomDir =
+          directions[Math.floor(Math.random() * directions.length)];
+        creep.move(randomDir);
+        creep.say("🚜 Уступаю!");
+        return; // Пропускаем остаток тика, чтобы освободить клетку
+      }
+    }
+
     /**
      * 1. УПРАВЛЕНИЕ СОСТОЯНИЕМ
      */
@@ -24,7 +58,7 @@ var roleHauler = {
       const mySource = sources[creep.memory.sourceIndex];
 
       if (mySource) {
-        // Приоритет 1: Энергия на земле (Dropped)
+        // Приоритет 1: Энергия на земле
         const dropped = mySource.pos.findInRange(FIND_DROPPED_RESOURCES, 2, {
           filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 0,
         })[0];
@@ -36,18 +70,19 @@ var roleHauler = {
             });
           }
         } else {
-          // Приоритет 2: Контейнер (Container)
-          const container = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
+          // Приоритет 2: Контейнер
+          const targetContainer = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
             filter: s =>
               s.structureType === STRUCTURE_CONTAINER &&
               s.store[RESOURCE_ENERGY] > 0,
           })[0];
 
-          if (container) {
+          if (targetContainer) {
             if (
-              creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+              creep.withdraw(targetContainer, RESOURCE_ENERGY) ===
+              ERR_NOT_IN_RANGE
             ) {
-              creep.moveTo(container, {
+              creep.moveTo(targetContainer, {
                 visualizePathStyle: { stroke: "#ffaa00" },
               });
             }
@@ -55,19 +90,19 @@ var roleHauler = {
         }
       }
     } else {
-      /**
-       * 3. РЕЖИМ ДОСТАВКИ (Приоритеты)
-       */
+    /**
+     * 3. РЕЖИМ ДОСТАВКИ
+     */
       let target = null;
 
-      // 1. Расширения
+      // Приоритет 1: Расширения
       target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
         filter: s =>
           s.structureType === STRUCTURE_EXTENSION &&
           s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
       });
 
-      // 2. Спавн
+      // Приоритет 2: Спавн
       if (!target) {
         target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
           filter: s =>
@@ -76,7 +111,7 @@ var roleHauler = {
         });
       }
 
-      // 3. Терминал
+      // Приоритет 3: Терминал (для продажи излишков)
       if (
         !target &&
         creep.room.terminal &&
@@ -85,7 +120,7 @@ var roleHauler = {
         target = creep.room.terminal;
       }
 
-      // 4. Хранилище
+      // Приоритет 4: Хранилище (Storage)
       if (
         !target &&
         creep.room.storage &&

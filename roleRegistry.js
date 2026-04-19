@@ -6,4 +6,5 @@ module.exports = {
   test_miner: require("./role.miner"),
   test_hauler: require("./role.hauler"),
   test_towerSupplier: require("./role.towerSupplier"),
+  test_mineralMiner: require("./role.mineralMiner"),
 };
