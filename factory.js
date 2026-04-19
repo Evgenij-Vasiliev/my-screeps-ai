@@ -59,6 +59,16 @@ const factory = {
       body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
     }),
+    test_mineralMiner: spawn => {
+      const minerals = spawn.room.find(FIND_MINERALS);
+      return {
+        body: prepareBody({ work: 5, carry: 5, move: 5 }),
+        memory: {
+          mineralId: minerals.length > 0 ? minerals[0].id : null,
+        },
+      };
+    },
+
     default: () => ({
       body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},

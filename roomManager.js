@@ -12,6 +12,7 @@ const roomManager = {
       { role: "test_builder", count: 0 },
       { role: "test_upgrader", count: 1 },
       { role: "test_repairer", count: 1 },
+      { role: "test_mineralMiner", count: 2 },
     ];
 
     // 2. ОТЧЕТ ПО КРИПАМ КОМНАТЫ
