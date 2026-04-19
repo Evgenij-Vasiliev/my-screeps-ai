@@ -1,18 +1,24 @@
 /**
  * ПОДКЛЮЧЕНИЕ МОДУЛЕЙ
  */
-const roleHarvester = require("./role.harvester");
-const roleUpgrader = require("./role.upgrader");
-const roleBuilder = require("./role.builder");
-const roleRepairer = require("./role.repairer");
-const roleMiner = require("./role.miner"); // 1. ПОДКЛЮЧАЕМ НОВЫЙ МОДУЛЬ
+const roles = {
+  test_harvester: require("./role.harvester"),
+  test_upgrader: require("./role.upgrader"),
+  test_builder: require("./role.builder"),
+  test_repairer: require("./role.repairer"),
+  test_miner: require("./role.miner"),
+  test_hauler: require("./role.hauler"),
+  test_towerSupplier: require("./role.towerSupplier"),
+};
+
+const roleTower = require("./role.tower"); // Модуль для башен
 
 module.exports.loop = function () {
   /**
    * 1. ОЧИСТКА ПАМЯТИ
    */
   for (let name in Memory.creeps) {
-    if (!Game.creeps) {
+    if (!Game.creeps[name]) {
       delete Memory.creeps[name];
     }
   }
@@ -32,16 +38,17 @@ module.exports.loop = function () {
    * 3. ПЛАН НАСЕЛЕНИЯ
    */
   const rolesConfig = [
-    // 2. ДОБАВЛЯЕМ МАЙНЕРОВ В ПЛАН (пока 2, по одному на источник)
+    { role: "test_harvester", count: 1 },
     { role: "test_miner", count: 2 },
-    { role: "test_harvester", count: 4 },
-    { role: "test_builder", count: 4 },
+    { role: "test_hauler", count: 4 },
+    { role: "test_towerSupplier", count: 2 },
+    { role: "test_builder", count: 0 },
     { role: "test_upgrader", count: 1 },
     { role: "test_repairer", count: 1 },
   ];
 
   /**
-   * 4. ЦИКЛ СПАВНА (Автоматизация)
+   * 4. ЦИКЛ СПАВНА
    */
   for (let roleData of rolesConfig) {
     const creepsWithRole = _.filter(
@@ -54,8 +61,6 @@ module.exports.loop = function () {
       if (spawn && !spawn.spawning) {
         const bestIndex = sourceUsage[0] <= sourceUsage[1] ? 0 : 1;
 
-        // 3. ОПРЕДЕЛЯЕМ ТЕЛО И ПАМЯТЬ ДЛЯ МАЙНЕРА
-        // Если роль - майнер, даем ему 5 WORK (как мы обсуждали). Иначе - стандартное тело.
         let body = [WORK, CARRY, MOVE];
         let memory = {
           role: roleData.role,
@@ -64,10 +69,18 @@ module.exports.loop = function () {
         };
 
         if (roleData.role === "test_miner") {
-          body = [WORK, WORK, WORK, WORK, WORK, MOVE];
-          // Для майнера важно найти ID источника прямо сейчас
+          body = [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE];
           const sources = spawn.room.find(FIND_SOURCES);
-          memory.sourceId = sources[bestIndex].id;
+          if (sources[bestIndex]) {
+            memory.sourceId = sources[bestIndex].id;
+          }
+        }
+
+        if (
+          roleData.role === "test_hauler" ||
+          roleData.role === "test_towerSupplier"
+        ) {
+          body = [CARRY, CARRY, MOVE, MOVE];
         }
 
         spawn.spawnCreep(body, `${roleData.role}_${Game.time}`, {
@@ -81,14 +94,24 @@ module.exports.loop = function () {
   }
 
   /**
-   * 5. ЦИКЛ ЛОГИКИ
+   * 5. ЦИКЛ ЛОГИКИ КРИПОВ (Рефакторинг: используем объект roles)
    */
   for (let name in Game.creeps) {
     const creep = Game.creeps[name];
-    if (creep.memory.role === "test_harvester") roleHarvester.run(creep);
-    if (creep.memory.role === "test_upgrader") roleUpgrader.run(creep);
-    if (creep.memory.role === "test_builder") roleBuilder.run(creep);
-    if (creep.memory.role === "test_repairer") roleRepairer.run(creep);
-    if (creep.memory.role === "test_miner") roleMiner.run(creep); // 4. ЗАПУСКАЕМ МОЗГ МАЙНЕРА
+    const roleName = creep.memory.role;
+    if (roles[roleName]) {
+      roles[roleName].run(creep);
+    }
+  }
+
+  /**
+   * 6. ЛОГИКА БАШЕН
+   */
+  const towers = _.filter(
+    Game.structures,
+    s => s.structureType === STRUCTURE_TOWER,
+  );
+  for (const tower of towers) {
+    roleTower.run(tower);
   }
 };
