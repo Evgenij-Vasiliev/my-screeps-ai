@@ -1,42 +1,66 @@
 /**
- * Модуль фабрики крипов
+ * Вспомогательная функция для генерации массива частей тела.
+ * Принимает объект с количеством запчастей.
  */
+const prepareBody = ({
+  work = 0,
+  carry = 0,
+  move = 0,
+  attack = 0,
+  tough = 0,
+  ranged_attack = 0,
+  heal = 0,
+  claim = 0,
+}) => {
+  const body = [];
+  // Порядок важен для выживаемости: броня -> атака -> движение
+  for (let i = 0; i < tough; i++) body.push(TOUGH);
+  for (let i = 0; i < work; i++) body.push(WORK);
+  for (let i = 0; i < carry; i++) body.push(CARRY);
+  for (let i = 0; i < attack; i++) body.push(ATTACK);
+  for (let i = 0; i < ranged_attack; i++) body.push(RANGED_ATTACK);
+  for (let i = 0; i < heal; i++) body.push(HEAL);
+  for (let i = 0; i < claim; i++) body.push(CLAIM);
+  for (let i = 0; i < move; i++) body.push(MOVE); // MOVE обычно в конце
+
+  return body;
+};
+
 const factory = {
   blueprints: {
     test_miner: (spawn, bestIndex) => {
       const sources = spawn.room.find(FIND_SOURCES);
       return {
-        body: [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE],
+        body: prepareBody({ work: 5, move: 2 }),
         memory: { sourceId: sources[bestIndex] ? sources[bestIndex].id : null },
       };
     },
     test_hauler: () => ({
-      body: [CARRY, CARRY, MOVE, MOVE],
+      body: prepareBody({ carry: 2, move: 2 }),
       memory: {},
     }),
     test_towerSupplier: () => ({
-      body: [CARRY, CARRY, MOVE, MOVE],
+      body: prepareBody({ carry: 2, move: 2 }),
       memory: {},
     }),
-    // Добавляем недостающие роли:
     test_harvester: () => ({
-      body: [WORK, CARRY, MOVE],
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
     }),
     test_upgrader: () => ({
-      body: [WORK, CARRY, MOVE],
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
     }),
     test_builder: () => ({
-      body: [WORK, CARRY, MOVE],
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
     }),
     test_repairer: () => ({
-      body: [WORK, CARRY, MOVE],
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
     }),
     default: () => ({
-      body: [WORK, CARRY, MOVE],
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
     }),
   },
