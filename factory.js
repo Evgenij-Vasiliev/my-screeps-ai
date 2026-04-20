@@ -36,11 +36,11 @@ const factory = {
       };
     },
     test_hauler: () => ({
-      body: prepareBody({ carry: 2, move: 2 }),
+      body: prepareBody({ carry: 3, move: 3 }),
       memory: {},
     }),
     test_towerSupplier: () => ({
-      body: prepareBody({ carry: 2, move: 2 }),
+      body: prepareBody({ carry: 3, move: 3 }),
       memory: {},
     }),
     test_harvester: () => ({
@@ -48,15 +48,15 @@ const factory = {
       memory: {},
     }),
     test_upgrader: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      body: prepareBody({ work: 2, carry: 2, move: 4 }),
       memory: {},
     }),
     test_builder: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      body: prepareBody({ work: 4, carry: 4, move: 8 }),
       memory: {},
     }),
     test_repairer: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      body: prepareBody({ work: 2, carry: 2, move: 2 }),
       memory: {},
     }),
     test_mineralMiner: spawn => {

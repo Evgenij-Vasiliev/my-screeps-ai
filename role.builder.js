@@ -1,56 +1,68 @@
-/**
- * ЛОГИКА СТРОИТЕЛЯ (Builder Role)
- * Задача: Возведение новых зданий. Если строек нет — помощь апгрейдеру.
- */
 const roleUpgrader = require("./role.upgrader");
 
 module.exports = {
   run: function (creep) {
     /**
-     * 1. СОСТОЯНИЕ (State Management)
+     * 1. ТУМБЛЕР (State Switch)
      */
-    if (creep.memory.working === undefined) {
+    if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
+      delete creep.memory.buildTargetId; // Забываем цель при разрядке
+      creep.say("🔄 сбор");
+    }
+    if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
+      creep.memory.working = true;
+      creep.say("🚧 строю");
     }
 
     /**
-     * 2. ТУМБЛЕР (Logic Switch)
+     * 2. РЕЖИМ СТРОЙКИ (Building Mode)
      */
-    if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true; // Набрал ресурсы -> пора строить
-    } else if (
-      creep.memory.working === true &&
-      creep.store[RESOURCE_ENERGY] === 0
-    ) {
-      creep.memory.working = false; // Пустой -> пора за едой
-    }
+    if (creep.memory.working) {
+      // Пытаемся получить цель из памяти
+      let target = Game.getObjectById(creep.memory.buildTargetId);
 
+      // Если в памяти пусто или стройка завершена — ищем новую БЛИЖАЙШУЮ
+      if (!target) {
+        target = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
+        if (target) {
+          creep.memory.buildTargetId = target.id;
+        }
+      }
+
+      if (target) {
+        if (creep.build(target) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(target, { visualizePathStyle: { stroke: "#ffff00" } });
+        }
+      } else {
+        // Если строек вообще нет — помогаем апгрейдеру
+        roleUpgrader.run(creep);
+      }
+    } else {
     /**
      * 3. РЕЖИМ СБОРА (Harvesting Mode)
      */
-    if (!creep.memory.working) {
       const sources = creep.room.find(FIND_SOURCES);
       const mySource = sources[creep.memory.sourceIndex];
 
       if (mySource) {
-        // 1. Ищем энергию НА ЗЕМЛЕ в радиусе 2 клеток от источника
+        // Приоритет 1: Энергия на земле
         const droppedEnergy = mySource.pos.findInRange(
           FIND_DROPPED_RESOURCES,
           2,
           {
             filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 0,
           },
-        )[0]; // Берем первую попавшуюся кучу
+        )[0];
 
         if (droppedEnergy) {
-          // Если на земле что-то лежит — подбираем (pickup)
           if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
             creep.moveTo(droppedEnergy, {
               visualizePathStyle: { stroke: "#ffaa00" },
             });
           }
         } else {
-          // 2. Если на земле чисто — ищем КОНТЕЙНЕР в радиусе 2 клеток
+          // Приоритет 2: Контейнер
           const container = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
             filter: s =>
               s.structureType === STRUCTURE_CONTAINER &&
@@ -66,7 +78,7 @@ module.exports = {
               });
             }
           } else {
-            // 3. Если и контейнер пуст — КОПАЕМ сами
+            // Приоритет 3: Копаем сами
             if (creep.harvest(mySource) === ERR_NOT_IN_RANGE) {
               creep.moveTo(mySource, {
                 visualizePathStyle: { stroke: "#ffaa00" },
@@ -74,28 +86,6 @@ module.exports = {
             }
           }
         }
-      }
-    } else {
-      /**
-       * 4. РЕЖИМ СТРОЙКИ (Building Mode)
-       */
-      // Находим БЛИЖАЙШУЮ площадку вместо первой в списке
-      const target = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
-
-      if (target) {
-        // Если стройка найдена — строим
-        if (creep.build(target) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, {
-            visualizePathStyle: { stroke: "#ffff00" },
-          });
-        }
-      } else {
-        /**
-         * ЗАПАСНОЙ ВАРИАНТ (Fallthrough Logic)
-         * Если строек в комнате нет, используем логику апгрейдера,
-         * чтобы крип приносил пользу контроллеру.
-         */
-        roleUpgrader.run(creep);
       }
     }
   },

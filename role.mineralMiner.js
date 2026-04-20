@@ -1,38 +1,50 @@
+/**
+ * ЛОГИКА ДОБЫТЧИКА МИНЕРАЛОВ (Mineral Miner)
+ * Задача: Только добыча минерала и доставка в терминал/хранилище.
+ */
 module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
 
-    // === Переключение режима ===
-    if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
-      creep.memory.working = false;
-    }
-    if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true;
-    }
-
-    if (creep.memory.working) {
-      this.deliverMinerals(creep);
-    } else {
-      this.collectMinerals(creep);
-    }
-  },
-
-  collectMinerals: function (creep) {
-    const room = creep.room;
-    if (creep.getActiveBodyparts(WORK) === 0) return;
-
-    // Кэш минерала
-    if (!creep.memory.mineralId || Game.time % 100 === 0) {
-      const mineral = room.find(FIND_MINERALS)[0];
-      creep.memory.mineralId = mineral ? mineral.id : null;
+    // 1. ПРОВЕРКА И КЭШ МИНЕРАЛА
+    if (!creep.memory.mineralId || Game.time % 1000 === 0) {
+      const minerals = creep.room.find(FIND_MINERALS);
+      if (minerals.length > 0) creep.memory.mineralId = minerals[0].id;
     }
 
     const mineral = Game.getObjectById(creep.memory.mineralId);
+
+    // Если минерала нет или он пуст — крип просто ждет (пока не внедрим Шаг 2)
+    if (!mineral || mineral.amount === 0) {
+      creep.say("💤 Wait");
+      return;
+    }
+
+    // 2. УПРАВЛЕНИЕ СОСТОЯНИЕМ
+    if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
+      creep.memory.working = false;
+      creep.say("⛏️ добыча");
+    }
+    if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
+      creep.memory.working = true;
+      creep.say("🚚 доставка");
+    }
+
+    // 3. ВЫБОР ДЕЙСТВИЯ
+    if (creep.memory.working) {
+      this.deliverMinerals(creep);
+    } else {
+      this.collectMinerals(creep, mineral);
+    }
+  },
+
+  collectMinerals: function (creep, mineral) {
     if (!mineral || mineral.amount === 0) return;
+    if (creep.getActiveBodyparts(WORK) === 0) return;
 
     // Кэш экстрактора
     if (!creep.memory.extractorId || Game.time % 200 === 0) {
-      const extractor = room.find(FIND_STRUCTURES, {
+      const extractor = creep.room.find(FIND_STRUCTURES, {
         filter: s =>
           s.structureType === STRUCTURE_EXTRACTOR && s.pos.isNearTo(mineral),
       })[0];
@@ -53,13 +65,15 @@ module.exports = {
 
   deliverMinerals: function (creep) {
     const room = creep.room;
-    // Ищем любой ресурс, кроме энергии
+
+    // Ищем в рюкзаке любой ресурс, кроме энергии
     const resourceType = _.find(
       Object.keys(creep.store),
       r => r !== RESOURCE_ENERGY,
     );
+
     if (!resourceType) {
-      creep.memory.working = false; // Если осталась только энергия, идем копать
+      creep.memory.working = false;
       return;
     }
 
@@ -74,12 +88,8 @@ module.exports = {
     const terminal = Game.getObjectById(creep.memory.terminalId);
     const storage = Game.getObjectById(creep.memory.storageId);
 
-    let target = null;
-    if (terminal && terminal.store.getFreeCapacity() > 0) {
-      target = terminal;
-    } else if (storage && storage.store.getFreeCapacity() > 0) {
-      target = storage;
-    }
+    let target =
+      terminal && terminal.store.getFreeCapacity() > 0 ? terminal : storage;
 
     if (target) {
       if (creep.transfer(target, resourceType) === ERR_NOT_IN_RANGE) {
