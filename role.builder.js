@@ -1,4 +1,4 @@
-const roleUpgrader = require("./role.upgrader");
+const roleHarvester = require("./role.harvester");
 
 module.exports = {
   run: function (creep) {
@@ -36,12 +36,12 @@ module.exports = {
         }
       } else {
         // Если строек вообще нет — помогаем апгрейдеру
-        roleUpgrader.run(creep);
+        roleHarvester.run(creep);
       }
     } else {
-    /**
-     * 3. РЕЖИМ СБОРА (Harvesting Mode)
-     */
+      /**
+       * 3. РЕЖИМ СБОРА (Harvesting Mode)
+       */
       const sources = creep.room.find(FIND_SOURCES);
       const mySource = sources[creep.memory.sourceIndex];
 
