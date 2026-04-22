@@ -5,7 +5,7 @@ module.exports = {
     const room = tower.room;
     const energy = tower.store[RESOURCE_ENERGY] || 0;
     const capacity = tower.store.getCapacity(RESOURCE_ENERGY) || 0;
-    const energyThreshold = capacity * 0.5;
+    const energyThreshold = capacity * 0.7;
 
     // === 0. Проверка принудительной цели ===
     if (room.memory.towerTargetId) {
