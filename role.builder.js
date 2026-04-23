@@ -3,11 +3,24 @@ const roleHarvester = require("./role.harvester");
 module.exports = {
   run: function (creep) {
     /**
+     * 0. ПРОВЕРКА КОМНАТЫ (Room Check)
+     * Если цель задана и мы не там — идем в нужную комнату
+     */
+    if (
+      creep.memory.targetRoom &&
+      creep.room.name !== creep.memory.targetRoom
+    ) {
+      const exitPos = new RoomPosition(25, 25, creep.memory.targetRoom);
+      creep.moveTo(exitPos, { visualizePathStyle: { stroke: "#ffffff" } });
+      return; // Выходим из функции, чтобы не выполнять остальную логику
+    }
+
+    /**
      * 1. ТУМБЛЕР (State Switch)
      */
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
-      delete creep.memory.buildTargetId; // Забываем цель при разрядке
+      delete creep.memory.buildTargetId;
       creep.say("🔄 сбор");
     }
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
@@ -19,10 +32,8 @@ module.exports = {
      * 2. РЕЖИМ СТРОЙКИ (Building Mode)
      */
     if (creep.memory.working) {
-      // Пытаемся получить цель из памяти
       let target = Game.getObjectById(creep.memory.buildTargetId);
 
-      // Если в памяти пусто или стройка завершена — ищем новую БЛИЖАЙШУЮ
       if (!target) {
         target = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
         if (target) {
@@ -35,7 +46,7 @@ module.exports = {
           creep.moveTo(target, { visualizePathStyle: { stroke: "#ffff00" } });
         }
       } else {
-        // Если строек вообще нет — помогаем апгрейдеру
+        // Если строек нет, помогаем другой роли (убедитесь, что harvester умеет работать в чужой комнате)
         roleHarvester.run(creep);
       }
     } else {
@@ -43,7 +54,10 @@ module.exports = {
        * 3. РЕЖИМ СБОРА (Harvesting Mode)
        */
       const sources = creep.room.find(FIND_SOURCES);
-      const mySource = sources[creep.memory.sourceIndex];
+      // Если sourceIndex не задан или источника нет, берем ближайший
+      const mySource =
+        sources[creep.memory.sourceIndex] ||
+        creep.pos.findClosestByRange(FIND_SOURCES);
 
       if (mySource) {
         // Приоритет 1: Энергия на земле

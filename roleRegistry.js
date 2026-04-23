@@ -7,4 +7,8 @@ module.exports = {
   test_hauler: require("./role.hauler"),
   test_towerSupplier: require("./role.towerSupplier"),
   test_mineralMiner: require("./role.mineralMiner"),
+  test_attacker: require("./role.attacker"),
+  test_reserver: require("./role.reserver"),
+  test_remoteMiner: require("./role.remoteMiner"), // Регистрация майнера
+  test_remoteHauler: require("./role.remoteHauler"), // Регистрация хаулера
 };

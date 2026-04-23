@@ -3,8 +3,8 @@ const roleTower = require("./role.tower");
 
 const roomManager = {
   run: function (room) {
-    // 1. ПЛАН НАСЕЛЕНИЯ
-    const rolesConfig = room.memory.rolesConfig || [
+    // 1. ЛОКАЛЬНЫЙ ПЛАН (Крипы, которые работают ТОЛЬКО внутри этой комнаты)
+    let localRolesConfig = [
       { role: "test_harvester", count: 1 },
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 2 },
@@ -15,50 +15,59 @@ const roomManager = {
       { role: "test_mineralMiner", count: 1 },
     ];
 
-    // 2. ОТЧЕТ ПО КРИПАМ КОМНАТЫ
-    const roomCreeps = room.find(FIND_MY_CREEPS);
-    const creepsByRole = _.groupBy(roomCreeps, c => c.memory.role);
+    // 2. ГЛОБАЛЬНЫЙ ПЛАН (Крипы, которые уходят из комнат и считаются по всей империи)
+    let globalRolesConfig = [];
 
+    // Аттакеры — всего 5 штук на все 5 комнат
+    globalRolesConfig.push({ role: "test_attacker", count: 5 });
+
+    // Триада экспансии — заказывается только в E35S37, но считается ГЛОБАЛЬНО
+    if (room.name === "E35S37") {
+      globalRolesConfig.push({ role: "test_reserver", count: 2 });
+      globalRolesConfig.push({ role: "test_remoteMiner", count: 2 });
+      globalRolesConfig.push({ role: "test_remoteHauler", count: 2 }); // Те самые самосвалы
+    }
+
+    // 3. ПОДСЧЕТ (Локальный vs Глобальный)
+    const allCreeps = Object.values(Game.creeps);
+    const roomCreeps = room.find(FIND_MY_CREEPS);
+
+    const globalGroups = _.groupBy(allCreeps, c => c.memory.role);
+    const localGroups = _.groupBy(roomCreeps, c => c.memory.role);
+
+    // Баланс источников внутри комнаты
     let sourceUsage = { 0: 0, 1: 0 };
     roomCreeps.forEach(c => {
       if (c.memory.sourceIndex !== undefined)
         sourceUsage[c.memory.sourceIndex]++;
     });
 
-    // 3. УПРАВЛЕНИЕ СПАВНОМ
-    const spawn = room.find(FIND_MY_SPAWNS, { filter: s => !s.spawning })[0];
+    // 4. УПРАВЛЕНИЕ СПАВНОМ
+    const spawns = room.find(FIND_MY_SPAWNS, { filter: s => !s.spawning });
+    const spawn = spawns[0];
 
     if (spawn) {
-      // ИСПРАВЛЕНИЕ: Находим массив минералов и берем первый объект
-      const minerals = room.find(FIND_MINERALS);
-      const mineral = minerals.length > 0 ? minerals[0] : null;
+      // Объединяем оба списка для проверки
+      const fullConfig = [...localRolesConfig, ...globalRolesConfig];
 
-      // ИСПРАВЛЕНИЕ: Используем корректное свойство mineralAmount
-      const mineralAvailable = mineral && mineral.mineralAmount > 0;
+      for (let roleData of fullConfig) {
+        // Определяем, считать ли крипа по всему миру или только в комнате
+        const isGlobal = globalRolesConfig.some(r => r.role === roleData.role);
 
-      for (let roleData of rolesConfig) {
-        let targetCount = roleData.count;
+        const currentCount = isGlobal
+          ? (globalGroups[roleData.role] || []).length
+          : (localGroups[roleData.role] || []).length;
 
-        // Если это сборщик минералов, но их нет — обнуляем план
-        if (roleData.role === "test_mineralMiner" && !mineralAvailable) {
-          targetCount = 0;
-        }
-
-        const currentCount = (creepsByRole[roleData.role] || []).length;
-
-        if (currentCount < targetCount) {
+        if (currentCount < roleData.count) {
+          // Выбираем менее загруженный источник
           const bestIndex = sourceUsage[0] <= sourceUsage[1] ? 0 : 1;
           const result = factory.run(spawn, roleData, bestIndex);
-
-          if (result === OK) {
-            sourceUsage[bestIndex]++;
-            break;
-          }
+          if (result === OK) break; // За тик спавним только одного
         }
       }
     }
 
-    // 4. УПРАВЛЕНИЕ БАШНЯМИ
+    // 5. БАШНИ
     const towers = room.find(FIND_MY_STRUCTURES, {
       filter: s => s.structureType === STRUCTURE_TOWER,
     });
