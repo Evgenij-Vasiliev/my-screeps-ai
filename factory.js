@@ -1,6 +1,5 @@
 /**
  * Вспомогательная функция для генерации массива частей тела.
- * Принимает объект с количеством запчастей.
  */
 const prepareBody = ({
   work = 0,
@@ -13,7 +12,6 @@ const prepareBody = ({
   claim = 0,
 }) => {
   const body = [];
-  // Порядок важен для выживаемости: броня -> атака -> движение
   for (let i = 0; i < tough; i++) body.push(TOUGH);
   for (let i = 0; i < work; i++) body.push(WORK);
   for (let i = 0; i < carry; i++) body.push(CARRY);
@@ -21,13 +19,42 @@ const prepareBody = ({
   for (let i = 0; i < ranged_attack; i++) body.push(RANGED_ATTACK);
   for (let i = 0; i < heal; i++) body.push(HEAL);
   for (let i = 0; i < claim; i++) body.push(CLAIM);
-  for (let i = 0; i < move; i++) body.push(MOVE); // MOVE обычно в конце
+  for (let i = 0; i < move; i++) body.push(MOVE);
 
   return body;
 };
 
 const factory = {
   blueprints: {
+    // === УДАЛЕННЫЙ МАЙНЕР ===
+    test_remoteMiner: () => ({
+      body: prepareBody({ work: 6, carry: 1, move: 3 }),
+      memory: {},
+    }),
+
+    // === УДАЛЕННЫЙ ПЕРЕВОЗЧИК ===
+    test_remoteHauler: () => ({
+      body: prepareBody({ carry: 20, move: 20 }),
+      memory: { working: false },
+    }),
+
+    test_reserver: () => ({
+      body: prepareBody({ claim: 2, move: 2 }),
+      memory: { working: false },
+    }),
+
+    test_attacker: () => ({
+      body: prepareBody({
+        tough: 10,
+        ranged_attack: 10,
+        heal: 5,
+        move: 25,
+      }),
+      memory: {
+        targetRoom: null,
+      },
+    }),
+
     test_miner: (spawn, bestIndex) => {
       const sources = spawn.room.find(FIND_SOURCES);
       return {
