@@ -2,11 +2,10 @@
  * ЛОГИКА ТРАНСПОРТЕРA (Hauler Role)
  */
 const roleHauler = {
-  /** @param {Creep} creep **/
   run: function (creep) {
     /**
      * =========================================
-     * 0. АНТИ-БЛОКИРОВКА (Уступаем место майнеру)
+     * 0. АНТИ-БЛОКИРОВКА
      * =========================================
      */
     const containerUnderCreep = creep.pos
@@ -29,6 +28,7 @@ const roleHauler = {
           LEFT,
           TOP_LEFT,
         ];
+
         const randomDir =
           directions[Math.floor(Math.random() * directions.length)];
 
@@ -40,7 +40,7 @@ const roleHauler = {
 
     /**
      * =========================================
-     * 1. УПРАВЛЕНИЕ СОСТОЯНИЕМ (state machine)
+     * 1. STATE
      * =========================================
      */
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
@@ -55,7 +55,7 @@ const roleHauler = {
 
     /**
      * =========================================
-     * 2. РЕЖИМ СБОРА (ПОКА НЕ ТРОГАЕМ)
+     * 2. СБОР (без изменений)
      * =========================================
      */
     if (!creep.memory.working) {
@@ -69,9 +69,7 @@ const roleHauler = {
 
         if (dropped) {
           if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(dropped, {
-              visualizePathStyle: { stroke: "#ffaa00" },
-            });
+            creep.moveTo(dropped);
           }
         } else {
           const targetContainer = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
@@ -85,9 +83,7 @@ const roleHauler = {
               creep.withdraw(targetContainer, RESOURCE_ENERGY) ===
               ERR_NOT_IN_RANGE
             ) {
-              creep.moveTo(targetContainer, {
-                visualizePathStyle: { stroke: "#ffaa00" },
-              });
+              creep.moveTo(targetContainer);
             }
           }
         }
@@ -95,35 +91,57 @@ const roleHauler = {
     } else {
       /**
        * =========================================
-       * 3. РЕЖИМ ДОСТАВКИ (ПЕРЕПИСАНО)
+       * 3. ДОСТАВКА (с настройкой из Memory)
        * =========================================
        */
 
-      // 1. Берем готовый кэш целей из roomManager
-      // ВАЖНО: здесь уже НЕТ find() — мы экономим CPU
       const targets = creep.room._energyTargets;
+      let target = null;
 
-      // Если список существует и не пустой
+      /**
+       * 1. Основные цели (spawn + extensions)
+       */
       if (targets && targets.length) {
-        // 2. Выбираем ближайшую цель (это дешево)
-        const target = creep.pos.findClosestByRange(targets);
+        target = creep.pos.findClosestByRange(targets);
+      }
 
-        // 3. Дополнительная защита:
-        // если цель уже заполнена — пропускаем тик
-        // (из-за TTL-кэша такое может случаться)
-        if (target.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
-          return;
-        }
+      /**
+       * 2. TERMINAL (используем значение из memory)
+       */
+      const terminalTarget = creep.room.memory.terminalEnergyTarget || 10000; // дефолт
 
-        // 4. Пытаемся передать энергию
+      if (
+        !target &&
+        creep.room.terminal &&
+        creep.room.terminal.store[RESOURCE_ENERGY] < terminalTarget
+      ) {
+        target = creep.room.terminal;
+        creep.say("📦 terminal");
+      }
+
+      /**
+       * 3. STORAGE
+       */
+      if (
+        !target &&
+        creep.room.storage &&
+        creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+      ) {
+        target = creep.room.storage;
+        creep.say("🏦 storage");
+      }
+
+      /**
+       * 4. Выполнение
+       */
+      if (target) {
         const result = creep.transfer(target, RESOURCE_ENERGY);
 
-        // 5. Если не в радиусе — двигаемся
         if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, {
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
+          creep.moveTo(target);
         }
+      } else {
+        creep.say("😴 idle");
       }
     }
   },

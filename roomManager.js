@@ -5,35 +5,28 @@ const roomManager = {
   run: function (room) {
     /**
      * =========================================
-     * 0. КЭШ СТРУКТУР С TTL (НОВОЕ)
+     * 0. КЭШ ENERGY TARGETS (БЕЗ БАШЕН)
      * =========================================
      */
 
-    // Если кэша нет ИЛИ прошло 10 тиков → обновляем
+    // Обновляем редко (TTL)
     if (!room.memory.energyTargets || Game.time % 10 === 0) {
-      // ДОРОГАЯ операция — поэтому делаем редко
       const energyTargets = room.find(FIND_MY_STRUCTURES, {
         filter: s =>
-          // Интересующие нас структуры
+          // ОСТАВЛЯЕМ ТОЛЬКО:
           (s.structureType === STRUCTURE_EXTENSION ||
-            s.structureType === STRUCTURE_SPAWN ||
-            s.structureType === STRUCTURE_TOWER) &&
-          // Только те, куда можно передать энергию
+            s.structureType === STRUCTURE_SPAWN) &&
           s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
       });
 
-      // Сохраняем только ID (Memory безопасен только для JSON)
+      // Сохраняем только ID
       room.memory.energyTargets = energyTargets.map(s => s.id);
     }
 
-    /**
-     * Runtime-кэш (на 1 тик)
-     * Здесь мы превращаем ID обратно в объекты
-     * Это делается 1 раз на комнату, а не в каждом крипе
-     */
-    room._energyTargets = room.memory.energyTargets
-      .map(id => Game.getObjectById(id)) // превращаем ID → объект
-      .filter(obj => obj); // удаляем null (если структура исчезла)
+    // Runtime-кэш (каждый тик!)
+    room._energyTargets = (room.memory.energyTargets || [])
+      .map(id => Game.getObjectById(id))
+      .filter(obj => obj);
 
     /**
      * =========================================
@@ -71,21 +64,12 @@ const roomManager = {
      * 3. ПОДСЧЕТ КРИПОВ
      * =========================================
      */
-
-    // Все крипы в игре (для глобальных ролей)
     const allCreeps = Object.values(Game.creeps);
-
-    // Только крипы в этой комнате
     const roomCreeps = room.find(FIND_MY_CREEPS);
 
-    // Группировка по ролям (удобно и быстро)
     const globalGroups = _.groupBy(allCreeps, c => c.memory.role);
     const localGroups = _.groupBy(roomCreeps, c => c.memory.role);
 
-    /**
-     * Балансировка по источникам
-     * Чтобы крипы не шли все в один источник
-     */
     let sourceUsage = { 0: 0, 1: 0 };
 
     roomCreeps.forEach(c => {
@@ -99,8 +83,6 @@ const roomManager = {
      * 4. СПАВН
      * =========================================
      */
-
-    // Ищем свободный спавн (не занят спавном)
     const spawns = room.find(FIND_MY_SPAWNS, {
       filter: s => !s.spawning,
     });
@@ -108,26 +90,20 @@ const roomManager = {
     const spawn = spawns[0];
 
     if (spawn) {
-      // Объединяем локальные и глобальные роли
       const fullConfig = [...localRolesConfig, ...globalRolesConfig];
 
       for (let roleData of fullConfig) {
-        // Проверяем: роль глобальная или локальная
         const isGlobal = globalRolesConfig.some(r => r.role === roleData.role);
 
-        // Выбираем правильный счетчик
         const currentCount = isGlobal
           ? (globalGroups[roleData.role] || []).length
           : (localGroups[roleData.role] || []).length;
 
-        // Если крипов меньше, чем нужно → спавним
         if (currentCount < roleData.count) {
-          // Выбираем менее загруженный источник
           const bestIndex = sourceUsage[0] <= sourceUsage[1] ? 0 : 1;
 
           const result = factory.run(spawn, roleData, bestIndex);
 
-          // ВАЖНО: только 1 крип за тик (экономия CPU и контроль)
           if (result === OK) break;
         }
       }
@@ -135,10 +111,9 @@ const roomManager = {
 
     /**
      * =========================================
-     * 5. БАШНИ
+     * 5. БАШНИ (работают отдельно!)
      * =========================================
      */
-
     const towers = room.find(FIND_MY_STRUCTURES, {
       filter: s => s.structureType === STRUCTURE_TOWER,
     });
