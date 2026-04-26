@@ -1,15 +1,14 @@
 const roomManager = require("./roomManager");
 const roles = require("./roleRegistry");
-const cpuMonitor = require("./cpuMonitor"); // 1. Подключаем модуль
+const cpuMonitor = require("./cpuMonitor");
 
 module.exports.loop = function () {
-  // 2. Инициализируем замер в самом начале тика
   cpuMonitor.startTick();
 
   /**
    * 1. ОЧИСТКА ПАМЯТИ
    */
-  for (let name in Memory.creeps) {
+  for (const name in Memory.creeps) {
     if (!Game.creeps[name]) {
       delete Memory.creeps[name];
     }
@@ -18,10 +17,10 @@ module.exports.loop = function () {
   /**
    * 2. ЛОГИКА КОМНАТ
    */
-  // Оборачиваем менеджер комнат, чтобы видеть его нагрузку
   cpuMonitor.trackRole("roomManager", () => {
-    for (let roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
+    const rooms = Object.values(Game.rooms);
+
+    for (const room of rooms) {
       if (room.controller && room.controller.my) {
         roomManager.run(room);
       }
@@ -31,19 +30,18 @@ module.exports.loop = function () {
   /**
    * 3. ЛОГИКА КРИПОВ
    */
-  for (let name in Game.creeps) {
-    const creep = Game.creeps[name];
-    const roleName = creep.memory.role; // Сохраняем имя роли
+  const creeps = Object.values(Game.creeps);
+
+  for (const creep of creeps) {
+    const roleName = creep.memory.role;
     const roleModule = roles[roleName];
 
-    if (roleModule) {
-      // 3. Оборачиваем выполнение роли в трекер
-      cpuMonitor.trackRole(roleName, () => {
-        roleModule.run(creep);
-      });
-    }
+    if (!roleModule) continue; // защита от ошибок
+
+    cpuMonitor.trackRole(roleName, () => {
+      roleModule.run(creep);
+    });
   }
 
-  // 4. Завершаем замер и выводим статистику в консоль
   cpuMonitor.endTick();
 };
