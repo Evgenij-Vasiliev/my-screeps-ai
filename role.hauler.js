@@ -55,14 +55,22 @@ const roleHauler = {
 
     /**
      * =========================================
-     * 2. СБОР (без изменений)
+     * 2. СБОР (ПОЛНОСТЬЮ ЧЕРЕЗ КЭШ)
      * =========================================
      */
     if (!creep.memory.working) {
-      const sources = creep.room.find(FIND_SOURCES);
-      const mySource = sources[creep.memory.sourceIndex];
+      const sources = creep.room._sources;
+      const containers = creep.room._sourceContainers;
+
+      const mySource = sources ? sources[creep.memory.sourceIndex] : null;
+      const myContainer = containers
+        ? containers[creep.memory.sourceIndex]
+        : null;
 
       if (mySource) {
+        /**
+         * Приоритет 1: dropped energy
+         */
         const dropped = mySource.pos.findInRange(FIND_DROPPED_RESOURCES, 2, {
           filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 0,
         })[0];
@@ -71,44 +79,34 @@ const roleHauler = {
           if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) {
             creep.moveTo(dropped);
           }
-        } else {
-          const targetContainer = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
-            filter: s =>
-              s.structureType === STRUCTURE_CONTAINER &&
-              s.store[RESOURCE_ENERGY] > 0,
-          })[0];
-
-          if (targetContainer) {
-            if (
-              creep.withdraw(targetContainer, RESOURCE_ENERGY) ===
-              ERR_NOT_IN_RANGE
-            ) {
-              creep.moveTo(targetContainer);
-            }
+        } else if (myContainer && myContainer.store[RESOURCE_ENERGY] > 0) {
+        /**
+         * Приоритет 2: контейнер (через кэш!)
+         */
+          if (
+            creep.withdraw(myContainer, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+          ) {
+            creep.moveTo(myContainer);
           }
+        } else {
+          creep.say("⏳ пусто");
         }
       }
     } else {
       /**
        * =========================================
-       * 3. ДОСТАВКА (с настройкой из Memory)
+       * 3. ДОСТАВКА
        * =========================================
        */
 
       const targets = creep.room._energyTargets;
       let target = null;
 
-      /**
-       * 1. Основные цели (spawn + extensions)
-       */
       if (targets && targets.length) {
         target = creep.pos.findClosestByRange(targets);
       }
 
-      /**
-       * 2. TERMINAL (используем значение из memory)
-       */
-      const terminalTarget = creep.room.memory.terminalEnergyTarget || 10000; // дефолт
+      const terminalTarget = creep.room.memory.terminalEnergyTarget || 10000;
 
       if (
         !target &&
@@ -119,9 +117,6 @@ const roleHauler = {
         creep.say("📦 terminal");
       }
 
-      /**
-       * 3. STORAGE
-       */
       if (
         !target &&
         creep.room.storage &&
@@ -131,9 +126,6 @@ const roleHauler = {
         creep.say("🏦 storage");
       }
 
-      /**
-       * 4. Выполнение
-       */
       if (target) {
         const result = creep.transfer(target, RESOURCE_ENERGY);
 
