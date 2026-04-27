@@ -1,74 +1,87 @@
 /**
- * ЛОГИКА ЗАПРАВЩИКА БАШЕН (Tower Supplier Role) - Ветка TEST
+ * ЛОГИКА ЗАПРАВЩИКА БАШЕН (Tower Supplier Role)
  */
 module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
 
     /**
+     * =========================================
      * 1. СОСТОЯНИЕ
+     * =========================================
      */
     if (creep.store[RESOURCE_ENERGY] === 0 && creep.memory.working !== false) {
       creep.memory.working = false;
       creep.say("🔄 сбор");
     }
+
     if (creep.store.getFreeCapacity() === 0 && !creep.memory.working) {
       creep.memory.working = true;
       creep.say("⚡ башни");
     }
 
     /**
-     * 2. РЕЖИМ СБОРА (Строго по sourceIndex)
+     * =========================================
+     * 2. СБОР (с защитой storage)
+     * =========================================
      */
     if (!creep.memory.working) {
-      const sources = creep.room.find(FIND_SOURCES);
-      const mySource = sources[creep.memory.sourceIndex];
+      const storage = creep.room.storage;
 
-      if (mySource) {
-        // Ищем контейнер строго у своего источника (радиус 2 клетки)
-        const container = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
-          filter: s =>
-            s.structureType === STRUCTURE_CONTAINER &&
-            s.store[RESOURCE_ENERGY] > 0,
-        })[0];
+      // ❗ Минимальный запас (можно потом вынести в memory)
+      const MIN_STORAGE_ENERGY = 5000;
 
-        if (container) {
-          if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(container, {
-              visualizePathStyle: { stroke: "#ffaa00" },
-            });
+      /**
+       * 1. STORAGE (только если есть запас)
+       */
+      if (storage && storage.store[RESOURCE_ENERGY] > MIN_STORAGE_ENERGY) {
+        if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(storage);
+        }
+      } else {
+        /**
+         * 2. FALLBACK — контейнер
+         */
+        const containers = creep.room._sourceContainers;
+        const myContainer = containers
+          ? containers[creep.memory.sourceIndex]
+          : null;
+
+        if (myContainer && myContainer.store[RESOURCE_ENERGY] > 0) {
+          if (
+            creep.withdraw(myContainer, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+          ) {
+            creep.moveTo(myContainer);
           }
         } else {
-          creep.say("⏳ пусто");
+          creep.say("⏳ нет энергии");
         }
       }
     } else {
-    /**
-     * 3. РЕЖИМ ПЕРЕДАЧИ (Равномерная заправка)
-     */
-      // Ищем башни, которым нужна энергия
-      const towers = creep.room.find(FIND_STRUCTURES, {
-        filter: s =>
-          s.structureType === STRUCTURE_TOWER &&
-          s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-      });
+      /**
+       * =========================================
+       * 3. ПЕРЕДАЧА
+       * =========================================
+       */
+      const towers = creep.room._towers;
 
-      if (towers.length > 0) {
-        // Выбираем самую пустую башню из доступных
-        const targetTower = _.min(towers, t => t.store[RESOURCE_ENERGY]);
+      const needyTowers = towers
+        ? towers.filter(t => t.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+        : [];
+
+      if (needyTowers.length > 0) {
+        const targetTower = _.min(needyTowers, t => t.store[RESOURCE_ENERGY]);
 
         if (targetTower) {
           if (
             creep.transfer(targetTower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
           ) {
-            creep.moveTo(targetTower, {
-              visualizePathStyle: { stroke: "#ffffff" },
-            });
+            creep.moveTo(targetTower);
           }
         }
       } else {
         creep.say("💤 сон");
-        // Опционально: отходим к спавну, чтобы не мешать на дорогах
+
         const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
         if (spawn) creep.moveTo(spawn, { reusePath: 10 });
       }

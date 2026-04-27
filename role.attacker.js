@@ -2,7 +2,7 @@ module.exports = {
   run: function (creep) {
     // === РУЧНОЕ УПРАВЛЕНИЕ (Глобальный приказ) ===
     // Если тут null - работают по плану. Если вписать "E35S39" - все летят туда.
-    const emergencyTarget = "E36S37";
+    const emergencyTarget = null;
 
     // 1. САМОЛЕЧЕНИЕ (Всегда в приоритете)
     if (creep.hits < creep.hitsMax) {

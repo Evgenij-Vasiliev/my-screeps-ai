@@ -5,65 +5,115 @@ const roomManager = {
   run: function (room) {
     /**
      * =========================================
-     * 0. КЭШ ENERGY TARGETS (БЕЗ БАШЕН)
+     * 0. ENERGY TARGETS
      * =========================================
      */
-
-    // Обновляем редко (TTL)
     if (!room.memory.energyTargets || Game.time % 10 === 0) {
       const energyTargets = room.find(FIND_MY_STRUCTURES, {
         filter: s =>
-          // ОСТАВЛЯЕМ ТОЛЬКО:
           (s.structureType === STRUCTURE_EXTENSION ||
             s.structureType === STRUCTURE_SPAWN) &&
           s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
       });
 
-      // Сохраняем только ID
       room.memory.energyTargets = energyTargets.map(s => s.id);
     }
 
-    // Runtime-кэш (каждый тик!)
     room._energyTargets = (room.memory.energyTargets || [])
       .map(id => Game.getObjectById(id))
       .filter(obj => obj);
 
     /**
      * =========================================
-     * 1. ЛОКАЛЬНЫЙ ПЛАН
+     * 1. БАШНИ
+     * =========================================
+     */
+    if (!room.memory.towers || Game.time % 50 === 0) {
+      const towers = room.find(FIND_MY_STRUCTURES, {
+        filter: s => s.structureType === STRUCTURE_TOWER,
+      });
+
+      room.memory.towers = towers.map(t => t.id);
+    }
+
+    room._towers = (room.memory.towers || [])
+      .map(id => Game.getObjectById(id))
+      .filter(obj => obj);
+
+    /**
+     * =========================================
+     * 2. ИСТОЧНИКИ
+     * =========================================
+     */
+    if (!room.memory.sources) {
+      const sources = room.find(FIND_SOURCES);
+      room.memory.sources = sources.map(s => s.id);
+    }
+
+    room._sources = room.memory.sources
+      .map(id => Game.getObjectById(id))
+      .filter(obj => obj);
+
+    /**
+     * =========================================
+     * 3. КОНТЕЙНЕРЫ У ИСТОЧНИКОВ (С ВОССТАНОВЛЕНИЕМ)
+     * =========================================
+     */
+    if (!room.memory.sourceContainers) {
+      room.memory.sourceContainers = [];
+    }
+
+    room._sourceContainers = [];
+
+    room._sources.forEach((source, index) => {
+      let container = null;
+      const containerId = room.memory.sourceContainers[index];
+
+      // 1. Пытаемся взять из памяти
+      if (containerId) {
+        container = Game.getObjectById(containerId);
+      }
+
+      // 2. Если контейнера нет → пересканируем
+      if (!container) {
+        container =
+          source.pos.findInRange(FIND_STRUCTURES, 2, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER,
+          })[0] || null;
+
+        // Обновляем память
+        room.memory.sourceContainers[index] = container ? container.id : null;
+      }
+
+      room._sourceContainers[index] = container;
+    });
+
+    /**
+     * =========================================
+     * 4. ЛОКАЛЬНЫЙ ПЛАН
      * =========================================
      */
     let localRolesConfig = [
       { role: "test_harvester", count: 1 },
       { role: "test_miner", count: 2 },
-      { role: "test_hauler", count: 2 },
-      { role: "test_towerSupplier", count: 2 },
+      { role: "test_hauler", count: 4 },
+      { role: "test_towerSupplier", count: 1 },
       { role: "test_builder", count: 1 },
       { role: "test_upgrader", count: 1 },
       { role: "test_repairer", count: 1 },
-      { role: "test_mineralMiner", count: 0 },
+      { role: "test_mineralMiner", count: 1 },
     ];
 
-    /**
-     * =========================================
-     * 2. ГЛОБАЛЬНЫЙ ПЛАН
-     * =========================================
-     */
     let globalRolesConfig = [];
 
-    globalRolesConfig.push({ role: "test_attacker", count: 0 });
+    globalRolesConfig.push({ role: "test_attacker", count: 5 });
 
     if (room.name === "E35S37") {
-      globalRolesConfig.push({ role: "test_reserver", count: 0 });
-      globalRolesConfig.push({ role: "test_remoteMiner", count: 0 });
-      globalRolesConfig.push({ role: "test_remoteHauler", count: 0 });
+      globalRolesConfig.push({ role: "test_reserver", count: 2 });
+      globalRolesConfig.push({ role: "test_remoteMiner", count: 2 });
+      globalRolesConfig.push({ role: "test_remoteHauler", count: 2 });
     }
 
-    /**
-     * =========================================
-     * 3. ПОДСЧЕТ КРИПОВ
-     * =========================================
-     */
     const allCreeps = Object.values(Game.creeps);
     const roomCreeps = room.find(FIND_MY_CREEPS);
 
@@ -80,7 +130,7 @@ const roomManager = {
 
     /**
      * =========================================
-     * 4. СПАВН
+     * 5. СПАВН
      * =========================================
      */
     const spawns = room.find(FIND_MY_SPAWNS, {
@@ -111,14 +161,14 @@ const roomManager = {
 
     /**
      * =========================================
-     * 5. БАШНИ (работают отдельно!)
+     * 6. БАШНИ
      * =========================================
      */
-    const towers = room.find(FIND_MY_STRUCTURES, {
-      filter: s => s.structureType === STRUCTURE_TOWER,
-    });
+    const towers = room._towers;
 
-    towers.forEach(tower => roleTower.run(tower));
+    if (towers && towers.length) {
+      towers.forEach(tower => roleTower.run(tower));
+    }
   },
 };
 
