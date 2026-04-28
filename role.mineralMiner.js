@@ -1,36 +1,80 @@
 /**
- * ЛОГИКА ДОБЫТЧИКА МИНЕРАЛОВ (Mineral Miner)
- * Задача: Только добыча минерала и доставка в терминал/хранилище.
+ * ===================================================
+ * ROLE.MINERALMINER.JS — Добытчик минералов
+ * ===================================================
+ * Стратегия: добывает минерал с помощью Extractor
+ * и доставляет его в Terminal (приоритет) или Storage.
+ *
+ * Требования:
+ * - RCL6+ (нужен Extractor и Terminal)
+ * - Extractor должен быть построен на минерале
+ * - Mineral должен быть не пуст (regenerates ~50000 тиков)
+ *
+ * Память крипа (creep.memory):
+ * - working      {boolean}     — false = добыча, true = доставка
+ * - mineralId    {string}      — ID минерала (из room.memory)
+ * - extractorId  {string|null} — ID экстрактора (кэш навсегда)
+ * ===================================================
  */
 module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
 
-    // 1. ПРОВЕРКА И КЭШ МИНЕРАЛА
-    if (!creep.memory.mineralId || Game.time % 1000 === 0) {
+    /**
+     * 1. ПОЛУЧЕНИЕ МИНЕРАЛА
+     *
+     * ИСПРАВЛЕНИЕ: берём mineralId из room.memory — он уже кэширован
+     * там с момента спавна крипа (factory.js записал при создании).
+     * Не нужно делать find() каждые 1000 тиков.
+     */
+    const mineralId = creep.memory.mineralId || creep.room.memory.mineralId;
+
+    if (!mineralId) {
+      // Крайний случай: ни у крипа ни у комнаты нет mineralId
+      // Ищем и сохраняем в оба места
       const minerals = creep.room.find(FIND_MINERALS);
-      if (minerals.length > 0) creep.memory.mineralId = minerals[0].id;
+      if (minerals.length === 0) {
+        creep.say("❌ нет минерала");
+        return;
+      }
+      creep.memory.mineralId = minerals[0].id;
+      creep.room.memory.mineralId = minerals[0].id;
     }
 
-    const mineral = Game.getObjectById(creep.memory.mineralId);
+    const mineral = Game.getObjectById(mineralId);
 
-    // Если минерала нет или он пуст — крип просто ждет (пока не внедрим Шаг 2)
-    if (!mineral || mineral.amount === 0) {
-      creep.say("💤 Wait");
+    if (!mineral) {
+      creep.say("❌ ошибка");
       return;
     }
 
-    // 2. УПРАВЛЕНИЕ СОСТОЯНИЕМ
+    /**
+     * Минерал пуст — ждём регенерации.
+     * mineralId остаётся в памяти — не нужно искать заново.
+     * ticksToRegeneration показывает сколько тиков до восстановления.
+     */
+    if (mineral.amount === 0) {
+      const ticks = mineral.ticksToRegeneration || "?";
+      creep.say(`💤 ${ticks}т`);
+      return;
+    }
+
+    /**
+     * 2. ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЙ
+     */
     if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
       creep.memory.working = false;
       creep.say("⛏️ добыча");
     }
+
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
       creep.memory.working = true;
-      creep.say("🚚 доставка");
+      creep.say("🚚 везу");
     }
 
-    // 3. ВЫБОР ДЕЙСТВИЯ
+    /**
+     * 3. ВЫБОР ДЕЙСТВИЯ
+     */
     if (creep.memory.working) {
       this.deliverMinerals(creep);
     } else {
@@ -38,24 +82,49 @@ module.exports = {
     }
   },
 
+  /**
+   * collectMinerals — добыча минерала.
+   * Крип должен стоять на клетке минерала и иметь части WORK.
+   * Extractor должен быть построен — без него harvest вернёт ошибку.
+   */
   collectMinerals: function (creep, mineral) {
     if (!mineral || mineral.amount === 0) return;
-    if (creep.getActiveBodyparts(WORK) === 0) return;
 
-    // Кэш экстрактора
-    if (!creep.memory.extractorId || Game.time % 200 === 0) {
-      const extractor = creep.room.find(FIND_STRUCTURES, {
-        filter: s =>
-          s.structureType === STRUCTURE_EXTRACTOR && s.pos.isNearTo(mineral),
-      })[0];
-      creep.memory.extractorId = extractor ? extractor.id : null;
+    if (creep.getActiveBodyparts(WORK) === 0) {
+      creep.say("❌ нет WORK");
+      return;
     }
 
-    const extractor = Game.getObjectById(creep.memory.extractorId);
-    if (!extractor) return;
+    /**
+     * Экстрактор кэшируем навсегда — он строится один раз
+     * и никуда не переносится. Game.time % 200 был лишним.
+     *
+     * ИСПРАВЛЕНИЕ: кэш только один раз при первом запуске.
+     */
+    if (!creep.memory.extractorId) {
+      const extractor = mineral.pos.findInRange(FIND_STRUCTURES, 1, {
+        filter: s => s.structureType === STRUCTURE_EXTRACTOR,
+      })[0];
 
-    // Добыча
-    if (creep.harvest(mineral) === ERR_NOT_IN_RANGE) {
+      // Если экстрактора нет — ждём пока его построят
+      if (!extractor) {
+        creep.say("⏳ нет экстрактора");
+        return;
+      }
+
+      creep.memory.extractorId = extractor.id;
+    }
+
+    // Проверяем что экстрактор ещё существует
+    const extractor = Game.getObjectById(creep.memory.extractorId);
+    if (!extractor) {
+      delete creep.memory.extractorId; // сбросим — найдём в следующем тике
+      return;
+    }
+
+    // Добываем. ERR_TIRED означает что экстрактор на cooldown — это нормально.
+    const result = creep.harvest(mineral);
+    if (result === ERR_NOT_IN_RANGE) {
       creep.moveTo(mineral, {
         reusePath: 30,
         visualizePathStyle: { stroke: "#ffaa00" },
@@ -63,33 +132,44 @@ module.exports = {
     }
   },
 
+  /**
+   * deliverMinerals — доставка минерала в Terminal или Storage.
+   *
+   * ИСПРАВЛЕНИЕ: убрали кэш terminalId и storageId в памяти крипа.
+   * room.terminal и room.storage — это прямые ссылки, они всегда актуальны.
+   * Кэшировать их ID избыточно и только запутывает код.
+   *
+   * ИСПРАВЛЕНИЕ: заменили _.find(Object.keys(...)) на стандартный JS.
+   */
   deliverMinerals: function (creep) {
     const room = creep.room;
 
-    // Ищем в рюкзаке любой ресурс, кроме энергии
-    const resourceType = _.find(
-      Object.keys(creep.store),
-      r => r !== RESOURCE_ENERGY,
+    // Ищем любой ресурс в рюкзаке кроме энергии
+    // Object.keys(creep.store) возвращает список всех ресурсов в рюкзаке
+    const resourceType = Object.keys(creep.store).find(
+      r => r !== RESOURCE_ENERGY && creep.store[r] > 0,
     );
 
     if (!resourceType) {
+      // В рюкзаке нет минералов — переключаемся обратно
       creep.memory.working = false;
       return;
     }
 
-    // Кэш терминала и хранилища
-    if (!creep.memory.terminalId || Game.time % 200 === 0) {
-      creep.memory.terminalId = room.terminal ? room.terminal.id : null;
-    }
-    if (!creep.memory.storageId || Game.time % 500 === 0) {
-      creep.memory.storageId = room.storage ? room.storage.id : null;
-    }
+    /**
+     * Приоритет доставки:
+     * 1. Terminal — основное место хранения минералов для торговли
+     * 2. Storage — если terminal полон или не построен
+     *
+     * Terminal появляется на RCL6 вместе с возможностью добычи минералов.
+     */
+    let target = null;
 
-    const terminal = Game.getObjectById(creep.memory.terminalId);
-    const storage = Game.getObjectById(creep.memory.storageId);
-
-    let target =
-      terminal && terminal.store.getFreeCapacity() > 0 ? terminal : storage;
+    if (room.terminal && room.terminal.store.getFreeCapacity() > 0) {
+      target = room.terminal;
+    } else if (room.storage && room.storage.store.getFreeCapacity() > 0) {
+      target = room.storage;
+    }
 
     if (target) {
       if (creep.transfer(target, resourceType) === ERR_NOT_IN_RANGE) {
@@ -98,6 +178,9 @@ module.exports = {
           visualizePathStyle: { stroke: "#ffffff" },
         });
       }
+    } else {
+      // Некуда сдать — ждём
+      creep.say("😴 всё полно");
     }
   },
 };
