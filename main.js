@@ -16,11 +16,11 @@ module.exports.loop = function () {
 
   /**
    * 2. ЛОГИКА КОМНАТ
+   * for...in быстрее Object.values() — не создаёт лишний массив
    */
   cpuMonitor.trackRole("roomManager", () => {
-    const rooms = Object.values(Game.rooms);
-
-    for (const room of rooms) {
+    for (const roomName in Game.rooms) {
+      const room = Game.rooms[roomName];
       if (room.controller && room.controller.my) {
         roomManager.run(room);
       }
@@ -29,16 +29,15 @@ module.exports.loop = function () {
 
   /**
    * 3. ЛОГИКА КРИПОВ
+   * for...in быстрее Object.values() — не создаёт лишний массив
    */
-  const creeps = Object.values(Game.creeps);
-
-  for (const creep of creeps) {
-    const roleName = creep.memory.role;
-    const roleModule = roles[roleName];
+  for (const name in Game.creeps) {
+    const creep = Game.creeps[name];
+    const roleModule = roles[creep.memory.role];
 
     if (!roleModule) continue; // защита от ошибок
 
-    cpuMonitor.trackRole(roleName, () => {
+    cpuMonitor.trackRole(creep.memory.role, () => {
       roleModule.run(creep);
     });
   }

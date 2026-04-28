@@ -1,89 +1,154 @@
 /**
- * ЛОГИКА АПГРЕЙДЕРА (Upgrader Role)
- * Основная задача: постоянная накачка контроллера комнаты энергией (RCL).
+ * ===================================================
+ * ROLE.UPGRADER.JS — Апгрейдер контроллера
+ * ===================================================
+ * Стратегия: качает контроллер комнаты энергией.
+ * Чем выше уровень контроллера (RCL) — тем больше
+ * структур можно строить.
+ *
+ * ВАЖНО про источники энергии:
+ * Апгрейдер НЕ берёт энергию из контейнеров у источников —
+ * это зона майнеров и хаулеров. Конкуренция за эти контейнеры
+ * нарушает работу всей цепочки добычи.
+ *
+ * Правильный порядок источников для апгрейдера:
+ * 1. Контейнер рядом с контроллером (если есть)
+ * 2. Storage комнаты
+ * 3. Копает сам (только если нет инфраструктуры)
+ *
+ * Память крипа (creep.memory):
+ * - working           {boolean}     — false = сбор, true = апгрейд
+ * - upgradeContainerId {string|null} — ID контейнера у контроллера
+ * ===================================================
  */
 module.exports = {
   run: function (creep) {
     /**
-     * 1. СОСТОЯНИЕ (State Management)
-     * Если память пуста, начинаем с режима "готов к набору энергии".
+     * 1. ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЙ
      */
-    if (creep.memory.working === undefined) {
+    if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
+      creep.say("🔄 сбор");
+    }
+
+    if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
+      creep.memory.working = true;
+      creep.say("⚡ качаю");
     }
 
     /**
-     * 2. ТУМБЛЕР (Logic Switch)
-     * Переключаем режимы: "Сбор" (false) и "Улучшение" (true).
-     */
-    if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true; // Рюкзак полон -> идем к контроллеру
-    } else if (
-      creep.memory.working === true &&
-      creep.store[RESOURCE_ENERGY] === 0
-    ) {
-      creep.memory.working = false; // Энергия кончилась -> возвращаемся к источнику
-    }
-
-    /**
-     * 3. РЕЖИМ СБОРА (Harvesting Mode)
+     * 2. РЕЖИМ СБОРА
+     *
+     * ИСПРАВЛЕНИЕ: апгрейдер больше не берёт из контейнеров у источников.
+     * Теперь ищет энергию в правильном порядке:
+     * контейнер у контроллера → storage → копает сам.
      */
     if (!creep.memory.working) {
-      const sources = creep.room.find(FIND_SOURCES);
-      const mySource = sources[creep.memory.sourceIndex];
+      /**
+       * Приоритет 1: контейнер рядом с контроллером.
+       * Часто игроки ставят контейнер в 1-2 клетках от контроллера
+       * специально для апгрейдеров — они стоят там и качают не двигаясь.
+       *
+       * Кэшируем ID в память — не ищем каждый тик.
+       */
+      const controller = creep.room.controller;
+
+      if (!creep.memory.upgradeContainerId) {
+        const upgradeContainer = controller.pos.findInRange(
+          FIND_STRUCTURES,
+          3,
+          {
+            filter: s => s.structureType === STRUCTURE_CONTAINER,
+          },
+        )[0];
+
+        // Сохраняем навсегда — контейнер у контроллера не переносят
+        creep.memory.upgradeContainerId = upgradeContainer
+          ? upgradeContainer.id
+          : null;
+      }
+
+      const upgradeContainer = creep.memory.upgradeContainerId
+        ? Game.getObjectById(creep.memory.upgradeContainerId)
+        : null;
+
+      // Контейнер разрушен — сбрасываем кэш
+      if (creep.memory.upgradeContainerId && !upgradeContainer) {
+        delete creep.memory.upgradeContainerId;
+      }
+
+      if (upgradeContainer && upgradeContainer.store[RESOURCE_ENERGY] > 50) {
+        if (
+          creep.withdraw(upgradeContainer, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+        ) {
+          creep.moveTo(upgradeContainer, {
+            reusePath: 10,
+            visualizePathStyle: { stroke: "#4b0082" },
+          });
+        }
+        return;
+      }
+
+      /**
+       * Приоритет 2: Storage.
+       * Главное долгосрочное хранилище комнаты (RCL4+).
+       * Апгрейдер — главный потребитель энергии из storage.
+       */
+      if (creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 0) {
+        if (
+          creep.withdraw(creep.room.storage, RESOURCE_ENERGY) ===
+          ERR_NOT_IN_RANGE
+        ) {
+          creep.moveTo(creep.room.storage, {
+            reusePath: 10,
+            visualizePathStyle: { stroke: "#4b0082" },
+          });
+        }
+        return;
+      }
+
+      /**
+       * Приоритет 3: копаем сами.
+       * Только если нет ни контейнера у контроллера, ни storage.
+       * Типичная ситуация: самое начало игры.
+       *
+       * Берём источник из кэша комнаты (бесплатно).
+       */
+      const sourceIds = creep.room.memory.sources || [];
+      const sources =
+        sourceIds.length > 0
+          ? sourceIds.map(id => Game.getObjectById(id)).filter(Boolean)
+          : creep.room.find(FIND_SOURCES);
+
+      const mySource = sources[creep.memory.sourceIndex] || sources[0];
 
       if (mySource) {
-        // 1. Ищем энергию НА ЗЕМЛЕ в радиусе 2 клеток от источника
-        const droppedEnergy = mySource.pos.findInRange(
-          FIND_DROPPED_RESOURCES,
-          2,
-          {
-            filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 0,
-          },
-        )[0]; // Берем первую попавшуюся кучу
-
-        if (droppedEnergy) {
-          // Если на земле что-то лежит — подбираем (pickup)
-          if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(droppedEnergy, {
-              visualizePathStyle: { stroke: "#ffaa00" },
-            });
-          }
-        } else {
-          // 2. Если на земле чисто — ищем КОНТЕЙНЕР в радиусе 2 клеток
-          const container = mySource.pos.findInRange(FIND_STRUCTURES, 2, {
-            filter: s =>
-              s.structureType === STRUCTURE_CONTAINER &&
-              s.store[RESOURCE_ENERGY] > 0,
-          })[0];
-
-          if (container) {
-            if (
-              creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-            ) {
-              creep.moveTo(container, {
-                visualizePathStyle: { stroke: "#ffaa00" },
-              });
-            }
-          } else {
-            // 3. Если и контейнер пуст — КОПАЕМ сами
-            if (creep.harvest(mySource) === ERR_NOT_IN_RANGE) {
-              creep.moveTo(mySource, {
-                visualizePathStyle: { stroke: "#ffaa00" },
-              });
-            }
-          }
+        if (creep.harvest(mySource) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(mySource, {
+            reusePath: 5,
+            visualizePathStyle: { stroke: "#4b0082" },
+          });
         }
       }
     } else {
       /**
-       * 4. РЕЖИМ УЛУЧШЕНИЯ (Upgrade Mode)
-       * Работа с контроллером комнаты.
+       * 3. РЕЖИМ АПГРЕЙДА
+       *
+       * upgradeController() можно вызывать с расстояния 3 клеток.
+       * Апгрейдер не обязан стоять вплотную к контроллеру.
+       *
+       * reusePath: 20 — путь к контроллеру никогда не меняется,
+       * можно кэшировать надолго.
        */
-      const target = creep.room.controller;
-      if (creep.upgradeController(target) === ERR_NOT_IN_RANGE) {
-        // Рисуем синюю линию пути к контроллеру для отличия от других ролей
-        creep.moveTo(target, { visualizePathStyle: { stroke: "#4b0082" } });
+      const controller = creep.room.controller;
+
+      if (!controller) return; // защита: вдруг крип в нейтральной комнате
+
+      if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(controller, {
+          reusePath: 20,
+          visualizePathStyle: { stroke: "#4b0082" },
+        });
       }
     }
   },
