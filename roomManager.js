@@ -86,7 +86,7 @@ const roomManager = {
       }).length > 0;
 
     const localRolesConfig = [
-      { role: "test_harvester", count: 1 },
+      { role: "test_harvester", count: 3 },
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 2 },
       { role: "test_towerSupplier", count: 1 },
@@ -123,10 +123,14 @@ const roomManager = {
       sourceUsage[index] = 0;
     });
 
-    // Считаем только майнеров и хаулеров — только они реально привязаны к источнику
+    // ИСПРАВЛЕНИЕ: добавлен test_harvester в подсчёт sourceUsage.
+    // Раньше харвестеры спавнились первыми, но не учитывались в балансировке —
+    // sourceUsage всегда был {0:0, 1:0} при их спавне, и все три шли к источнику 0.
     roomCreeps.forEach(c => {
       if (
-        (c.memory.role === "test_miner" || c.memory.role === "test_hauler") &&
+        (c.memory.role === "test_miner" ||
+          c.memory.role === "test_hauler" ||
+          c.memory.role === "test_harvester") &&
         c.memory.sourceIndex !== undefined &&
         sourceUsage[c.memory.sourceIndex] !== undefined
       ) {
