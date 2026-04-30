@@ -1,27 +1,27 @@
 /**
  * ===================================================
- * ROLE.TOWERSUPPLIER.JS — Заправщик башен
+ * ROLE.TOWERSUPPLIER.JS — Заправщик башен и терминала
  * ===================================================
- * Стратегия: берёт энергию из storage (или контейнера)
- * и заправляет башни, начиная с самой пустой.
+ * Основная задача: Storage → Башни
+ * Дополнительная: Storage → Терминал (когда башни полны)
+ *
+ * Терминал нужна энергия для оплаты торговых транзакций.
+ * Держим в терминале минимум TERMINAL_ENERGY_MIN энергии.
  *
  * Память крипа (creep.memory):
- * - working     {boolean} — false = сбор, true = заправка башен
+ * - working     {boolean} — false = сбор, true = доставка
  * - sourceIndex {number}  — индекс контейнера (запасной источник)
  * ===================================================
  */
+
+const TERMINAL_ENERGY_MIN = 20000; // минимум энергии в терминале
 
 module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
 
-    /**
-     * 1. ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЙ
-     *
-     * Приведено к единому стилю с другими ролями:
-     * - пусто → переходим в режим сбора
-     * - полно → переходим в режим заправки
-     */
+    // ── 1. ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЙ ──────────────────────────────────────────
+
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
       creep.say("🔄 сбор");
@@ -29,28 +29,15 @@ module.exports = {
 
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
       creep.memory.working = true;
-      creep.say("⚡ башни");
+      creep.say("⚡ везу");
     }
 
-    /**
-     * 2. РЕЖИМ СБОРА
-     *
-     * Приоритет источников:
-     * 1. Storage — если там достаточно энергии
-     * 2. Контейнер у источника — запасной вариант
-     */
+    // ── 2. РЕЖИМ СБОРА: берём из Storage ──────────────────────────────────
+
     if (!creep.memory.working) {
       const storage = creep.room.storage;
-
-      // Не трогаем storage если там мало энергии — оставляем для крипов
-      // Значение можно настроить через Memory.rooms[roomName].minStorageEnergy
       const MIN_STORAGE_ENERGY = creep.room.memory.minStorageEnergy || 5000;
 
-      /**
-       * Приоритет 1: Storage
-       * Storage появляется на RCL4 и вмещает до 1 000 000 энергии.
-       * Это главный источник для заправщика башен.
-       */
       if (storage && storage.store[RESOURCE_ENERGY] > MIN_STORAGE_ENERGY) {
         if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
           creep.moveTo(storage, {
@@ -61,11 +48,7 @@ module.exports = {
         return;
       }
 
-      /**
-       * Приоритет 2: Контейнер у источника (запасной вариант)
-       * Используется если storage пустой или ещё не построен.
-       * _sourceContainers — кэш из roomManager, бесплатно.
-       */
+      // Storage пуст — берём из контейнера
       const containers = creep.room._sourceContainers || [];
       const myContainer = containers[creep.memory.sourceIndex] || containers[0];
 
@@ -79,48 +62,53 @@ module.exports = {
         return;
       }
 
-      // Нет доступной энергии — ждём на месте
       creep.say("⏳ нет энергии");
-    } else {
-      /**
-       * 3. РЕЖИМ ЗАПРАВКИ БАШЕН
-       *
-       * Находим башню с наименьшим запасом энергии и заправляем её.
-       * Логика "самая пустая первой" гарантирует равномерную заправку.
-       *
-       * ИСПРАВЛЕНИЕ: заменили _.min(array, iterator) на .sort() —
-       * _.min с итератором это синтаксис Lodash 3.x, легко запутаться.
-       * .sort() работает везде и читается понятнее.
-       */
-      const towers = creep.room._towers || [];
-
-      // Фильтруем только незаполненные башни
-      const needyTowers = towers.filter(
-        t => t.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-      );
-
-      if (needyTowers.length > 0) {
-        // Сортируем по количеству энергии (по возрастанию) — первая = самая пустая
-        needyTowers.sort(
-          (a, b) => a.store[RESOURCE_ENERGY] - b.store[RESOURCE_ENERGY],
-        );
-        const targetTower = needyTowers[0];
-
-        if (creep.transfer(targetTower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(targetTower, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
-        }
-      } else {
-        /**
-         * Все башни полны — ждём на месте.
-         * ИСПРАВЛЕНИЕ: убрали поиск спавна через find() каждый тик —
-         * это лишний вызов когда крипу просто нечего делать.
-         * Крип просто стоит и ждёт пока башни начнут стрелять.
-         */
-        creep.say("💤 все полны");
-      }
+      return;
     }
+
+    // ── 3. РЕЖИМ ДОСТАВКИ ─────────────────────────────────────────────────
+
+    // Приоритет 1: башни — главная задача
+    const towers = creep.room._towers || [];
+    const needyTowers = towers.filter(
+      t => t.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+    );
+
+    if (needyTowers.length > 0) {
+      needyTowers.sort(
+        (a, b) => a.store[RESOURCE_ENERGY] - b.store[RESOURCE_ENERGY],
+      );
+      const targetTower = needyTowers[0];
+
+      if (creep.transfer(targetTower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(targetTower, {
+          reusePath: 5,
+          visualizePathStyle: { stroke: "#ffffff" },
+        });
+      }
+      return;
+    }
+
+    // Приоритет 2: терминал — подкачиваем энергию для торговли
+    // Только если башни полны и в терминале меньше минимума
+    const terminal = creep.room.terminal;
+
+    if (
+      terminal &&
+      terminal.store[RESOURCE_ENERGY] < TERMINAL_ENERGY_MIN &&
+      terminal.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+    ) {
+      creep.say("💱 терминал");
+      if (creep.transfer(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(terminal, {
+          reusePath: 5,
+          visualizePathStyle: { stroke: "#00ffff" },
+        });
+      }
+      return;
+    }
+
+    // Всё полно — ждём
+    creep.say("💤 полно");
   },
 };
