@@ -96,7 +96,8 @@ const roomManager = {
     const mineral = room.memory.mineralId
       ? Game.getObjectById(room.memory.mineralId)
       : null;
-    const mineralAvailable = mineral && mineral.amount > 0;
+    const mineralAvailable =
+      mineral && (mineral.amount > 0 || mineral.amount === undefined);
 
     // ── 6. СТРОЙКИ — раз в 100 тиков ──────────────────────────────────────
     // ОПТИМИЗАЦИЯ: раньше find() по стройкам шёл каждый тик.

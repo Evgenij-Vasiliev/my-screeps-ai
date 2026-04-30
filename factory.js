@@ -81,7 +81,7 @@ const factory = {
     }),
 
     test_remoteHauler: (spawn, bestIndex, roleData) => ({
-      body: prepareBody({ carry: 16, move: 16 }),
+      body: prepareBody({ carry: 20, move: 20 }),
       memory: { working: false, targetRoom: roleData.targetRoom || null },
     }),
 
