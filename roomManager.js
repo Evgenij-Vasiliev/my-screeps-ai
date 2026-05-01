@@ -11,6 +11,11 @@
  * - sources, sourceContainers, mineralId: один раз навсегда (в memory)
  * - allCreeps: один цикл for...in вместо _.groupBy + find
  * - roomCreeps: фильтр из уже собранного массива (не отдельный find)
+ *
+ * НОВОЕ: заблаговременный спавн майнеров
+ * - Роли в EARLY_SPAWN_ROLES не считаются "живыми" если ticksToLive < порога
+ * - Порог = время спавна тела + запас на дорогу
+ * - Это устраняет простой источника между смертью и спавном нового майнера
  * ===================================================
  */
 
@@ -20,12 +25,48 @@ const terminalManager = require("./terminalManager");
 
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
 
+// ── ЗАБЛАГОВРЕМЕННЫЙ СПАВН ─────────────────────────────────────────────────
+// Роли из этого объекта будут спавниться заранее.
+// travelBuffer — запас тиков на дорогу к источнику.
+// Для локального майнера: 10 тиков (он рядом).
+// Для удалённого: 80 тиков (ему идти через несколько комнат).
+const EARLY_SPAWN_ROLES = {
+  test_miner: { travelBuffer: 10 },
+  test_remoteMiner: { travelBuffer: 80 },
+};
+
+/**
+ * Считает тело крипа по его роли из factory.blueprints,
+ * чтобы узнать время спавна = количество частей * 3 тика.
+ * Возвращает готовый порог ticksToLive для "досрочного" спавна.
+ *
+ * @param {string} role — название роли (например "test_miner")
+ * @param {number} travelBuffer — запас тиков на дорогу
+ * @param {StructureSpawn} spawn — спавн для передачи в blueprint
+ * @returns {number} — порог ticksToLive ниже которого крип "не считается"
+ */
+function getEarlySpawnThreshold(role, travelBuffer, spawn) {
+  try {
+    const factory = require("./factory");
+    const blueprint = factory.blueprints[role]
+      ? factory.blueprints[role](spawn, 0, {})
+      : null;
+
+    if (blueprint && blueprint.body) {
+      // Каждая часть тела спавнится 3 тика
+      const spawnTime = blueprint.body.length * 3;
+      return spawnTime + travelBuffer;
+    }
+  } catch (e) {
+    // Если что-то пошло не так — используем безопасное значение
+  }
+  // Запасное значение: 50 тиков (достаточно для большинства случаев)
+  return 50 + travelBuffer;
+}
+
 const roomManager = {
   run: function (room) {
     // ── 1. ENERGY TARGETS — каждый тик ────────────────────────────────────
-    // Меняется быстро: крипы берут энергию из спавна/расширений каждый тик.
-    // Кэшировать нельзя — дадим устаревший список и крип пойдёт в уже
-    // заполненную структуру.
     {
       const energyTargets = room.find(FIND_MY_STRUCTURES, {
         filter: s =>
@@ -38,7 +79,6 @@ const roomManager = {
     }
 
     // ── 2. БАШНИ — раз в 50 тиков ─────────────────────────────────────────
-    // Башни не строятся часто. Кэш в memory переживает перезагрузку скрипта.
     if (!room.memory.towers || Game.time % 50 === 0) {
       const towers = room.find(FIND_MY_STRUCTURES, {
         filter: s => s.structureType === STRUCTURE_TOWER,
@@ -50,7 +90,6 @@ const roomManager = {
       .filter(Boolean);
 
     // ── 3. ИСТОЧНИКИ — один раз навсегда ──────────────────────────────────
-    // Источники энергии не меняются никогда.
     if (!room.memory.sources) {
       const sources = room.find(FIND_SOURCES);
       room.memory.sources = sources.map(s => s.id);
@@ -59,8 +98,7 @@ const roomManager = {
       .map(id => Game.getObjectById(id))
       .filter(Boolean);
 
-    // ── 4. КОНТЕЙНЕРЫ У ИСТОЧНИКОВ — с проверкой валидности ───────────────
-    // Контейнеры могут быть разрушены — проверяем что объект ещё существует.
+    // ── 4. КОНТЕЙНЕРЫ У ИСТОЧНИКОВ ────────────────────────────────────────
     if (!room.memory.sourceContainers) {
       room.memory.sourceContainers = [];
     }
@@ -74,7 +112,6 @@ const roomManager = {
         container = Game.getObjectById(containerId);
       }
 
-      // Если контейнер разрушен или не найден — ищем заново
       if (!container) {
         container =
           source.pos.findInRange(FIND_STRUCTURES, 2, {
@@ -87,8 +124,6 @@ const roomManager = {
     });
 
     // ── 5. МИНЕРАЛ — раз в 100 тиков ──────────────────────────────────────
-    // Минерал восстанавливается медленно (~50000 тиков).
-    // Проверяем редко — только не ноль ли там.
     if (!room.memory.mineralId || Game.time % 100 === 0) {
       const minerals = room.find(FIND_MINERALS);
       room.memory.mineralId = minerals.length > 0 ? minerals[0].id : null;
@@ -97,22 +132,15 @@ const roomManager = {
       ? Game.getObjectById(room.memory.mineralId)
       : null;
 
-    // ИСПРАВЛЕНИЕ: в Screeps shard3 поле называется mineralAmount, а не amount.
-    // mineral.amount всегда undefined → старое условие было всегда true →
-    // mineralMiner спавнились даже когда минерал полностью истощён.
     const mineralAvailable = mineral && mineral.mineralAmount > 0;
 
     // ── 6. СТРОЙКИ — раз в 100 тиков ──────────────────────────────────────
-    // ОПТИМИЗАЦИЯ: раньше find() по стройкам шёл каждый тик.
-    // Стройки появляются редко — достаточно проверять раз в 100 тиков.
     if (room.memory.hasSites === undefined || Game.time % 100 === 0) {
       room.memory.hasSites = room.find(FIND_CONSTRUCTION_SITES).length > 0;
     }
     const hasSites = room.memory.hasSites;
 
     // ── 7. РЕМОНТ — раз в 100 тиков ───────────────────────────────────────
-    // ОПТИМИЗАЦИЯ: раньше find() по всем структурам шёл каждый тик.
-    // Структуры теряют хиты медленно — достаточно проверять раз в 100 тиков.
     if (room.memory.needsRepair === undefined || Game.time % 100 === 0) {
       room.memory.needsRepair =
         room.find(FIND_STRUCTURES, {
@@ -124,30 +152,73 @@ const roomManager = {
     }
     const needsRepair = room.memory.needsRepair;
 
-    // ── 8. ПОДСЧЁТ КРИПОВ — один цикл вместо двух ─────────────────────────
-    // Теперь: один for...in, два простых объекта-счётчика.
-    // localGroups  — крипы в этой комнате по роли
-    // globalGroups — все крипы игры по роли
+    // ── 8. ПОДСЧЁТ КРИПОВ ─────────────────────────────────────────────────
+    // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
+    // Для ролей из EARLY_SPAWN_ROLES крип НЕ считается "живым" если его
+    // ticksToLive меньше порога (время спавна + дорога).
+    // Это заставляет спавн начаться ЗАРАНЕЕ, пока старый майнер ещё жив.
+    // Результат: новый майнер подходит к источнику почти сразу после смерти старого.
+
+    // Получаем спавн для расчёта порогов (нужен чтобы узнать тело крипа)
+    const spawnsForThreshold = room.find(FIND_MY_SPAWNS);
+    const spawnForThreshold = spawnsForThreshold[0] || null;
+
+    // Кэшируем пороги — не пересчитываем каждый тик для каждого крипа
+    // Пороги хранятся в памяти комнаты и обновляются раз в 200 тиков
+    if (!room.memory.earlySpawnThresholds || Game.time % 200 === 0) {
+      room.memory.earlySpawnThresholds = {};
+      for (const role in EARLY_SPAWN_ROLES) {
+        const { travelBuffer } = EARLY_SPAWN_ROLES[role];
+        room.memory.earlySpawnThresholds[role] = spawnForThreshold
+          ? getEarlySpawnThreshold(role, travelBuffer, spawnForThreshold)
+          : 50 + travelBuffer;
+      }
+    }
+    const thresholds = room.memory.earlySpawnThresholds;
 
     const localGroups = {}; // { role: count } для этой комнаты
     const globalGroups = {}; // { role: count } для всей игры
     const roomCreeps = []; // крипы этой комнаты (для sourceUsage)
-    let attackersHere = 0; // атакеры приписанные к этой комнате
+    let attackersHere = 0;
 
     for (const name in Game.creeps) {
       const creep = Game.creeps[name];
       const role = creep.memory.role;
 
-      // Глобальный счётчик — все крипы
-      globalGroups[role] = (globalGroups[role] || 0) + 1;
-
-      // Локальный счётчик — только крипы этой комнаты
-      if (creep.room.name === room.name) {
-        localGroups[role] = (localGroups[role] || 0) + 1;
-        roomCreeps.push(creep);
+      // Проверяем: не "умирает ли" этот крип досрочно?
+      // Новорождённые крипы имеют ticksToLive = undefined (только спавнились)
+      // — их пропускать не нужно, поэтому проверяем что ttl определён.
+      let countAsAlive = true;
+      if (thresholds[role] !== undefined && creep.ticksToLive !== undefined) {
+        if (creep.ticksToLive < thresholds[role]) {
+          // Крип "почти мёртв" с точки зрения планировщика — не считаем его
+          countAsAlive = false;
+        }
       }
 
-      // Считаем атакеров приписанных к этой комнате
+      if (countAsAlive) {
+        // Глобальный счётчик
+        globalGroups[role] = (globalGroups[role] || 0) + 1;
+
+        // Локальный счётчик — только крипы этой комнаты
+        // Для remoteMiner считаем по homeRoom (он физически в другой комнате)
+        const isLocalCreep =
+          creep.room.name === room.name ||
+          (role === "test_remoteMiner" && creep.memory.homeRoom === room.name);
+
+        if (creep.room.name === room.name) {
+          localGroups[role] = (localGroups[role] || 0) + 1;
+          roomCreeps.push(creep);
+        }
+      } else {
+        // Крип умирает — добавляем в roomCreeps для sourceUsage,
+        // но НЕ в счётчики (чтобы спавн запустился)
+        if (creep.room.name === room.name) {
+          roomCreeps.push(creep);
+        }
+      }
+
+      // Атакеры считаем всегда (отдельная логика, не связана с экономикой)
       if (role === "test_attacker" && creep.memory.homeRoom === room.name) {
         attackersHere++;
       }
@@ -167,7 +238,6 @@ const roomManager = {
       { role: "test_builder", count: hasSites ? 1 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
       { role: "test_repairer", count: needsRepair ? 1 : 0 },
-      // ИСПРАВЛЕНИЕ: mineralAvailable теперь использует mineral.mineralAmount
       { role: "test_mineralMiner", count: mineralAvailable ? 2 : 0 },
     ];
 
@@ -179,8 +249,6 @@ const roomManager = {
     }
 
     // ── 10. БАЛАНСИРОВКА ИСТОЧНИКОВ ───────────────────────────────────────
-    // Считаем сколько крипов уже назначено на каждый источник.
-    // Новый крип получит наименее загруженный источник.
     const sourceUsage = {};
     room._sources.forEach((_, index) => {
       sourceUsage[index] = 0;
@@ -203,7 +271,7 @@ const roomManager = {
     const spawn = spawns[0];
 
     if (spawn) {
-      // Атакеры — высший приоритет если их не хватает
+      // Атакеры — высший приоритет
       if (attackerCount > 0 && attackersHere < attackerCount) {
         const result = factory.run(spawn, { role: "test_attacker" }, 0);
         if (result === OK) {
@@ -212,7 +280,6 @@ const roomManager = {
         }
       }
 
-      // Обычные роли — по порядку конфига
       const fullConfig = [...localRolesConfig, ...globalRolesConfig];
 
       for (const roleData of fullConfig) {
