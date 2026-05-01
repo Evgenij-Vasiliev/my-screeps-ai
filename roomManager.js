@@ -96,8 +96,11 @@ const roomManager = {
     const mineral = room.memory.mineralId
       ? Game.getObjectById(room.memory.mineralId)
       : null;
-    const mineralAvailable =
-      mineral && (mineral.amount > 0 || mineral.amount === undefined);
+
+    // ИСПРАВЛЕНИЕ: в Screeps shard3 поле называется mineralAmount, а не amount.
+    // mineral.amount всегда undefined → старое условие было всегда true →
+    // mineralMiner спавнились даже когда минерал полностью истощён.
+    const mineralAvailable = mineral && mineral.mineralAmount > 0;
 
     // ── 6. СТРОЙКИ — раз в 100 тиков ──────────────────────────────────────
     // ОПТИМИЗАЦИЯ: раньше find() по стройкам шёл каждый тик.
@@ -122,14 +125,8 @@ const roomManager = {
     const needsRepair = room.memory.needsRepair;
 
     // ── 8. ПОДСЧЁТ КРИПОВ — один цикл вместо двух ─────────────────────────
-    // ОПТИМИЗАЦИЯ: раньше было:
-    //   1. for...in по Game.creeps → allCreeps (все крипы игры)
-    //   2. room.find(FIND_MY_CREEPS) → roomCreeps (отдельный find)
-    //   3. _.groupBy(allCreeps) — медленная lodash функция
-    //   4. _.groupBy(roomCreeps) — ещё одна
-    //
     // Теперь: один for...in, два простых объекта-счётчика.
-    // localGroups  — крипы приписанные к этой комнате (по spawnName или room)
+    // localGroups  — крипы в этой комнате по роли
     // globalGroups — все крипы игры по роли
 
     const localGroups = {}; // { role: count } для этой комнаты
@@ -150,8 +147,7 @@ const roomManager = {
         roomCreeps.push(creep);
       }
 
-      // Считаем атакеров приписанных к этой комнате — прямо здесь,
-      // чтобы не делать отдельный проход по Game.creeps позже
+      // Считаем атакеров приписанных к этой комнате
       if (role === "test_attacker" && creep.memory.homeRoom === room.name) {
         attackersHere++;
       }
@@ -171,6 +167,7 @@ const roomManager = {
       { role: "test_builder", count: hasSites ? 1 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
       { role: "test_repairer", count: needsRepair ? 1 : 0 },
+      // ИСПРАВЛЕНИЕ: mineralAvailable теперь использует mineral.mineralAmount
       { role: "test_mineralMiner", count: mineralAvailable ? 2 : 0 },
     ];
 
@@ -207,7 +204,6 @@ const roomManager = {
 
     if (spawn) {
       // Атакеры — высший приоритет если их не хватает
-      // attackersHere уже посчитан в общем цикле выше — без лишнего прохода
       if (attackerCount > 0 && attackersHere < attackerCount) {
         const result = factory.run(spawn, { role: "test_attacker" }, 0);
         if (result === OK) {
@@ -255,8 +251,7 @@ const roomManager = {
       }
     }
 
-    // Продажа ресурсов
-
+    // ── Продажа ресурсов ───────────────────────────────────────────────────
     terminalManager.run(room);
 
     // ── 12. БАШНИ ─────────────────────────────────────────────────────────
