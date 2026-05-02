@@ -12,10 +12,10 @@
  * - allCreeps: один цикл for...in вместо _.groupBy + find
  * - roomCreeps: фильтр из уже собранного массива (не отдельный find)
  *
- * НОВОЕ: заблаговременный спавн майнеров
- * - Роли в EARLY_SPAWN_ROLES не считаются "живыми" если ticksToLive < порога
- * - Порог = время спавна тела + запас на дорогу
- * - Это устраняет простой источника между смертью и спавном нового майнера
+ * ИСПРАВЛЕНО: привязка хаулеров к источникам
+ * - Хаулер №0 → источник 0, Хаулер №1 → источник 1
+ * - Определяется жёстко по количеству уже живых хаулеров в комнате
+ * - Больше не зависит от балансировщика sourceUsage (который не успевал обновляться)
  * ===================================================
  */
 
@@ -28,8 +28,6 @@ const REMOTE_ROOMS = ["E35S38", "E36S37"];
 // ── ЗАБЛАГОВРЕМЕННЫЙ СПАВН ─────────────────────────────────────────────────
 // Роли из этого объекта будут спавниться заранее.
 // travelBuffer — запас тиков на дорогу к источнику.
-// Для локального майнера: 10 тиков (он рядом).
-// Для удалённого: 80 тиков (ему идти через несколько комнат).
 const EARLY_SPAWN_ROLES = {
   test_miner: { travelBuffer: 10 },
   test_remoteMiner: { travelBuffer: 80 },
@@ -38,12 +36,6 @@ const EARLY_SPAWN_ROLES = {
 /**
  * Считает тело крипа по его роли из factory.blueprints,
  * чтобы узнать время спавна = количество частей * 3 тика.
- * Возвращает готовый порог ticksToLive для "досрочного" спавна.
- *
- * @param {string} role — название роли (например "test_miner")
- * @param {number} travelBuffer — запас тиков на дорогу
- * @param {StructureSpawn} spawn — спавн для передачи в blueprint
- * @returns {number} — порог ticksToLive ниже которого крип "не считается"
  */
 function getEarlySpawnThreshold(role, travelBuffer, spawn) {
   try {
@@ -53,16 +45,18 @@ function getEarlySpawnThreshold(role, travelBuffer, spawn) {
       : null;
 
     if (blueprint && blueprint.body) {
-      // Каждая часть тела спавнится 3 тика
       const spawnTime = blueprint.body.length * 3;
       return spawnTime + travelBuffer;
     }
-  } catch (e) {
-    // Если что-то пошло не так — используем безопасное значение
-  }
-  // Запасное значение: 50 тиков (достаточно для большинства случаев)
+  } catch (e) {}
   return 50 + travelBuffer;
 }
+
+// ── РОЛИ С ЖЁСТКОЙ ПРИВЯЗКОЙ К ИСТОЧНИКУ ─────────────────────────────────
+// Для этих ролей sourceIndex назначается строго по порядку:
+// первый спавнящийся → источник 0, второй → источник 1 и т.д.
+// Это решает проблему когда оба крипа выбирают один источник.
+const FIXED_SOURCE_ROLES = ["test_hauler", "test_miner", "test_harvester"];
 
 const roomManager = {
   run: function (room) {
@@ -153,18 +147,9 @@ const roomManager = {
     const needsRepair = room.memory.needsRepair;
 
     // ── 8. ПОДСЧЁТ КРИПОВ ─────────────────────────────────────────────────
-    // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
-    // Для ролей из EARLY_SPAWN_ROLES крип НЕ считается "живым" если его
-    // ticksToLive меньше порога (время спавна + дорога).
-    // Это заставляет спавн начаться ЗАРАНЕЕ, пока старый майнер ещё жив.
-    // Результат: новый майнер подходит к источнику почти сразу после смерти старого.
-
-    // Получаем спавн для расчёта порогов (нужен чтобы узнать тело крипа)
     const spawnsForThreshold = room.find(FIND_MY_SPAWNS);
     const spawnForThreshold = spawnsForThreshold[0] || null;
 
-    // Кэшируем пороги — не пересчитываем каждый тик для каждого крипа
-    // Пороги хранятся в памяти комнаты и обновляются раз в 200 тиков
     if (!room.memory.earlySpawnThresholds || Game.time % 200 === 0) {
       room.memory.earlySpawnThresholds = {};
       for (const role in EARLY_SPAWN_ROLES) {
@@ -176,49 +161,57 @@ const roomManager = {
     }
     const thresholds = room.memory.earlySpawnThresholds;
 
-    const localGroups = {}; // { role: count } для этой комнаты
-    const globalGroups = {}; // { role: count } для всей игры
-    const roomCreeps = []; // крипы этой комнаты (для sourceUsage)
+    const localGroups = {};
+    const globalGroups = {};
+    const roomCreeps = [];
     let attackersHere = 0;
+
+    // ── ЖЁСТКОЕ РАСПРЕДЕЛЕНИЕ ИСТОЧНИКОВ ─────────────────────────────────
+    // Для каждой роли с фиксированным источником считаем
+    // сколько крипов уже назначено на каждый sourceIndex.
+    // Структура: fixedSourceCount["test_hauler"] = { 0: 1, 1: 0 }
+    const fixedSourceCount = {};
+    for (const role of FIXED_SOURCE_ROLES) {
+      fixedSourceCount[role] = {};
+      for (let i = 0; i < (room.memory.sources || []).length; i++) {
+        fixedSourceCount[role][i] = 0;
+      }
+    }
 
     for (const name in Game.creeps) {
       const creep = Game.creeps[name];
       const role = creep.memory.role;
 
-      // Проверяем: не "умирает ли" этот крип досрочно?
-      // Новорождённые крипы имеют ticksToLive = undefined (только спавнились)
-      // — их пропускать не нужно, поэтому проверяем что ttl определён.
       let countAsAlive = true;
       if (thresholds[role] !== undefined && creep.ticksToLive !== undefined) {
         if (creep.ticksToLive < thresholds[role]) {
-          // Крип "почти мёртв" с точки зрения планировщика — не считаем его
           countAsAlive = false;
         }
       }
 
       if (countAsAlive) {
-        // Глобальный счётчик
         globalGroups[role] = (globalGroups[role] || 0) + 1;
-
-        // Локальный счётчик — только крипы этой комнаты
-        // Для remoteMiner считаем по homeRoom (он физически в другой комнате)
-        const isLocalCreep =
-          creep.room.name === room.name ||
-          (role === "test_remoteMiner" && creep.memory.homeRoom === room.name);
 
         if (creep.room.name === room.name) {
           localGroups[role] = (localGroups[role] || 0) + 1;
           roomCreeps.push(creep);
+
+          // Считаем занятые sourceIndex для ролей с жёсткой привязкой
+          if (
+            FIXED_SOURCE_ROLES.includes(role) &&
+            creep.memory.sourceIndex !== undefined &&
+            fixedSourceCount[role] !== undefined &&
+            fixedSourceCount[role][creep.memory.sourceIndex] !== undefined
+          ) {
+            fixedSourceCount[role][creep.memory.sourceIndex]++;
+          }
         }
       } else {
-        // Крип умирает — добавляем в roomCreeps для sourceUsage,
-        // но НЕ в счётчики (чтобы спавн запустился)
         if (creep.room.name === room.name) {
           roomCreeps.push(creep);
         }
       }
 
-      // Атакеры считаем всегда (отдельная логика, не связана с экономикой)
       if (role === "test_attacker" && creep.memory.homeRoom === room.name) {
         attackersHere++;
       }
@@ -228,17 +221,26 @@ const roomManager = {
     const needsUpgrader =
       room.controller && room.controller.ticksToDowngrade < 100000 ? 1 : 0;
 
-    const attackerCount = room.name === "E35S37" ? 0 : 1;
+    const attackerCount =
+      room.name === "E35S37" || room.name === "E36S38" ? 0 : 1;
 
     const localRolesConfig = [
       { role: "test_harvester", count: 1 },
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 2 },
       { role: "test_towerSupplier", count: 1 },
-      { role: "test_builder", count: hasSites ? 1 : 0 },
+      { role: "test_builder", count: hasSites ? 2 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
       { role: "test_repairer", count: needsRepair ? 1 : 0 },
-      { role: "test_mineralMiner", count: mineralAvailable ? 2 : 0 },
+      {
+        role: "test_mineralMiner",
+        count:
+          mineralAvailable &&
+          room.storage &&
+          room.storage.store[RESOURCE_ENERGY] > 20000
+            ? 2
+            : 0,
+      },
     ];
 
     const globalRolesConfig = [];
@@ -248,30 +250,11 @@ const roomManager = {
       globalRolesConfig.push({ role: "test_remoteHauler", count: 2 });
     }
 
-    // ── 10. БАЛАНСИРОВКА ИСТОЧНИКОВ ───────────────────────────────────────
-    const sourceUsage = {};
-    room._sources.forEach((_, index) => {
-      sourceUsage[index] = 0;
-    });
-
-    roomCreeps.forEach(c => {
-      if (
-        (c.memory.role === "test_miner" ||
-          c.memory.role === "test_hauler" ||
-          c.memory.role === "test_harvester") &&
-        c.memory.sourceIndex !== undefined &&
-        sourceUsage[c.memory.sourceIndex] !== undefined
-      ) {
-        sourceUsage[c.memory.sourceIndex]++;
-      }
-    });
-
     // ── 11. СПАВН ─────────────────────────────────────────────────────────
     const spawns = room.find(FIND_MY_SPAWNS, { filter: s => !s.spawning });
     const spawn = spawns[0];
 
     if (spawn) {
-      // Атакеры — высший приоритет
       if (attackerCount > 0 && attackersHere < attackerCount) {
         const result = factory.run(spawn, { role: "test_attacker" }, 0);
         if (result === OK) {
@@ -289,9 +272,36 @@ const roomManager = {
           : localGroups[roleData.role] || 0;
 
         if (currentCount < roleData.count) {
-          const bestIndex = Number(
-            Object.entries(sourceUsage).sort((a, b) => a[1] - b[1])[0][0],
-          );
+          let bestIndex;
+
+          if (FIXED_SOURCE_ROLES.includes(roleData.role)) {
+            // ── ЖЁСТКАЯ ПРИВЯЗКА ─────────────────────────────────────────
+            // Ищем источник с наименьшим количеством назначенных крипов
+            // этой роли. Если оба пусты — берём 0, потом 1.
+            // Это гарантирует что хаулеры/майнеры не дублируют источник.
+            const counts = fixedSourceCount[roleData.role] || {};
+            bestIndex = Number(
+              Object.entries(counts).sort((a, b) => a[1] - b[1])[0][0],
+            );
+          } else {
+            // Для остальных ролей — старая балансировка по sourceUsage
+            // (они не привязаны к конкретному источнику)
+            const sourceUsage = {};
+            room._sources.forEach((_, i) => {
+              sourceUsage[i] = 0;
+            });
+            roomCreeps.forEach(c => {
+              if (
+                c.memory.sourceIndex !== undefined &&
+                sourceUsage[c.memory.sourceIndex] !== undefined
+              ) {
+                sourceUsage[c.memory.sourceIndex]++;
+              }
+            });
+            bestIndex = Number(
+              Object.entries(sourceUsage).sort((a, b) => a[1] - b[1])[0][0],
+            );
+          }
 
           // Для удалённых ролей назначаем свободную комнату
           const remoteRoles = [

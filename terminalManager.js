@@ -9,11 +9,10 @@
  * - Минералы: продаём всё что есть в терминале (минимум 100 единиц)
  * - Энергия: продаём излишек сверх 100,000 в Storage
  *
- * Условия для сделки:
- * - В терминале минимум 20,000 энергии (на транзакции)
- * - Есть buy order с ненулевым количеством
- * - Терминал не на кулдауне
- * - Количество для продажи минимум 100 единиц
+ * ИСПРАВЛЕНО: убран жёсткий фильтр "энергии после сделки >= TERMINAL_ENERGY_MIN"
+ * Теперь единственное условие — txCost меньше чем есть энергии в терминале.
+ * Если покупатель далеко и транзакция дорогая — уменьшаем объём продажи
+ * до тех пор пока транзакция не станет по карману.
  *
  * Управление через консоль:
  *   Memory.tradeEnabled = false  — остановить торговлю
@@ -22,27 +21,22 @@
  */
 
 const STORAGE_ENERGY_BUFFER = 100000;
-const TERMINAL_ENERGY_MIN = 20000;
+const TERMINAL_ENERGY_MIN = 2000; // минимум чтобы терминал вообще не опустел
 const CHECK_INTERVAL = 50;
 const MIN_DEAL_AMOUNT = 100;
 
-// Сдвиги тиков для каждой комнаты — чтобы не вызывать
-// getAllOrders() для всех комнат одновременно.
-// При 5 комнатах и интервале 50: офсеты 0, 10, 20, 30, 40.
 let roomOffsets = {};
 
 const terminalManager = {
   run: function (room) {
     if (Memory.tradeEnabled === false) return;
 
-    // Назначаем каждой комнате свой сдвиг — один раз при запуске
     if (roomOffsets[room.name] === undefined) {
       const count = Object.keys(roomOffsets).length;
       const step = Math.floor(CHECK_INTERVAL / 5);
       roomOffsets[room.name] = count * step;
     }
 
-    // Проверяем только в "свой" тик — не все комнаты одновременно
     if ((Game.time + roomOffsets[room.name]) % CHECK_INTERVAL !== 0) return;
 
     const terminal = room.terminal;
@@ -50,7 +44,10 @@ const terminalManager = {
 
     if (!terminal || !storage) return;
     if (terminal.cooldown > 0) return;
-    if (terminal.store[RESOURCE_ENERGY] < TERMINAL_ENERGY_MIN) return;
+
+    // Нужна хоть какая-то энергия для транзакции
+    const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
+    if (availableEnergy < TERMINAL_ENERGY_MIN) return;
 
     // ── СОБИРАЕМ СПИСОК РЕСУРСОВ ДЛЯ ПРОДАЖИ ─────────────────────────────
 
@@ -65,10 +62,9 @@ const terminalManager = {
       }
     }
 
-    // Энергия: только излишек из терминала если Storage переполнен
+    // Энергия: только излишек если Storage переполнен
     const storageEnergy = storage.store[RESOURCE_ENERGY] || 0;
     const terminalEnergy = terminal.store[RESOURCE_ENERGY] || 0;
-
     if (storageEnergy > STORAGE_ENERGY_BUFFER) {
       const sellAmount = terminalEnergy - TERMINAL_ENERGY_MIN;
       if (sellAmount >= MIN_DEAL_AMOUNT) {
@@ -79,9 +75,6 @@ const terminalManager = {
     if (toSell.length === 0) return;
 
     // ── ПРОДАЁМ ПЕРВЫЙ РЕСУРС ИЗ СПИСКА ──────────────────────────────────
-    // За один тик терминал совершает только одну сделку.
-    // Следующий ресурс продастся через 50 тиков.
-
     const { resourceType, amount } = toSell[0];
 
     const orders = Game.market
@@ -96,42 +89,46 @@ const terminalManager = {
       return;
     }
 
-    // Топ-5 по цене — выбираем тех у кого хватает энергии на транзакцию
-    const candidates = orders
-      .slice(0, 5)
-      .map(order => {
-        const dealAmount = Math.min(amount, order.remainingAmount);
+    // Перебираем топ-10 ордеров по цене.
+    // Для каждого уменьшаем объём продажи пока транзакция не влезет в бюджет.
+    for (const order of orders.slice(0, 10)) {
+      let dealAmount = Math.min(amount, order.remainingAmount);
+
+      // Уменьшаем объём пока транзакция дороже доступной энергии.
+      // Минимум — MIN_DEAL_AMOUNT (100 единиц).
+      while (dealAmount >= MIN_DEAL_AMOUNT) {
         const txCost = Game.market.calcTransactionCost(
           dealAmount,
           room.name,
           order.roomName,
         );
-        const energyAfter = terminal.store[RESOURCE_ENERGY] - txCost;
-        return { order, dealAmount, txCost, energyAfter };
-      })
-      .filter(c => c.energyAfter >= TERMINAL_ENERGY_MIN);
 
-    if (candidates.length === 0) {
-      console.log(
-        `[Terminal ${room.name}] Недостаточно энергии для транзакции ${resourceType}`,
-      );
-      return;
+        if (txCost <= availableEnergy - TERMINAL_ENERGY_MIN) {
+          // Энергии хватает — совершаем сделку
+          const result = Game.market.deal(order.id, dealAmount, room.name);
+          if (result === OK) {
+            console.log(
+              `[Terminal ${room.name}] Продано ${dealAmount} ${resourceType} ` +
+                `по ${order.price} → ${order.roomName} ` +
+                `(транзакция: ${txCost} энергии)`,
+            );
+          } else {
+            console.log(
+              `[Terminal ${room.name}] Ошибка сделки ${resourceType}: ${result}`,
+            );
+          }
+          return; // одна сделка за тик — выходим
+        }
+
+        // Не хватает — уменьшаем объём вдвое и пробуем снова
+        dealAmount = Math.floor(dealAmount / 2);
+      }
+      // Этот ордер слишком дорогой даже для минимального объёма — пробуем следующий
     }
 
-    const best = candidates[0];
-    const result = Game.market.deal(best.order.id, best.dealAmount, room.name);
-
-    if (result === OK) {
-      console.log(
-        `[Terminal ${room.name}] Продано ${best.dealAmount} ${resourceType} ` +
-          `по ${best.order.price} → ${best.order.roomName} ` +
-          `(транзакция: ${best.txCost} энергии)`,
-      );
-    } else {
-      console.log(
-        `[Terminal ${room.name}] Ошибка сделки ${resourceType}: ${result}`,
-      );
-    }
+    console.log(
+      `[Terminal ${room.name}] Нет подходящих ордеров для ${resourceType} (мало энергии на транзакцию)`,
+    );
   },
 };
 
