@@ -46,12 +46,12 @@ module.exports = {
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
       delete creep.memory.buildTargetId; // сбрасываем цель стройки
-      creep.say("🔄 сбор");
+      // creep.say("🔄 сбор");
     }
 
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
       creep.memory.working = true;
-      creep.say("🚧 строю");
+      // creep.say("🚧 строю");
     }
 
     /**
@@ -91,7 +91,7 @@ module.exports = {
          * Типичная ситуация: все постройки завершены,
          * строитель временно помогает качать контроллер.
          */
-        creep.say("💤 нет строек");
+        // creep.say("💤 нет строек");
         roleHarvester.run(creep);
       }
     } else {

@@ -1,19 +1,20 @@
 /**
  * ===================================================
- * ROLE.TOWERSUPPLIER.JS — Заправщик башен и терминала
+ * ROLE.TOWERSUPPLIER.JS — Заправщик башен и разгрузчик линка
  * ===================================================
  *
  * Приоритеты:
  * 1. Башни ниже 30% → заряжаем башни (срочно)
- * 2. Терминал ниже TERMINAL_ENERGY_MIN → заливаем энергию в терминал
- * 3. Всё в порядке → ждём
+ * 2. Линк у Storage имеет энергию → забираем в Storage
+ * 3. Терминал ниже TERMINAL_ENERGY_MIN → заливаем энергию в терминал
+ * 4. Всё в порядке → ждём
  *
- * Логика одного рейса:
- * - Определяем задачу → берём энергию из Storage → доставляем → сброс
+ * Настройка линка через память комнаты:
+ *   Memory.rooms['E35S37'].links.storage = 'ID линка у Storage'
  * ===================================================
  */
 
-const TERMINAL_ENERGY_MIN = 20000; // минимум энергии в терминале
+const TERMINAL_ENERGY_MIN = 20000;
 
 module.exports = {
   run: function (creep) {
@@ -22,6 +23,12 @@ module.exports = {
     const storage = creep.room.storage;
     const towers = creep.room._towers || [];
     const terminal = creep.room.terminal;
+
+    // Получаем линк у Storage из памяти комнаты
+    const linksConfig = creep.room.memory.links;
+    const storageLink = linksConfig
+      ? Game.getObjectById(linksConfig.storage)
+      : null;
 
     // Переключение режима
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
@@ -33,12 +40,7 @@ module.exports = {
     }
 
     if (!creep.memory.working) {
-      // === СБОР: определяем задачу и берём энергию из Storage ===
-
-      if (!storage || storage.store[RESOURCE_ENERGY] === 0) {
-        creep.say("⏳ нет энергии");
-        return;
-      }
+      // === СБОР: определяем задачу ===
 
       // Приоритет 1: башня ниже 30%
       const urgentTower = towers.find(
@@ -47,6 +49,10 @@ module.exports = {
       );
 
       if (urgentTower) {
+        if (!storage || storage.store[RESOURCE_ENERGY] === 0) {
+          creep.say("⏳ нет энергии");
+          return;
+        }
         creep.memory.task = "towers";
         const result = creep.withdraw(storage, RESOURCE_ENERGY);
         if (result === ERR_NOT_IN_RANGE) {
@@ -58,11 +64,31 @@ module.exports = {
         return;
       }
 
-      // Приоритет 2: терминал ниже минимума
+      // Приоритет 2: линк у Storage имеет энергию → разгружаем в Storage
+      if (
+        storageLink &&
+        storageLink.store[RESOURCE_ENERGY] > 0 &&
+        storage &&
+        storage.store.getFreeCapacity() > 0
+      ) {
+        creep.memory.task = "unload_link";
+        const result = creep.withdraw(storageLink, RESOURCE_ENERGY);
+        if (result === ERR_NOT_IN_RANGE) {
+          creep.moveTo(storageLink, {
+            reusePath: 5,
+            visualizePathStyle: { stroke: "#00ff00" },
+          });
+        }
+        return;
+      }
+
+      // Приоритет 3: терминал ниже минимума
       if (
         terminal &&
         terminal.store[RESOURCE_ENERGY] < TERMINAL_ENERGY_MIN &&
-        terminal.store.getFreeCapacity() > 0
+        terminal.store.getFreeCapacity() > 0 &&
+        storage &&
+        storage.store[RESOURCE_ENERGY] > 0
       ) {
         creep.memory.task = "terminal";
         const amount = Math.min(
@@ -80,9 +106,23 @@ module.exports = {
       }
 
       // Нечего делать
-      creep.say("⏳ всё OK");
+
+      // creep.say("⏳ всё OK");
     } else {
       // === ДОСТАВКА: везём к цели ===
+
+      if (creep.memory.task === "unload_link") {
+        // Разгружаем линк в Storage
+        if (!storage) return;
+        const result = creep.transfer(storage, RESOURCE_ENERGY);
+        if (result === ERR_NOT_IN_RANGE) {
+          creep.moveTo(storage, {
+            reusePath: 5,
+            visualizePathStyle: { stroke: "#00ff00" },
+          });
+        }
+        return;
+      }
 
       if (creep.memory.task === "terminal" && terminal) {
         // Везём в терминал
@@ -96,7 +136,7 @@ module.exports = {
         return;
       }
 
-      // Везём в башню (task === "towers" или по умолчанию)
+      // Везём в башню (task === "towers")
       const needyTowers = towers
         .filter(t => t.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
         .sort((a, b) => a.store[RESOURCE_ENERGY] - b.store[RESOURCE_ENERGY]);
