@@ -22,6 +22,7 @@
 const factory = require("./factory");
 const roleTower = require("./role.tower");
 const terminalManager = require("./terminalManager");
+const linkManager = require("./role.linkManager");
 
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
 
@@ -330,6 +331,10 @@ const roomManager = {
 
     // ── Продажа ресурсов ───────────────────────────────────────────────────
     terminalManager.run(room);
+
+    // --ЛИНКИ--------------------------------------------
+
+    linkManager.run(room);
 
     // ── 12. БАШНИ ─────────────────────────────────────────────────────────
     room._towers.forEach(tower => roleTower.run(tower));

@@ -47,7 +47,7 @@ const roleHauler = {
         return;
       }
 
-      creep.say("⏳ жду");
+      // creep.say("⏳ жду");
       return;
     }
 
@@ -85,7 +85,7 @@ const roleHauler = {
       }
     }
 
-    creep.say("😴 всё полно");
+    // creep.say("😴 всё полно");
   },
 };
 
