@@ -31,12 +31,12 @@ const factory = {
     },
 
     test_hauler: () => ({
-      body: prepareBody({ carry: 10, move: 10 }),
+      body: prepareBody({ carry: 12, move: 12 }),
       memory: {},
     }),
 
     test_harvester: () => ({
-      body: prepareBody({ work: 2, carry: 2, move: 2 }),
+      body: prepareBody({ work: 2, carry: 4, move: 6 }),
       memory: {},
     }),
 
