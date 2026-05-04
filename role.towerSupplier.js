@@ -45,7 +45,7 @@ module.exports = {
       // Приоритет 1: башня ниже 30%
       const urgentTower = towers.find(
         t =>
-          t.store[RESOURCE_ENERGY] < t.store.getCapacity(RESOURCE_ENERGY) * 0.3,
+          t.store[RESOURCE_ENERGY] < t.store.getCapacity(RESOURCE_ENERGY) * 0.5,
       );
 
       if (urgentTower) {
