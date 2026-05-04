@@ -1,28 +1,25 @@
 /**
  * ===================================================
- * ROLE.MINER.JS — Статичный майнер (оптимизированный)
+ * ROLE.MINER.JS — Статичный майнер (контейнер + линк)
  * ===================================================
- * Стратегия: крип находит контейнер рядом с источником,
- * встаёт на него и копает не двигаясь.
+ * Стратегия:
+ * 1. Если есть контейнер рядом с источником — стоим на нём
+ * 2. Если контейнера нет — ищем позицию смежную с источником И линком
+ *    При этом клетка не должна быть занята самим линком или стеной
+ * 3. Стоим на месте, копаем и скидываем энергию в линк
  *
- * Оптимизации:
- * - sourceId кэшируется в память — findInRange не вызывается каждый тик
- * - containerId кэшируется в память — поиск выполняется только один раз
- * - Когда крип стоит на месте — только harvest(source), минимум CPU
- *
- * Память крипа (creep.memory):
- * - containerId  {string|null} — ID контейнера на котором работает
- * - sourceId     {string|null} — ID источника рядом с контейнером
- * - sourceIndex  {number}      — запасной индекс источника
- * - targetRoom   {string}      — если нужно работать в другой комнате
+ * Память крипа:
+ * - sourceId      {string|null} — ID источника
+ * - sourceIndex   {number}      — индекс источника (запасной)
+ * - containerId   {string|null} — ID контейнера (если есть)
+ * - parkX, parkY  {number}      — позиция стоянки (кэш)
+ * - targetRoom    {string}      — для работы в другой комнате
  * ===================================================
  */
 
 module.exports = {
   run: function (creep) {
-    /**
-     * 1. ПЕРЕХОД В ДРУГУЮ КОМНАТУ
-     */
+    // ── 1. ПЕРЕХОД В ДРУГУЮ КОМНАТУ ──────────────────────────────────────
     if (
       creep.memory.targetRoom &&
       creep.memory.targetRoom !== creep.room.name
@@ -36,96 +33,143 @@ module.exports = {
       return;
     }
 
-    /**
-     * 2. ПОИСК И БРОНИРОВАНИЕ КОНТЕЙНЕРА
-     * Выполняется только один раз — пока containerId не найден.
-     */
-    if (!creep.memory.containerId) {
-      const takenContainerIds = new Set();
-      for (const name in Game.creeps) {
-        const c = Game.creeps[name];
-        if (
-          c.id !== creep.id &&
-          (c.memory.role === "test_miner" || c.memory.role === "miner") &&
-          c.memory.containerId
-        ) {
-          takenContainerIds.add(c.memory.containerId);
-        }
-      }
+    // ── 2. ПОЛУЧАЕМ ИСТОЧНИК ─────────────────────────────────────────────
+    const sourceIds = creep.room.memory.sources || [];
+    const sourceId =
+      creep.memory.sourceId || sourceIds[creep.memory.sourceIndex];
+    if (!sourceId) return;
 
-      const sourceIds = creep.room.memory.sources || [];
-      const sources =
-        sourceIds.length > 0
-          ? sourceIds.map(id => Game.getObjectById(id)).filter(Boolean)
-          : creep.room.find(FIND_SOURCES);
+    const source = Game.getObjectById(sourceId);
+    if (!source) return;
 
-      for (const source of sources) {
-        const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
-          filter: s => s.structureType === STRUCTURE_CONTAINER,
+    if (!creep.memory.sourceId) creep.memory.sourceId = sourceId;
+
+    // ── 3. ОПРЕДЕЛЯЕМ ПОЗИЦИЮ СТОЯНКИ ───────────────────────────────────
+    if (creep.memory.parkX === undefined) {
+      // Сначала ищем свободный контейнер рядом с источником
+      const containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: s => s.structureType === STRUCTURE_CONTAINER,
+      });
+
+      const takenIds = new Set(
+        Object.values(Game.creeps)
+          .filter(
+            c =>
+              c.id !== creep.id &&
+              c.memory.role === creep.memory.role &&
+              c.memory.containerId,
+          )
+          .map(c => c.memory.containerId),
+      );
+
+      const freeContainer = containers.find(c => !takenIds.has(c.id));
+
+      if (freeContainer) {
+        // Есть свободный контейнер — стоим на нём
+        creep.memory.containerId = freeContainer.id;
+        creep.memory.parkX = freeContainer.pos.x;
+        creep.memory.parkY = freeContainer.pos.y;
+      } else {
+        // Контейнера нет — ищем позицию смежную и с источником и с линком
+        const nearLinks = source.pos.findInRange(FIND_MY_STRUCTURES, 2, {
+          filter: s => s.structureType === STRUCTURE_LINK,
         });
 
-        for (const container of containers) {
-          if (!takenContainerIds.has(container.id)) {
-            creep.memory.containerId = container.id;
-            // Сразу кэшируем sourceId — больше не нужен findInRange каждый тик
-            creep.memory.sourceId = source.id;
-            break;
+        let bestPos = null;
+        const terrain = creep.room.getTerrain();
+
+        if (nearLinks.length > 0) {
+          const link = nearLinks[0];
+
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              if (dx === 0 && dy === 0) continue;
+
+              const x = source.pos.x + dx;
+              const y = source.pos.y + dy;
+
+              // Стена — пропускаем
+              if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+              // Клетка не должна совпадать с позицией линка — на линк нельзя встать
+              if (x === link.pos.x && y === link.pos.y) continue;
+
+              // Клетка должна быть смежной с линком (расстояние Чебышева ≤ 1)
+              const distToLink = Math.max(
+                Math.abs(x - link.pos.x),
+                Math.abs(y - link.pos.y),
+              );
+
+              if (distToLink <= 1) {
+                bestPos = { x, y };
+                break;
+              }
+            }
+            if (bestPos) break;
           }
         }
 
-        if (creep.memory.containerId) break;
+        if (bestPos) {
+          creep.memory.parkX = bestPos.x;
+          creep.memory.parkY = bestPos.y;
+        } else {
+          // Линка нет — просто ближайшая свободная клетка у источника
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              if (dx === 0 && dy === 0) continue;
+              const x = source.pos.x + dx;
+              const y = source.pos.y + dy;
+              if (terrain.get(x, y) !== TERRAIN_MASK_WALL) {
+                creep.memory.parkX = x;
+                creep.memory.parkY = y;
+                break;
+              }
+            }
+            if (creep.memory.parkX !== undefined) break;
+          }
+        }
       }
     }
 
-    /**
-     * 3. ОСНОВНАЯ ЛОГИКА РАБОТЫ
-     */
-    if (creep.memory.containerId) {
-      const container = Game.getObjectById(creep.memory.containerId);
+    // ── 4. КОНТЕЙНЕР РАЗРУШЕН — сбрасываем кэш ──────────────────────────
+    if (
+      creep.memory.containerId &&
+      !Game.getObjectById(creep.memory.containerId)
+    ) {
+      delete creep.memory.containerId;
+      delete creep.memory.parkX;
+      delete creep.memory.parkY;
+      return;
+    }
 
-      if (!container) {
-        // Контейнер разрушен — сбрасываем оба кэша
-        delete creep.memory.containerId;
-        delete creep.memory.sourceId;
-        return;
-      }
+    // ── 5. ИДЁМ НА ПОЗИЦИЮ СТОЯНКИ ──────────────────────────────────────
+    if (creep.memory.parkX === undefined) return;
 
-      if (!creep.pos.isEqualTo(container.pos)) {
-        creep.moveTo(container, {
-          reusePath: 10,
-          visualizePathStyle: { stroke: "#ffaa00" },
-        });
-      } else {
-        // Берём source из кэша — никаких find() каждый тик
-        const source = Game.getObjectById(creep.memory.sourceId);
-        if (source) {
-          creep.harvest(source);
-        } else {
-          // source исчез (редко) — сбрасываем кэш
-          delete creep.memory.sourceId;
-        }
-      }
-    } else {
-      /**
-       * 4. ЗАПАСНОЙ ВАРИАНТ — контейнеров нет или все заняты
-       */
-      const sourceIds = creep.room.memory.sources || [];
-      const sources =
-        sourceIds.length > 0
-          ? sourceIds.map(id => Game.getObjectById(id)).filter(Boolean)
-          : creep.room.find(FIND_SOURCES);
+    const parkPos = new RoomPosition(
+      creep.memory.parkX,
+      creep.memory.parkY,
+      creep.room.name,
+    );
 
-      const mySource =
-        sources[creep.memory.sourceIndex] ||
-        creep.pos.findClosestByRange(sources);
+    if (!creep.pos.isEqualTo(parkPos)) {
+      creep.moveTo(parkPos, {
+        reusePath: 10,
+        visualizePathStyle: { stroke: "#ffaa00" },
+      });
+      return;
+    }
 
-      if (mySource) {
-        if (creep.harvest(mySource) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(mySource, {
-            reusePath: 10,
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
-        }
+    // ── 6. СТОИМ НА МЕСТЕ — КОПАЕМ И СКИДЫВАЕМ В ЛИНК ──────────────────
+    creep.harvest(source);
+
+    if (creep.store[RESOURCE_ENERGY] > 0) {
+      const nearLinks = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
+        filter: s =>
+          s.structureType === STRUCTURE_LINK &&
+          s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      });
+      if (nearLinks.length > 0) {
+        creep.transfer(nearLinks[0], RESOURCE_ENERGY);
       }
     }
   },

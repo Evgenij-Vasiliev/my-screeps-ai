@@ -228,7 +228,7 @@ const roomManager = {
     const localRolesConfig = [
       { role: "test_harvester", count: 1 },
       { role: "test_miner", count: 2 },
-      { role: "test_hauler", count: 2 },
+      { role: "test_hauler", count: 0 },
       { role: "test_towerSupplier", count: 1 },
       { role: "test_builder", count: hasSites ? 2 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
