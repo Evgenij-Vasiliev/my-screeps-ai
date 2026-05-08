@@ -21,7 +21,7 @@
  */
 
 const STORAGE_ENERGY_BUFFER = 100000;
-const TERMINAL_ENERGY_MIN = 2000; // минимум чтобы терминал вообще не опустел
+const TERMINAL_ENERGY_MIN = 50000; // минимум чтобы терминал вообще не опустел
 const CHECK_INTERVAL = 50;
 const MIN_DEAL_AMOUNT = 100;
 
@@ -54,13 +54,14 @@ const terminalManager = {
     const toSell = [];
 
     // Минералы: всё что есть в терминале кроме энергии
-    for (const resource in terminal.store) {
-      if (resource === RESOURCE_ENERGY) continue;
-      const amount = terminal.store[resource];
-      if (amount >= MIN_DEAL_AMOUNT) {
-        toSell.push({ resourceType: resource, amount });
-      }
-    }
+
+    // for (const resource in terminal.store) {
+    //   if (resource === RESOURCE_ENERGY) continue;
+    //   const amount = terminal.store[resource];
+    //   if (amount >= MIN_DEAL_AMOUNT) {
+    //     toSell.push({ resourceType: resource, amount });
+    //   }
+    // }
 
     // Энергия: только излишек если Storage переполнен
     const storageEnergy = storage.store[RESOURCE_ENERGY] || 0;

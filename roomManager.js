@@ -5,17 +5,17 @@
  * Запускается каждый тик для каждой комнаты под контролем.
  *
  * ОПТИМИЗАЦИИ:
- * - energyTargets: каждый тик (меняется быстро — спавн/расширения берут энергию)
- * - hasSites, needsRepair: раз в 100 тиков (медленно меняются)
- * - towers: раз в 50 тиков (башни не появляются часто)
- * - sources, sourceContainers, mineralId: один раз навсегда (в memory)
- * - allCreeps: один цикл for...in вместо _.groupBy + find
- * - roomCreeps: фильтр из уже собранного массива (не отдельный find)
+ * - energyTargets: каждый тик (меняется быстро)
+ * - hasSites, needsRepair: раз в 100 тиков
+ * - towers: раз в 50 тиков
+ * - sources, sourceContainers, mineralId: один раз навсегда
+ * - allCreeps: один цикл for...in
+ * - roomCreeps: фильтр из уже собранного массива
  *
- * ИСПРАВЛЕНО: привязка хаулеров к источникам
- * - Хаулер №0 → источник 0, Хаулер №1 → источник 1
- * - Определяется жёстко по количеству уже живых хаулеров в комнате
- * - Больше не зависит от балансировщика sourceUsage (который не успевал обновляться)
+ * ИСПРАВЛЕНО v2:
+ * - FIXED_SOURCE_ROLES заменён на Set — поиск O(1) вместо O(n)
+ * - remoteRoles заменён на Set
+ * - убран лишний require('./factory') внутри функции
  * ===================================================
  */
 
@@ -27,37 +27,38 @@ const linkManager = require("./role.linkManager");
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
 
 // ── ЗАБЛАГОВРЕМЕННЫЙ СПАВН ─────────────────────────────────────────────────
-// Роли из этого объекта будут спавниться заранее.
-// travelBuffer — запас тиков на дорогу к источнику.
 const EARLY_SPAWN_ROLES = {
   test_miner: { travelBuffer: 10 },
   test_remoteMiner: { travelBuffer: 80 },
 };
 
+// ОПТИМИЗАЦИЯ: Set вместо массива — проверка includes() за O(1)
+const FIXED_SOURCE_ROLES = new Set([
+  "test_hauler",
+  "test_miner",
+  "test_harvester",
+]);
+const REMOTE_ROLES = new Set([
+  "test_remoteMiner",
+  "test_remoteHauler",
+  "test_reserver",
+]);
+
 /**
- * Считает тело крипа по его роли из factory.blueprints,
- * чтобы узнать время спавна = количество частей * 3 тика.
+ * Считает время спавна крипа по его роли.
  */
 function getEarlySpawnThreshold(role, travelBuffer, spawn) {
   try {
-    const factory = require("./factory");
+    // ОПТИМИЗАЦИЯ: убран лишний require внутри функции
     const blueprint = factory.blueprints[role]
       ? factory.blueprints[role](spawn, 0, {})
       : null;
-
     if (blueprint && blueprint.body) {
-      const spawnTime = blueprint.body.length * 3;
-      return spawnTime + travelBuffer;
+      return blueprint.body.length * 3 + travelBuffer;
     }
   } catch (e) {}
   return 50 + travelBuffer;
 }
-
-// ── РОЛИ С ЖЁСТКОЙ ПРИВЯЗКОЙ К ИСТОЧНИКУ ─────────────────────────────────
-// Для этих ролей sourceIndex назначается строго по порядку:
-// первый спавнящийся → источник 0, второй → источник 1 и т.д.
-// Это решает проблему когда оба крипа выбирают один источник.
-const FIXED_SOURCE_ROLES = ["test_hauler", "test_miner", "test_harvester"];
 
 const roomManager = {
   run: function (room) {
@@ -102,11 +103,7 @@ const roomManager = {
     room._sources.forEach((source, index) => {
       let container = null;
       const containerId = room.memory.sourceContainers[index];
-
-      if (containerId) {
-        container = Game.getObjectById(containerId);
-      }
-
+      if (containerId) container = Game.getObjectById(containerId);
       if (!container) {
         container =
           source.pos.findInRange(FIND_STRUCTURES, 2, {
@@ -114,7 +111,6 @@ const roomManager = {
           })[0] || null;
         room.memory.sourceContainers[index] = container ? container.id : null;
       }
-
       room._sourceContainers[index] = container;
     });
 
@@ -126,7 +122,6 @@ const roomManager = {
     const mineral = room.memory.mineralId
       ? Game.getObjectById(room.memory.mineralId)
       : null;
-
     const mineralAvailable = mineral && mineral.mineralAmount > 0;
 
     // ── 6. СТРОЙКИ — раз в 100 тиков ──────────────────────────────────────
@@ -167,10 +162,7 @@ const roomManager = {
     const roomCreeps = [];
     let attackersHere = 0;
 
-    // ── ЖЁСТКОЕ РАСПРЕДЕЛЕНИЕ ИСТОЧНИКОВ ─────────────────────────────────
-    // Для каждой роли с фиксированным источником считаем
-    // сколько крипов уже назначено на каждый sourceIndex.
-    // Структура: fixedSourceCount["test_hauler"] = { 0: 1, 1: 0 }
+    // ОПТИМИЗАЦИЯ: fixedSourceCount инициализируем через Set
     const fixedSourceCount = {};
     for (const role of FIXED_SOURCE_ROLES) {
       fixedSourceCount[role] = {};
@@ -197,9 +189,9 @@ const roomManager = {
           localGroups[role] = (localGroups[role] || 0) + 1;
           roomCreeps.push(creep);
 
-          // Считаем занятые sourceIndex для ролей с жёсткой привязкой
+          // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
           if (
-            FIXED_SOURCE_ROLES.includes(role) &&
+            FIXED_SOURCE_ROLES.has(role) &&
             creep.memory.sourceIndex !== undefined &&
             fixedSourceCount[role] !== undefined &&
             fixedSourceCount[role][creep.memory.sourceIndex] !== undefined
@@ -222,8 +214,8 @@ const roomManager = {
     const needsUpgrader =
       room.controller && room.controller.ticksToDowngrade < 100000 ? 1 : 0;
 
-    const attackerCount =
-      room.name === "E35S37" || room.name === "E36S38" ? 0 : 1;
+    const attackerCount = 1;
+    // room.name === "E35S37" || room.name === "E36S38" ? 0 : 1;
 
     const localRolesConfig = [
       { role: "test_harvester", count: 1 },
@@ -275,18 +267,13 @@ const roomManager = {
         if (currentCount < roleData.count) {
           let bestIndex;
 
-          if (FIXED_SOURCE_ROLES.includes(roleData.role)) {
-            // ── ЖЁСТКАЯ ПРИВЯЗКА ─────────────────────────────────────────
-            // Ищем источник с наименьшим количеством назначенных крипов
-            // этой роли. Если оба пусты — берём 0, потом 1.
-            // Это гарантирует что хаулеры/майнеры не дублируют источник.
+          if (FIXED_SOURCE_ROLES.has(roleData.role)) {
+            // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
             const counts = fixedSourceCount[roleData.role] || {};
             bestIndex = Number(
               Object.entries(counts).sort((a, b) => a[1] - b[1])[0][0],
             );
           } else {
-            // Для остальных ролей — старая балансировка по sourceUsage
-            // (они не привязаны к конкретному источнику)
             const sourceUsage = {};
             room._sources.forEach((_, i) => {
               sourceUsage[i] = 0;
@@ -304,13 +291,8 @@ const roomManager = {
             );
           }
 
-          // Для удалённых ролей назначаем свободную комнату
-          const remoteRoles = [
-            "test_remoteMiner",
-            "test_remoteHauler",
-            "test_reserver",
-          ];
-          if (remoteRoles.includes(roleData.role)) {
+          // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
+          if (REMOTE_ROLES.has(roleData.role)) {
             const taken = Object.values(Game.creeps)
               .filter(
                 c =>
@@ -318,7 +300,6 @@ const roomManager = {
                   (c.memory.target || c.memory.targetRoom),
               )
               .map(c => c.memory.target || c.memory.targetRoom);
-
             roleData.targetRoom =
               REMOTE_ROOMS.find(r => !taken.includes(r)) || REMOTE_ROOMS[0];
           }
@@ -332,8 +313,7 @@ const roomManager = {
     // ── Продажа ресурсов ───────────────────────────────────────────────────
     terminalManager.run(room);
 
-    // --ЛИНКИ--------------------------------------------
-
+    // ── ЛИНКИ ─────────────────────────────────────────────────────────────
     linkManager.run(room);
 
     // ── 12. БАШНИ ─────────────────────────────────────────────────────────
