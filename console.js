@@ -69,6 +69,12 @@ const cmd = {
     console.log("  — показать память комнаты");
     console.log('require("console").resetMemory("E37S37")');
     console.log("  — сбросить кэш комнаты");
+    console.log('require("console").buyPrices("Z")');
+    console.log("  — цены продавцов для покупки ресурса");
+    console.log('require("console").buy("Z", 5000, "orderId", "E35S37")');
+    console.log("  — план покупки ресурса");
+    console.log('require("console").buy("Z", 5000, "orderId", "E35S37", true)');
+    console.log("  — купить ресурс");
     console.log("=========================================");
   },
 
@@ -286,10 +292,9 @@ const cmd = {
    * prices — показать цены покупки на рынке
    */
   prices(resource) {
-    const orders = Game.market.getAllOrders({
-      type: ORDER_BUY,
-      resourceType: resource,
-    });
+    const orders = Game.market
+      .getAllOrders({ type: ORDER_SELL, resourceType: resource })
+      .filter(o => o.remainingAmount > 0);
     if (!orders || orders.length === 0) {
       console.log(`[prices] Нет ордеров на покупку ${resource}`);
       return;
@@ -382,6 +387,104 @@ const cmd = {
     });
     console.log(
       result === OK ? `[sell] ✅ Ордер создан!` : `[sell] ❌ Ошибка: ${result}`,
+    );
+  },
+
+  /**
+   * buyPrices — показать цены продажи на рынке (чтобы купить ресурс)
+   * Использование: require("console").buyPrices("Z")
+   */
+  buyPrices(resource) {
+    const orders = Game.market.getAllOrders({
+      type: ORDER_SELL,
+      resourceType: resource,
+    });
+    if (!orders || orders.length === 0) {
+      console.log(`[buyPrices] Нет ордеров на продажу ${resource}`);
+      return;
+    }
+    orders.sort((a, b) => a.price - b.price);
+    const top = orders.slice(0, 10);
+    console.log(`[buyPrices] Топ-10 ордеров на ПРОДАЖУ ${resource}:`);
+    console.log(`  Цена   | Количество      | Комната`);
+    top.forEach(o => {
+      console.log(
+        `  ${String(o.price.toFixed(3)).padEnd(7)}| ${String(
+          o.remainingAmount.toLocaleString(),
+        ).padEnd(16)}| ${o.roomName || "межсерверный"}`,
+      );
+    });
+    const best = top[0];
+    console.log(`[buyPrices] Лучшая цена покупки: ${best.price.toFixed(3)}`);
+    console.log(
+      `[buyPrices] Команда: require("console").buy("${resource}", КОЛИЧЕСТВО, "${best.id}", "ВАША_КОМНАТА")`,
+    );
+  },
+
+  /**
+   * buy — купить ресурс у продавца
+   * Использование:
+   *   require("console").buy("Z", 5000, "ID_ордера", "E35S37")        — план
+   *   require("console").buy("Z", 5000, "ID_ордера", "E35S37", true)  — купить
+   */
+  buy(resource, amount, orderId, roomName, confirm = false) {
+    const room = Game.rooms[roomName];
+    if (!room || !room.terminal) {
+      console.log(`[buy] Нет терминала в ${roomName}`);
+      return;
+    }
+    if (room.terminal.cooldown > 0) {
+      console.log(
+        `[buy] Терминал ${roomName} на кулдауне: ${room.terminal.cooldown} тиков`,
+      );
+      return;
+    }
+
+    const order = Game.market.getOrderById(orderId);
+    if (!order) {
+      console.log(`[buy] Ордер ${orderId} не найден`);
+      return;
+    }
+
+    const dealAmount = Math.min(amount, order.remainingAmount);
+    const txCost = Game.market.calcTransactionCost(
+      dealAmount,
+      roomName,
+      order.roomName,
+    );
+    const energyAvailable = room.terminal.store[RESOURCE_ENERGY] || 0;
+
+    console.log(`[buy] ПЛАН ПОКУПКИ:`);
+    console.log(
+      `  Ресурс: ${resource} | Количество: ${dealAmount.toLocaleString()}`,
+    );
+    console.log(
+      `  Цена: ${order.price} | Итого: ~${(
+        dealAmount * order.price
+      ).toLocaleString()} кредитов`,
+    );
+    console.log(
+      `  Транзакция: ${txCost} энергии | В терминале: ${energyAvailable.toLocaleString()}`,
+    );
+    console.log(`  Баланс: ${Game.market.credits.toFixed(2)} кредитов`);
+
+    if (txCost > energyAvailable) {
+      console.log(`  ❌ Недостаточно энергии для транзакции`);
+      return;
+    }
+
+    if (!confirm) {
+      console.log(
+        `  Для покупки: require("console").buy("${resource}", ${amount}, "${orderId}", "${roomName}", true)`,
+      );
+      return;
+    }
+
+    const result = Game.market.deal(orderId, dealAmount, roomName);
+    console.log(
+      result === OK
+        ? `[buy] ✅ Куплено ${dealAmount} ${resource}!`
+        : `[buy] ❌ Ошибка: ${result}`,
     );
   },
 

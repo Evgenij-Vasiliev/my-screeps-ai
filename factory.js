@@ -70,6 +70,11 @@ const factory = {
       memory: {},
     }),
 
+    test_labWorker: () => ({
+      body: prepareBody({ carry: 2, move: 2 }),
+      memory: {},
+    }),
+
     test_towerSupplier: () => ({
       body: prepareBody({ carry: 4, move: 4 }),
       memory: {},
