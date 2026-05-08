@@ -25,18 +25,18 @@ const factory = {
     test_miner: (spawn, bestIndex) => {
       const sourceId = (spawn.room.memory.sources || [])[bestIndex] || null;
       return {
-        body: prepareBody({ work: 5, carry: 1, move: 2 }),
+        body: prepareBody({ work: 5, carry: 1, move: 4 }),
         memory: { sourceId },
       };
     },
 
-    test_hauler: () => ({
-      body: prepareBody({ carry: 12, move: 12 }),
-      memory: {},
-    }),
+    // test_hauler: () => ({
+    //   body: prepareBody({ carry: 12, move: 12 }),
+    //   memory: {},
+    // }),
 
     test_harvester: () => ({
-      body: prepareBody({ work: 2, carry: 4, move: 6 }),
+      body: prepareBody({ work: 1, carry: 2, move: 3 }),
       memory: {},
     }),
 
@@ -71,12 +71,12 @@ const factory = {
     }),
 
     test_towerSupplier: () => ({
-      body: prepareBody({ carry: 8, move: 8 }),
+      body: prepareBody({ carry: 4, move: 4 }),
       memory: {},
     }),
 
     test_remoteMiner: (spawn, bestIndex, roleData) => ({
-      body: prepareBody({ work: 6, carry: 1, move: 7 }),
+      body: prepareBody({ work: 5, carry: 1, move: 5 }),
       memory: { target: roleData.targetRoom || null },
     }),
 

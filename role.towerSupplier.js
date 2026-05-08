@@ -14,7 +14,7 @@
  * ===================================================
  */
 
-const TERMINAL_ENERGY_MIN = 20000;
+const TERMINAL_ENERGY_MIN = 100000;
 
 module.exports = {
   run: function (creep) {
