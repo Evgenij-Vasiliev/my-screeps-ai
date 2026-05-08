@@ -23,6 +23,7 @@ const factory = require("./factory");
 const roleTower = require("./role.tower");
 const terminalManager = require("./terminalManager");
 const linkManager = require("./role.linkManager");
+const labManager = require("./role.labManager");
 
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
 
@@ -222,6 +223,7 @@ const roomManager = {
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 0 },
       { role: "test_towerSupplier", count: 1 },
+      { role: "test_labWorker", count: 1 },
       { role: "test_builder", count: hasSites ? 2 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
       { role: "test_repairer", count: needsRepair ? 1 : 0 },
@@ -315,6 +317,10 @@ const roomManager = {
 
     // ── ЛИНКИ ─────────────────────────────────────────────────────────────
     linkManager.run(room);
+
+    // --ЛАБЫ--------------------------------------------
+
+    labManager.run(room);
 
     // ── 12. БАШНИ ─────────────────────────────────────────────────────────
     room._towers.forEach(tower => roleTower.run(tower));

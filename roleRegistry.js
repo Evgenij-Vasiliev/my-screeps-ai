@@ -26,6 +26,7 @@ module.exports = {
   test_repairer: require("./role.repairer"), // Чинит дороги и контейнеры
   test_towerSupplier: require("./role.towerSupplier"), // Заряжает башни энергией
   test_mineralMiner: require("./role.mineralMiner"), // Добывает минералы
+  test_labWorker: require("./role.labWorker"), // Рабочий лабораторий
 
   // --- Удалённые операции ---
   test_remoteMiner: require("./role.remoteMiner"), // Майнер в соседней комнате
