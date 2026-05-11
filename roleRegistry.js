@@ -32,6 +32,7 @@ module.exports = {
   test_remoteMiner: require("./role.remoteMiner"), // Майнер в соседней комнате
   test_remoteHauler: require("./role.remoteHauler"), // Перевозчик из соседней комнаты
   test_reserver: require("./role.reserver"), // Резервирует контроллер соседней комнаты
+  test_claimer: require("./role.claimer"),
 
   // --- Военные ---
   test_attacker: require("./role.attacker"), // Боевой крип

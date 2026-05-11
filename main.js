@@ -1,6 +1,7 @@
 const roomManager = require("./roomManager");
 const roles = require("./roleRegistry");
 const cpuMonitor = require("./cpuMonitor");
+const cmd = require("./console");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -15,8 +16,15 @@ module.exports.loop = function () {
   }
 
   /**
-   * 2. ЛОГИКА КОМНАТ
-   * for...in быстрее Object.values() — не создаёт лишний массив
+   * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
+   * Покупает Z и O если меньше 10000 в любой комнате
+   */
+  if (Game.time % 1000 === 0) {
+    cmd.autoRefill();
+  }
+
+  /**
+   * 3. ЛОГИКА КОМНАТ
    */
   cpuMonitor.trackRole("roomManager", () => {
     for (const roomName in Game.rooms) {
@@ -28,15 +36,12 @@ module.exports.loop = function () {
   });
 
   /**
-   * 3. ЛОГИКА КРИПОВ
-   * for...in быстрее Object.values() — не создаёт лишний массив
+   * 4. ЛОГИКА КРИПОВ
    */
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     const roleModule = roles[creep.memory.role];
-
-    if (!roleModule) continue; // защита от ошибок
-
+    if (!roleModule) continue;
     cpuMonitor.trackRole(creep.memory.role, () => {
       roleModule.run(creep);
     });

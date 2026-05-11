@@ -75,6 +75,10 @@ const cmd = {
     console.log("  — план покупки ресурса");
     console.log('require("console").buy("Z", 5000, "orderId", "E35S37", true)');
     console.log("  — купить ресурс");
+    console.log('require("console").autoRefill()');
+    console.log("  — купить Z и O если меньше 10000 во всех комнатах");
+    console.log('require("console").autoRefill(5000)');
+    console.log("  — задать свой порог");
     console.log("=========================================");
   },
 
@@ -486,6 +490,70 @@ const cmd = {
         ? `[buy] ✅ Куплено ${dealAmount} ${resource}!`
         : `[buy] ❌ Ошибка: ${result}`,
     );
+  },
+
+  /**
+   * autoRefill — автопокупка Z и O если меньше порога
+   * Использование: require("console").autoRefill()
+   * Запускайте вручную когда нужно пополнить запасы
+   */
+  autoRefill(threshold = 10000) {
+    const toBuy = ["Z", "O", "X", "K", "H"];
+
+    for (const roomName in Game.rooms) {
+      const room = Game.rooms[roomName];
+      if (!room.controller || !room.controller.my) continue;
+      if (!room.terminal) continue;
+      if (room.terminal.cooldown > 0) continue;
+
+      for (const resource of toBuy) {
+        const current = room.terminal.store[resource] || 0;
+        if (current >= threshold) continue;
+
+        const needed = threshold - current;
+        console.log(
+          `[autoRefill] ${roomName}: ${resource} = ${current} — нужно купить ${needed}`,
+        );
+
+        // Ищем лучший ордер
+        const orders = Game.market
+          .getAllOrders({ type: ORDER_SELL, resourceType: resource })
+          .filter(o => o.remainingAmount > 0)
+          .sort((a, b) => a.price - b.price);
+
+        if (orders.length === 0) {
+          console.log(`[autoRefill] Нет ордеров на ${resource}`);
+          continue;
+        }
+
+        const order = orders[0];
+        const dealAmount = Math.min(needed, order.remainingAmount);
+        const txCost = Game.market.calcTransactionCost(
+          dealAmount,
+          roomName,
+          order.roomName,
+        );
+        const energyAvailable = room.terminal.store[RESOURCE_ENERGY] || 0;
+
+        if (txCost > energyAvailable) {
+          console.log(
+            `[autoRefill] ${roomName}: недостаточно энергии для покупки ${resource}`,
+          );
+          continue;
+        }
+
+        const result = Game.market.deal(order.id, dealAmount, roomName);
+        if (result === OK) {
+          console.log(
+            `[autoRefill] ✅ ${roomName}: куплено ${dealAmount} ${resource} по ${order.price}`,
+          );
+        } else {
+          console.log(
+            `[autoRefill] ❌ ${roomName}: ошибка покупки ${resource}: ${result}`,
+          );
+        }
+      }
+    }
   },
 
   /**
