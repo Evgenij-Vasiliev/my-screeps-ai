@@ -1,18 +1,17 @@
 /**
  * ===================================================
- * TERMINALMANAGER.JS — Автопродажа ресурсов
+ * TERMINALMANAGER.JS — Автопродажа + Автологистика лаб
  * ===================================================
  * Запускается из roomManager каждый тик, но реально
  * работает раз в 50 тиков — каждая комната в свой тик.
  *
  * Логика продажи:
- * - Минералы: продаём всё что есть в терминале (минимум 100 единиц)
  * - Энергия: продаём излишек сверх 100,000 в Storage
  *
- * ИСПРАВЛЕНО: убран жёсткий фильтр "энергии после сделки >= TERMINAL_ENERGY_MIN"
- * Теперь единственное условие — txCost меньше чем есть энергии в терминале.
- * Если покупатель далеко и транзакция дорогая — уменьшаем объём продажи
- * до тех пор пока транзакция не станет по карману.
+ * Логика автологистики лаб:
+ * - Каждые 100 тиков проверяем запас реагентов
+ * - Если реагента < LAB_REAGENT_MIN — ищем комнату с излишком
+ * - Отправляем реагент через терминал автоматически
  *
  * Управление через консоль:
  *   Memory.tradeEnabled = false  — остановить торговлю
@@ -20,14 +19,135 @@
  * ===================================================
  */
 
-const STORAGE_ENERGY_BUFFER = 100000;
-const TERMINAL_ENERGY_MIN = 50000; // минимум чтобы терминал вообще не опустел
+const STORAGE_ENERGY_BUFFER = 50000;
+const TERMINAL_ENERGY_MIN = 20000;
 const CHECK_INTERVAL = 50;
 const MIN_DEAL_AMOUNT = 100;
+
+// Минимальный запас реагента в терминале комнаты
+// Если меньше — везём из другой комнаты
+const LAB_REAGENT_MIN = 3000;
+
+// Сколько везём за один раз
+const LAB_REAGENT_SEND = 5000;
+
+// Минимальный излишек в комнате-доноре чтобы она могла отдать
+const LAB_REAGENT_DONOR_MIN = 6000;
 
 let roomOffsets = {};
 
 const terminalManager = {
+  /**
+   * ── АВТОЛОГИСТИКА РЕАГЕНТОВ ──────────────────────────────────────────────
+   * Запускается раз в 100 тиков для каждой комнаты.
+   * Проверяет запас реагентов лаб и везёт из других комнат если мало.
+   */
+  runLabSupply: function (room) {
+    // Проверяем только раз в 100 тиков
+    if (Game.time % 100 !== 0) return;
+
+    const config = room.memory.labs;
+    if (!config) return;
+
+    const terminal = room.terminal;
+    if (!terminal) return;
+    if (terminal.cooldown > 0) return;
+
+    // Проверяем энергию для транзакции
+    const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
+    if (availableEnergy < TERMINAL_ENERGY_MIN) return;
+
+    // Проверяем оба реагента
+    const reagents = [
+      { resource: config.reagent1 },
+      { resource: config.reagent2 },
+    ];
+
+    for (const { resource } of reagents) {
+      if (!resource) continue;
+
+      // Сколько реагента есть в этой комнате (терминал + storage)
+      const inTerminal = terminal.store[resource] || 0;
+      const inStorage = room.storage ? room.storage.store[resource] || 0 : 0;
+      const total = inTerminal + inStorage;
+
+      // Хватает — пропускаем
+      if (total >= LAB_REAGENT_MIN) continue;
+
+      const needed = LAB_REAGENT_SEND;
+
+      console.log(
+        `[LabSupply ${room.name}] Мало ${resource}: ${total} — ищем донора`,
+      );
+
+      // Ищем комнату с излишком этого реагента
+      let donorRoom = null;
+      let donorAmount = 0;
+
+      for (const roomName in Game.rooms) {
+        // Не берём из самой себя
+        if (roomName === room.name) continue;
+
+        const donor = Game.rooms[roomName];
+        if (!donor.controller || !donor.controller.my) continue;
+        if (!donor.terminal) continue;
+        if (donor.terminal.cooldown > 0) continue;
+
+        // Считаем запас у донора
+        const donorTerminal = donor.terminal.store[resource] || 0;
+        const donorStorage = donor.storage
+          ? donor.storage.store[resource] || 0
+          : 0;
+        const donorTotal = donorTerminal + donorStorage;
+
+        // Донор должен иметь излишек сверх минимума
+        if (donorTotal > LAB_REAGENT_DONOR_MIN) {
+          donorRoom = donor;
+          donorAmount = Math.min(needed, donorTotal - LAB_REAGENT_DONOR_MIN);
+          break;
+        }
+      }
+
+      if (!donorRoom) {
+        console.log(
+          `[LabSupply ${room.name}] Нет донора для ${resource} — нужно купить`,
+        );
+        continue;
+      }
+
+      // Проверяем стоимость транзакции
+      const txCost = Game.market.calcTransactionCost(
+        donorAmount,
+        donorRoom.name,
+        room.name,
+      );
+
+      const donorEnergy = donorRoom.terminal.store[RESOURCE_ENERGY] || 0;
+      if (txCost > donorEnergy - TERMINAL_ENERGY_MIN) {
+        console.log(
+          `[LabSupply ${room.name}] У донора ${donorRoom.name} мало энергии для транзакции`,
+        );
+        continue;
+      }
+
+      // Отправляем реагент
+      const result = donorRoom.terminal.send(resource, donorAmount, room.name);
+      if (result === OK) {
+        console.log(
+          `[LabSupply] ✅ ${donorRoom.name} → ${room.name}: ${donorAmount} ${resource}`,
+        );
+      } else {
+        console.log(`[LabSupply] ❌ Ошибка отправки ${resource}: ${result}`);
+      }
+
+      // Одна отправка за тик — выходим
+      return;
+    }
+  },
+
+  /**
+   * ── ОСНОВНОЙ ЗАПУСК ───────────────────────────────────────────────────────
+   */
   run: function (room) {
     if (Memory.tradeEnabled === false) return;
 
@@ -37,6 +157,9 @@ const terminalManager = {
       roomOffsets[room.name] = count * step;
     }
 
+    // ── АВТОЛОГИСТИКА ЛАБ ─────────────────────────────────────────────────
+    this.runLabSupply(room);
+
     if ((Game.time + roomOffsets[room.name]) % CHECK_INTERVAL !== 0) return;
 
     const terminal = room.terminal;
@@ -45,25 +168,12 @@ const terminalManager = {
     if (!terminal || !storage) return;
     if (terminal.cooldown > 0) return;
 
-    // Нужна хоть какая-то энергия для транзакции
     const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (availableEnergy < TERMINAL_ENERGY_MIN) return;
 
-    // ── СОБИРАЕМ СПИСОК РЕСУРСОВ ДЛЯ ПРОДАЖИ ─────────────────────────────
-
+    // ── ПРОДАЖА ЭНЕРГИИ ───────────────────────────────────────────────────
     const toSell = [];
 
-    // Минералы: всё что есть в терминале кроме энергии
-
-    // for (const resource in terminal.store) {
-    //   if (resource === RESOURCE_ENERGY) continue;
-    //   const amount = terminal.store[resource];
-    //   if (amount >= MIN_DEAL_AMOUNT) {
-    //     toSell.push({ resourceType: resource, amount });
-    //   }
-    // }
-
-    // Энергия: только излишек если Storage переполнен
     const storageEnergy = storage.store[RESOURCE_ENERGY] || 0;
     const terminalEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (storageEnergy > STORAGE_ENERGY_BUFFER) {
@@ -75,7 +185,6 @@ const terminalManager = {
 
     if (toSell.length === 0) return;
 
-    // ── ПРОДАЁМ ПЕРВЫЙ РЕСУРС ИЗ СПИСКА ──────────────────────────────────
     const { resourceType, amount } = toSell[0];
 
     const orders = Game.market
@@ -90,13 +199,9 @@ const terminalManager = {
       return;
     }
 
-    // Перебираем топ-10 ордеров по цене.
-    // Для каждого уменьшаем объём продажи пока транзакция не влезет в бюджет.
     for (const order of orders.slice(0, 10)) {
       let dealAmount = Math.min(amount, order.remainingAmount);
 
-      // Уменьшаем объём пока транзакция дороже доступной энергии.
-      // Минимум — MIN_DEAL_AMOUNT (100 единиц).
       while (dealAmount >= MIN_DEAL_AMOUNT) {
         const txCost = Game.market.calcTransactionCost(
           dealAmount,
@@ -105,7 +210,6 @@ const terminalManager = {
         );
 
         if (txCost <= availableEnergy - TERMINAL_ENERGY_MIN) {
-          // Энергии хватает — совершаем сделку
           const result = Game.market.deal(order.id, dealAmount, room.name);
           if (result === OK) {
             console.log(
@@ -118,13 +222,11 @@ const terminalManager = {
               `[Terminal ${room.name}] Ошибка сделки ${resourceType}: ${result}`,
             );
           }
-          return; // одна сделка за тик — выходим
+          return;
         }
 
-        // Не хватает — уменьшаем объём вдвое и пробуем снова
         dealAmount = Math.floor(dealAmount / 2);
       }
-      // Этот ордер слишком дорогой даже для минимального объёма — пробуем следующий
     }
 
     console.log(
