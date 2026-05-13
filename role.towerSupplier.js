@@ -3,14 +3,14 @@
  * ROLE.TOWERSUPPLIER.JS — Заправщик башен и разгрузчик линка
  * ===================================================
  *
- * Приоритеты:
- * 1. Башни ниже 30% → заряжаем башни (срочно)
- * 2. Линк у Storage имеет энергию → забираем в Storage
+ * Приоритеты (исправлено):
+ * 1. Линк у Storage имеет энергию → забираем в Storage (ПЕРВЫЙ ПРИОРИТЕТ)
+ * 2. Башни ниже 50% → берём из Storage → заправляем башни
  * 3. Терминал ниже TERMINAL_ENERGY_MIN → заливаем энергию в терминал
  * 4. Всё в порядке → ждём
  *
  * Настройка линка через память комнаты:
- *   Memory.rooms['E35S37'].links.storage = 'ID линка у Storage'
+ *   Memory.rooms['E37S38'].links.storage = 'ID линка у Storage'
  * ===================================================
  */
 
@@ -30,7 +30,7 @@ module.exports = {
       ? Game.getObjectById(linksConfig.storage)
       : null;
 
-    // Переключение режима
+    // Переключение режима: пустой → собираем, полный → доставляем
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
       creep.memory.task = null;
@@ -40,31 +40,11 @@ module.exports = {
     }
 
     if (!creep.memory.working) {
-      // === СБОР: определяем задачу ===
+      // === СБОР: определяем откуда брать ===
 
-      // Приоритет 1: башня ниже 30%
-      const urgentTower = towers.find(
-        t =>
-          t.store[RESOURCE_ENERGY] < t.store.getCapacity(RESOURCE_ENERGY) * 0.5,
-      );
-
-      if (urgentTower) {
-        if (!storage || storage.store[RESOURCE_ENERGY] === 0) {
-          creep.say("⏳ нет энергии");
-          return;
-        }
-        creep.memory.task = "towers";
-        const result = creep.withdraw(storage, RESOURCE_ENERGY);
-        if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(storage, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#ffff00" },
-          });
-        }
-        return;
-      }
-
-      // Приоритет 2: линк у Storage имеет энергию → разгружаем в Storage
+      // Приоритет 1: линк у Storage имеет энергию → разгружаем в Storage
+      // Это главный приоритет — майнеры кладут энергию в линк,
+      // крип должен немедленно её забрать чтобы линк освободился
       if (
         storageLink &&
         storageLink.store[RESOURCE_ENERGY] > 0 &&
@@ -82,7 +62,30 @@ module.exports = {
         return;
       }
 
-      // Приоритет 3: терминал ниже минимума
+      // Приоритет 2: башня ниже 50% → берём из Storage
+      const urgentTower = towers.find(
+        t =>
+          t.store[RESOURCE_ENERGY] < t.store.getCapacity(RESOURCE_ENERGY) * 0.5,
+      );
+
+      if (urgentTower) {
+        // Нет энергии в Storage — ждём пока линк не разгрузится
+        if (!storage || storage.store[RESOURCE_ENERGY] === 0) {
+          creep.say("⏳ нет энергии");
+          return;
+        }
+        creep.memory.task = "towers";
+        const result = creep.withdraw(storage, RESOURCE_ENERGY);
+        if (result === ERR_NOT_IN_RANGE) {
+          creep.moveTo(storage, {
+            reusePath: 5,
+            visualizePathStyle: { stroke: "#ffff00" },
+          });
+        }
+        return;
+      }
+
+      // Приоритет 3: терминал ниже минимума → берём из Storage
       if (
         terminal &&
         terminal.store[RESOURCE_ENERGY] < TERMINAL_ENERGY_MIN &&
@@ -105,14 +108,13 @@ module.exports = {
         return;
       }
 
-      // Нечего делать
-
+      // Нечего делать — ждём
       // creep.say("⏳ всё OK");
     } else {
       // === ДОСТАВКА: везём к цели ===
 
+      // Разгружаем линк → кладём в Storage
       if (creep.memory.task === "unload_link") {
-        // Разгружаем линк в Storage
         if (!storage) return;
         const result = creep.transfer(storage, RESOURCE_ENERGY);
         if (result === ERR_NOT_IN_RANGE) {
@@ -124,8 +126,8 @@ module.exports = {
         return;
       }
 
+      // Везём в терминал
       if (creep.memory.task === "terminal" && terminal) {
-        // Везём в терминал
         const result = creep.transfer(terminal, RESOURCE_ENERGY);
         if (result === ERR_NOT_IN_RANGE) {
           creep.moveTo(terminal, {

@@ -12,10 +12,10 @@
  * - allCreeps: один цикл for...in
  * - roomCreeps: фильтр из уже собранного массива
  *
- * ИСПРАВЛЕНО v2:
- * - FIXED_SOURCE_ROLES заменён на Set — поиск O(1) вместо O(n)
- * - remoteRoles заменён на Set
- * - убран лишний require('./factory') внутри функции
+ * ИСПРАВЛЕНО v3:
+ * - Умный спавн labWorker — один крип на каждый блок лаб
+ * - Каждый labWorker получает assignedLab в памяти
+ * - Количество labWorker определяется автоматически по памяти комнаты
  * ===================================================
  */
 
@@ -50,7 +50,6 @@ const REMOTE_ROLES = new Set([
  */
 function getEarlySpawnThreshold(role, travelBuffer, spawn) {
   try {
-    // ОПТИМИЗАЦИЯ: убран лишний require внутри функции
     const blueprint = factory.blueprints[role]
       ? factory.blueprints[role](spawn, 0, {})
       : null;
@@ -59,6 +58,22 @@ function getEarlySpawnThreshold(role, travelBuffer, spawn) {
     }
   } catch (e) {}
   return 50 + travelBuffer;
+}
+
+/**
+ * Возвращает список ключей активных блоков лаб в комнате.
+ * Например: ['labs', 'labs2', 'labs3']
+ * Используется для умного спавна labWorker.
+ */
+function getLabKeys(room) {
+  const keys = [];
+  const mem = room.memory;
+  if (mem.labs) keys.push("labs");
+  if (mem.labs2) keys.push("labs2");
+  if (mem.labs3) keys.push("labs3");
+  if (mem.labs4) keys.push("labs4");
+  if (mem.labs5) keys.push("labs5");
+  return keys;
 }
 
 const roomManager = {
@@ -163,6 +178,10 @@ const roomManager = {
     const roomCreeps = [];
     let attackersHere = 0;
 
+    // Считаем labWorker по assignedLab — чтобы знать какой блок уже покрыт
+    // Ключ: assignedLab ('labs', 'labs2'...), значение: количество крипов
+    const labWorkersByBlock = {};
+
     // ОПТИМИЗАЦИЯ: fixedSourceCount инициализируем через Set
     const fixedSourceCount = {};
     for (const role of FIXED_SOURCE_ROLES) {
@@ -190,6 +209,12 @@ const roomManager = {
           localGroups[role] = (localGroups[role] || 0) + 1;
           roomCreeps.push(creep);
 
+          // Считаем labWorker по блокам
+          if (role === "test_labWorker" && creep.memory.assignedLab) {
+            labWorkersByBlock[creep.memory.assignedLab] =
+              (labWorkersByBlock[creep.memory.assignedLab] || 0) + 1;
+          }
+
           // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
           if (
             FIXED_SOURCE_ROLES.has(role) &&
@@ -216,14 +241,24 @@ const roomManager = {
       room.controller && room.controller.ticksToDowngrade < 100000 ? 1 : 0;
 
     const attackerCount = 1;
-    // room.name === "E35S37" || room.name === "E36S38" ? 0 : 1;
+
+    // Считаем сколько не-энергетических ресурсов в терминале
+    const terminalNonEnergy = room.terminal
+      ? Object.entries(room.terminal.store)
+          .filter(([r]) => r !== RESOURCE_ENERGY)
+          .reduce((sum, [, amt]) => sum + amt, 0)
+      : 0;
 
     const localRolesConfig = [
       { role: "test_harvester", count: 1 },
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 0 },
       { role: "test_towerSupplier", count: 1 },
-      { role: "test_labWorker", count: 1 },
+      // Спавним разгрузчика если в терминале накопилось более 5000 минералов
+      {
+        role: "test_terminalUnloader",
+        count: terminalNonEnergy > 5000 ? 1 : 0,
+      },
       { role: "test_builder", count: hasSites ? 2 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
       { role: "test_repairer", count: needsRepair ? 1 : 0 },
@@ -245,6 +280,10 @@ const roomManager = {
       globalRolesConfig.push({ role: "test_remoteHauler", count: 2 });
     }
 
+    // ── 10. СПАВН LABWORKER — умный, по блокам ────────────────────────────
+    // Определяем сколько блоков лаб настроено в этой комнате
+    const labKeys = getLabKeys(room);
+
     // ── 11. СПАВН ─────────────────────────────────────────────────────────
     const spawns = room.find(FIND_MY_SPAWNS, { filter: s => !s.spawning });
     const spawn = spawns[0];
@@ -255,6 +294,29 @@ const roomManager = {
         if (result === OK) {
           room._towers.forEach(tower => roleTower.run(tower));
           return;
+        }
+      }
+
+      // Спавним labWorker для каждого блока лаб которому не хватает крипа
+      for (const labKey of labKeys) {
+        const hasWorker = (labWorkersByBlock[labKey] || 0) >= 1;
+        if (!hasWorker) {
+          // Спавним крипа с привязкой к конкретному блоку
+          const result = spawn.spawnCreep(
+            [CARRY, CARRY, MOVE, MOVE],
+            `test_labWorker_${Game.time}`,
+            {
+              memory: {
+                role: "test_labWorker",
+                assignedLab: labKey,
+                working: false,
+              },
+            },
+          );
+          if (result === OK) {
+            // Спавн занят — выходим из цикла спавна
+            break;
+          }
         }
       }
 
@@ -270,7 +332,6 @@ const roomManager = {
           let bestIndex;
 
           if (FIXED_SOURCE_ROLES.has(roleData.role)) {
-            // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
             const counts = fixedSourceCount[roleData.role] || {};
             bestIndex = Number(
               Object.entries(counts).sort((a, b) => a[1] - b[1])[0][0],
@@ -293,7 +354,6 @@ const roomManager = {
             );
           }
 
-          // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
           if (REMOTE_ROLES.has(roleData.role)) {
             const taken = Object.values(Game.creeps)
               .filter(
@@ -318,8 +378,7 @@ const roomManager = {
     // ── ЛИНКИ ─────────────────────────────────────────────────────────────
     linkManager.run(room);
 
-    // --ЛАБЫ--------------------------------------------
-
+    // ── ЛАБЫ ──────────────────────────────────────────────────────────────
     labManager.run(room);
 
     // ── 12. БАШНИ ─────────────────────────────────────────────────────────

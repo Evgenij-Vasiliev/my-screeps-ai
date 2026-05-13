@@ -36,7 +36,7 @@ const factory = {
     // }),
 
     test_harvester: () => ({
-      body: prepareBody({ work: 1, carry: 2, move: 3 }),
+      body: prepareBody({ work: 2, carry: 4, move: 6 }),
       memory: {},
     }),
 
@@ -71,12 +71,17 @@ const factory = {
     }),
 
     test_labWorker: () => ({
-      body: prepareBody({ carry: 2, move: 2 }),
+      body: prepareBody({ carry: 4, move: 4 }),
       memory: {},
     }),
 
     test_towerSupplier: () => ({
       body: prepareBody({ carry: 4, move: 4 }),
+      memory: {},
+    }),
+
+    test_terminalUnloader: () => ({
+      body: prepareBody({ carry: 8, move: 4 }),
       memory: {},
     }),
 
