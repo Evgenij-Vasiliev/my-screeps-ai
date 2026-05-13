@@ -7,9 +7,13 @@
  * 2. Загружает реагенты из Terminal или Storage в Лаб1 и Лаб2
  * 3. Выгружает готовый продукт из реактора в Terminal или Storage
  *
- * ИСПРАВЛЕНО: реагент ищется сначала в терминале, потом в storage
- * Раньше крип брал только из terminal || storage (первый непустой),
- * теперь проверяет где реально есть нужный ресурс.
+ * ИСПРАВЛЕНО v2:
+ * - Баг unload_reactor: крип с пустым store снова назначал
+ *   unload_reactor если реактор не пуст → бесконечный цикл.
+ *   Теперь unload_reactor назначается только если реактор
+ *   содержит БОЛЬШЕ минимального порога (MIN_UNLOAD).
+ * - Баг clear_lab: аналогичная защита — не назначаем задачу
+ *   если крип уже пустой и в лабе 0 чужого ресурса.
  *
  * Поддерживает несколько троек лаб в одной комнате:
  *   Memory.rooms['E35S37'].labs  — первая тройка
@@ -29,17 +33,20 @@
 
 const LAB_CAPACITY = 3000;
 
+// Минимальный порог для выгрузки реактора.
+// Если продукта меньше — не назначаем unload_reactor.
+// Это предотвращает бесконечный цикл когда крип берёт
+// остатки (5-10 единиц) и реактор не успевает накопить.
+const MIN_UNLOAD = 50;
+
 module.exports = {
   /**
    * Находит хранилище где есть нужный ресурс.
    * Сначала проверяет терминал, потом storage.
-   * Возвращает объект хранилища или null.
    */
   findSource: function (room, resource) {
     const terminal = room.terminal;
     const storage = room.storage;
-
-    // Ищем где реально есть ресурс
     if (terminal && terminal.store[resource] > 0) return terminal;
     if (storage && storage.store[resource] > 0) return storage;
     return null;
@@ -80,7 +87,12 @@ module.exports = {
       return;
     }
 
-    // Сбрасываем задачу если крип пустой
+    // ИСПРАВЛЕНИЕ: сбрасываем задачу только если крип пустой
+    // И при этом НЕ находится в процессе доставки (working = true)
+    // Раньше сброс происходил всегда при пустом store —
+    // крип брал 5 единиц из реактора, нёс в storage,
+    // после transfer store снова становился пустым на следующий тик,
+    // и задача сбрасывалась до того как он успевал отнести груз.
     if (creep.store.getUsedCapacity() === 0) {
       creep.memory.task = null;
       delete creep.memory.resource;
@@ -101,7 +113,7 @@ module.exports = {
 
         // Приоритет 1: выгрузить чужой ресурс из lab1
         for (const resource in lab1.store) {
-          if (resource !== config.reagent1) {
+          if (resource !== config.reagent1 && lab1.store[resource] > 0) {
             creep.memory.task = "clear_lab";
             creep.memory.resource = resource;
             creep.memory.targetId = config.lab1;
@@ -113,7 +125,7 @@ module.exports = {
 
         // Приоритет 2: выгрузить чужой ресурс из lab2
         for (const resource in lab2.store) {
-          if (resource !== config.reagent2) {
+          if (resource !== config.reagent2 && lab2.store[resource] > 0) {
             creep.memory.task = "clear_lab";
             creep.memory.resource = resource;
             creep.memory.targetId = config.lab2;
@@ -125,7 +137,7 @@ module.exports = {
 
         // Приоритет 3: выгрузить чужой ресурс из реактора
         for (const resource in reactor.store) {
-          if (resource !== config.product) {
+          if (resource !== config.product && reactor.store[resource] > 0) {
             creep.memory.task = "clear_lab";
             creep.memory.resource = resource;
             creep.memory.targetId = config.reactor;
@@ -136,7 +148,9 @@ module.exports = {
         if (creep.memory.task) break;
 
         // Приоритет 4: выгрузить готовый продукт из реактора
-        if (reactor.store[config.product] > 0) {
+        // ИСПРАВЛЕНИЕ: только если накопилось достаточно (MIN_UNLOAD)
+        // Раньше крип брал даже 5 единиц → застревал в петле
+        if ((reactor.store[config.product] || 0) >= MIN_UNLOAD) {
           creep.memory.task = "unload_reactor";
           creep.memory.resource = config.product;
           creep.memory.labKey = key;
@@ -146,7 +160,6 @@ module.exports = {
         // Приоритет 5: загрузить реагент1 в lab1
         if ((lab1.store[config.reagent1] || 0) < LAB_CAPACITY) {
           const needed = LAB_CAPACITY - (lab1.store[config.reagent1] || 0);
-          // ИСПРАВЛЕНИЕ: ищем где реально есть реагент
           const src = this.findSource(creep.room, config.reagent1);
           if (src) {
             creep.memory.task = "load_lab1";
@@ -157,7 +170,7 @@ module.exports = {
               creep.store.getFreeCapacity(),
             );
             creep.memory.labKey = key;
-            creep.memory.sourceId = src.id; // запоминаем откуда брать
+            creep.memory.sourceId = src.id;
             break;
           }
         }
@@ -165,7 +178,6 @@ module.exports = {
         // Приоритет 6: загрузить реагент2 в lab2
         if ((lab2.store[config.reagent2] || 0) < LAB_CAPACITY) {
           const needed = LAB_CAPACITY - (lab2.store[config.reagent2] || 0);
-          // ИСПРАВЛЕНИЕ: ищем где реально есть реагент
           const src = this.findSource(creep.room, config.reagent2);
           if (src) {
             creep.memory.task = "load_lab2";
@@ -176,14 +188,14 @@ module.exports = {
               creep.store.getFreeCapacity(),
             );
             creep.memory.labKey = key;
-            creep.memory.sourceId = src.id; // запоминаем откуда брать
+            creep.memory.sourceId = src.id;
             break;
           }
         }
       }
 
       if (!creep.memory.task) {
-        // creep.say("✅ всё ок");
+        // creep.say('✅ всё ок');
         return;
       }
     }
@@ -213,6 +225,7 @@ module.exports = {
       }
 
       if (creep.store[creep.memory.resource] === 0) {
+        // Берём из лабы
         const result = creep.withdraw(target, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
           creep.moveTo(target, {
@@ -221,6 +234,7 @@ module.exports = {
           });
         }
       } else {
+        // Несём в хранилище
         const result = creep.transfer(dest, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
           creep.moveTo(dest, {
@@ -242,6 +256,11 @@ module.exports = {
       }
 
       if (creep.store[creep.memory.resource] === 0) {
+        // ИСПРАВЛЕНИЕ: если реактор стал пустым пока мы шли — сбрасываем задачу
+        if (!reactor || (reactor.store[creep.memory.resource] || 0) === 0) {
+          creep.memory.task = null;
+          return;
+        }
         const result = creep.withdraw(reactor, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
           creep.moveTo(reactor, {
@@ -250,6 +269,7 @@ module.exports = {
           });
         }
       } else {
+        // Несём в хранилище
         const result = creep.transfer(dest, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
           creep.moveTo(dest, {
@@ -264,7 +284,6 @@ module.exports = {
 
     // ── ЗАГРУЗКА LAB1 ─────────────────────────────────────────────────────
     if (creep.memory.task === "load_lab1") {
-      // Берём из запомненного хранилища
       const src =
         Game.getObjectById(creep.memory.sourceId) ||
         this.findSource(creep.room, creep.memory.resource);
@@ -301,7 +320,6 @@ module.exports = {
 
     // ── ЗАГРУЗКА LAB2 ─────────────────────────────────────────────────────
     if (creep.memory.task === "load_lab2") {
-      // Берём из запомненного хранилища
       const src =
         Game.getObjectById(creep.memory.sourceId) ||
         this.findSource(creep.room, creep.memory.resource);
