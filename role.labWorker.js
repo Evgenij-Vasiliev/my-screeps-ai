@@ -4,16 +4,17 @@
  * ===================================================
  * Задачи:
  * 1. Выгружает чужие ресурсы из лаб (если поменяли конфиг)
- * 2. Загружает реагенты из Terminal/Storage в Лаб1 и Лаб2
- * 3. Выгружает готовый продукт из реактора в Terminal/Storage
+ * 2. Загружает реагенты из Terminal или Storage в Лаб1 и Лаб2
+ * 3. Выгружает готовый продукт из реактора в Terminal или Storage
+ *
+ * ИСПРАВЛЕНО: реагент ищется сначала в терминале, потом в storage
+ * Раньше крип брал только из terminal || storage (первый непустой),
+ * теперь проверяет где реально есть нужный ресурс.
  *
  * Поддерживает несколько троек лаб в одной комнате:
  *   Memory.rooms['E35S37'].labs  — первая тройка
  *   Memory.rooms['E35S37'].labs2 — вторая тройка
  *   и так далее...
- *
- * Если в памяти крипа есть assignedLab — работает только с ней.
- * Если нет — перебирает все тройки по порядку.
  *
  * Память крипа:
  * - assignedLab {string} — закреплённая тройка (labs, labs2...)
@@ -22,12 +23,40 @@
  * - amount      {number} — сколько взять
  * - labKey      {string} — какая тройка обслуживается сейчас
  * - targetId    {string} — ID структуры для текущей задачи
+ * - sourceId    {string} — ID хранилища откуда брать реагент
  * ===================================================
  */
 
 const LAB_CAPACITY = 3000;
 
 module.exports = {
+  /**
+   * Находит хранилище где есть нужный ресурс.
+   * Сначала проверяет терминал, потом storage.
+   * Возвращает объект хранилища или null.
+   */
+  findSource: function (room, resource) {
+    const terminal = room.terminal;
+    const storage = room.storage;
+
+    // Ищем где реально есть ресурс
+    if (terminal && terminal.store[resource] > 0) return terminal;
+    if (storage && storage.store[resource] > 0) return storage;
+    return null;
+  },
+
+  /**
+   * Находит куда выгрузить продукт.
+   * Сначала терминал, потом storage.
+   */
+  findDest: function (room) {
+    const terminal = room.terminal;
+    const storage = room.storage;
+    if (terminal && terminal.store.getFreeCapacity() > 0) return terminal;
+    if (storage && storage.store.getFreeCapacity() > 0) return storage;
+    return null;
+  },
+
   run: function (creep) {
     if (!creep || !creep.room) return;
 
@@ -51,15 +80,6 @@ module.exports = {
       return;
     }
 
-    const terminal = creep.room.terminal;
-    const storage = creep.room.storage;
-    const source = terminal || storage;
-
-    if (!source) {
-      creep.say("❌ нет хранилища");
-      return;
-    }
-
     // Сбрасываем задачу если крип пустой
     if (creep.store.getUsedCapacity() === 0) {
       creep.memory.task = null;
@@ -67,6 +87,7 @@ module.exports = {
       delete creep.memory.amount;
       delete creep.memory.labKey;
       delete creep.memory.targetId;
+      delete creep.memory.sourceId;
     }
 
     // Ищем задачу если нет текущей
@@ -123,42 +144,46 @@ module.exports = {
         }
 
         // Приоритет 5: загрузить реагент1 в lab1
-        if (lab1.store[config.reagent1] < LAB_CAPACITY) {
-          const needed = LAB_CAPACITY - lab1.store[config.reagent1];
-          const available = source.store[config.reagent1] || 0;
-          if (available > 0) {
+        if ((lab1.store[config.reagent1] || 0) < LAB_CAPACITY) {
+          const needed = LAB_CAPACITY - (lab1.store[config.reagent1] || 0);
+          // ИСПРАВЛЕНИЕ: ищем где реально есть реагент
+          const src = this.findSource(creep.room, config.reagent1);
+          if (src) {
             creep.memory.task = "load_lab1";
             creep.memory.resource = config.reagent1;
             creep.memory.amount = Math.min(
               needed,
-              available,
+              src.store[config.reagent1],
               creep.store.getFreeCapacity(),
             );
             creep.memory.labKey = key;
+            creep.memory.sourceId = src.id; // запоминаем откуда брать
             break;
           }
         }
 
         // Приоритет 6: загрузить реагент2 в lab2
-        if (lab2.store[config.reagent2] < LAB_CAPACITY) {
-          const needed = LAB_CAPACITY - lab2.store[config.reagent2];
-          const available = source.store[config.reagent2] || 0;
-          if (available > 0) {
+        if ((lab2.store[config.reagent2] || 0) < LAB_CAPACITY) {
+          const needed = LAB_CAPACITY - (lab2.store[config.reagent2] || 0);
+          // ИСПРАВЛЕНИЕ: ищем где реально есть реагент
+          const src = this.findSource(creep.room, config.reagent2);
+          if (src) {
             creep.memory.task = "load_lab2";
             creep.memory.resource = config.reagent2;
             creep.memory.amount = Math.min(
               needed,
-              available,
+              src.store[config.reagent2],
               creep.store.getFreeCapacity(),
             );
             creep.memory.labKey = key;
+            creep.memory.sourceId = src.id; // запоминаем откуда брать
             break;
           }
         }
       }
 
       if (!creep.memory.task) {
-        creep.say("✅ всё ок");
+        // creep.say("✅ всё ок");
         return;
       }
     }
@@ -181,6 +206,12 @@ module.exports = {
         return;
       }
 
+      const dest = this.findDest(creep.room);
+      if (!dest) {
+        creep.say("❌ некуда класть");
+        return;
+      }
+
       if (creep.store[creep.memory.resource] === 0) {
         const result = creep.withdraw(target, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
@@ -190,9 +221,9 @@ module.exports = {
           });
         }
       } else {
-        const result = creep.transfer(source, creep.memory.resource);
+        const result = creep.transfer(dest, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, {
+          creep.moveTo(dest, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ff0000" },
           });
@@ -204,6 +235,12 @@ module.exports = {
 
     // ── ВЫГРУЗКА РЕАКТОРА ─────────────────────────────────────────────────
     if (creep.memory.task === "unload_reactor") {
+      const dest = this.findDest(creep.room);
+      if (!dest) {
+        creep.say("❌ некуда класть");
+        return;
+      }
+
       if (creep.store[creep.memory.resource] === 0) {
         const result = creep.withdraw(reactor, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
@@ -213,9 +250,9 @@ module.exports = {
           });
         }
       } else {
-        const result = creep.transfer(source, creep.memory.resource);
+        const result = creep.transfer(dest, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, {
+          creep.moveTo(dest, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#00ff00" },
           });
@@ -227,14 +264,23 @@ module.exports = {
 
     // ── ЗАГРУЗКА LAB1 ─────────────────────────────────────────────────────
     if (creep.memory.task === "load_lab1") {
+      // Берём из запомненного хранилища
+      const src =
+        Game.getObjectById(creep.memory.sourceId) ||
+        this.findSource(creep.room, creep.memory.resource);
+      if (!src) {
+        creep.memory.task = null;
+        return;
+      }
+
       if (creep.store[creep.memory.resource] === 0) {
         const result = creep.withdraw(
-          source,
+          src,
           creep.memory.resource,
           creep.memory.amount,
         );
         if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, {
+          creep.moveTo(src, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ffff00" },
           });
@@ -255,14 +301,23 @@ module.exports = {
 
     // ── ЗАГРУЗКА LAB2 ─────────────────────────────────────────────────────
     if (creep.memory.task === "load_lab2") {
+      // Берём из запомненного хранилища
+      const src =
+        Game.getObjectById(creep.memory.sourceId) ||
+        this.findSource(creep.room, creep.memory.resource);
+      if (!src) {
+        creep.memory.task = null;
+        return;
+      }
+
       if (creep.store[creep.memory.resource] === 0) {
         const result = creep.withdraw(
-          source,
+          src,
           creep.memory.resource,
           creep.memory.amount,
         );
         if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, {
+          creep.moveTo(src, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ffff00" },
           });
