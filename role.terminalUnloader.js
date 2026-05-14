@@ -3,22 +3,30 @@
  * ROLE.TERMINALUNLOADER.JS — Двусторонний логист терминала
  * ===================================================
  * Спавнится автоматически через roomManager когда в терминале
- * накапливается более 5000 не-энергетических ресурсов суммарно.
+ * накапливается более 5000 не-энергетических ресурсов суммарно,
+ * или когда есть очередь запросов terminalNeeds.
  *
  * Логика (в порядке приоритета):
  *
  * 1. STORAGE → ТЕРМИНАЛ (загрузка для отправки):
- *    terminalManager пишет в память комнаты очередь запросов:
+ *    terminalManager/balancer пишет в память комнаты очередь:
  *    room.memory.terminalNeeds = [
- *      { resource: 'O',  amount: 5000, toRoom: 'E37S38' },
- *      { resource: 'OH', amount: 5000, toRoom: 'E36S38' },
+ *      { resource: 'O',  amount: 10000, toRoom: 'E36S38' },
  *    ]
- *    Крип берёт первый запрос из очереди, несёт ресурс из
- *    storage в терминал. После доставки запрос удаляется.
+ *    Крип берёт первый запрос, МНОГОКРАТНО ходит storage→terminal
+ *    пока не перенесёт всё нужное количество.
+ *    Только после этого удаляет запрос из очереди.
  *
  * 2. ТЕРМИНАЛ → STORAGE (разгрузка):
  *    Если очередь пуста — ищем не-энергетические ресурсы
  *    в терминале и несём в storage.
+ *
+ * ИСПРАВЛЕНО v2:
+ * - Запрос из terminalNeeds НЕ удаляется после одной ходки.
+ *   Крип запоминает сколько уже перенёс (memory.transferred)
+ *   и продолжает пока transferred < need.amount.
+ *   Раньше запрос удалялся сразу после первого transfer → крип
+ *   переносил 1000-2000 единиц и бросал задачу.
  * ===================================================
  */
 
@@ -46,54 +54,70 @@ module.exports = {
 
     if (!creep.memory.working) {
       // ── ПРИОРИТЕТ 1: STORAGE → ТЕРМИНАЛ ──────────────────────────────
-      // Читаем очередь запросов от terminalManager
       const needs = creep.room.memory.terminalNeeds;
       if (needs && needs.length > 0) {
-        // Берём первый запрос из очереди
         const need = needs[0];
         const inStorage = storage.store[need.resource] || 0;
 
-        if (inStorage > 0) {
-          const amount = Math.min(
-            need.amount,
-            inStorage,
-            creep.store.getFreeCapacity(),
-          );
-          creep.memory.resource = need.resource;
-          creep.memory.task = "load_terminal";
-          creep.memory.needIdx = 0; // индекс запроса в очереди
+        // Сколько уже перенесено в терминал по этому запросу
+        if (!creep.memory.transferred) creep.memory.transferred = 0;
 
-          const result = creep.withdraw(storage, need.resource, amount);
-          if (result === ERR_NOT_IN_RANGE) {
-            creep.moveTo(storage, {
-              reusePath: 5,
-              visualizePathStyle: { stroke: "#00ffff" },
-            });
-          }
-          if (result === OK) {
-            creep.memory.working = true;
-          }
+        // Сколько ещё нужно перенести
+        const remaining = need.amount - creep.memory.transferred;
+
+        if (remaining <= 0) {
+          // Весь объём перенесён — удаляем запрос
+          console.log(
+            `[TerminalUnloader ${creep.room.name}] ✅ ` +
+              `${need.resource} перенесён в терминал (${need.amount} ед.)`,
+          );
+          creep.room.memory.terminalNeeds = needs.slice(1);
+          delete creep.memory.transferred;
+          delete creep.memory.resource;
+          delete creep.memory.task;
           return;
-        } else {
-          // Ресурса нет в storage — удаляем запрос из очереди
+        }
+
+        if (inStorage === 0) {
+          // Ресурса нет в storage — удаляем запрос
           console.log(
             `[TerminalUnloader ${creep.room.name}] ` +
               `Нет ${need.resource} в storage — удаляем запрос`,
           );
           creep.room.memory.terminalNeeds = needs.slice(1);
+          delete creep.memory.transferred;
+          return;
         }
+
+        // Берём сколько влезет, но не больше чем осталось перенести
+        const amount = Math.min(
+          remaining,
+          inStorage,
+          creep.store.getFreeCapacity(),
+        );
+
+        creep.memory.resource = need.resource;
+        creep.memory.task = "load_terminal";
+
+        const result = creep.withdraw(storage, need.resource, amount);
+        if (result === ERR_NOT_IN_RANGE) {
+          creep.moveTo(storage, {
+            reusePath: 5,
+            visualizePathStyle: { stroke: "#00ffff" },
+          });
+        }
+        if (result === OK) {
+          creep.memory.working = true;
+        }
+        return;
       }
 
       // ── ПРИОРИТЕТ 2: ТЕРМИНАЛ → STORAGE ──────────────────────────────
-      // Ищем любой не-энергетический ресурс в терминале
       const resource = Object.keys(terminal.store).find(
         r => r !== RESOURCE_ENERGY && terminal.store[r] > 0,
       );
 
-      if (!resource) {
-        // creep.say('✅ пусто');
-        return;
-      }
+      if (!resource) return;
 
       creep.memory.resource = resource;
       creep.memory.task = "unload_terminal";
@@ -126,28 +150,13 @@ module.exports = {
           });
         }
         if (result === OK) {
-          // Удаляем выполненный запрос из очереди
-          const needs = creep.room.memory.terminalNeeds;
-          if (needs && needs.length > 0) {
-            // Удаляем первый запрос на этот ресурс
-            const idx = needs.findIndex(
-              n => n.resource === creep.memory.resource,
-            );
-            if (idx !== -1) {
-              creep.room.memory.terminalNeeds = [
-                ...needs.slice(0, idx),
-                ...needs.slice(idx + 1),
-              ];
-            }
-          }
-          console.log(
-            `[TerminalUnloader ${creep.room.name}] ✅ ` +
-              `${creep.memory.resource} перенесён в терминал`,
-          );
+          // Считаем сколько перенесли — НЕ удаляем запрос
+          // Крип вернётся за следующей порцией пока remaining > 0
+          const delivered =
+            creep.store[creep.memory.resource] || creep.store.getUsedCapacity();
+          creep.memory.transferred =
+            (creep.memory.transferred || 0) + delivered;
           creep.memory.working = false;
-          delete creep.memory.resource;
-          delete creep.memory.task;
-          delete creep.memory.needIdx;
         }
         return;
       }

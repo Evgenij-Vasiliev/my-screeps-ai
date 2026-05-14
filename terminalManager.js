@@ -10,6 +10,10 @@
  * богатая комната (>100 000 в storage) отправляет ей
  * энергию через терминал автоматически.
  *
+ * БАЛАНСИРОВКА РЕСУРСОВ (resourceBalancer):
+ * Глобальный балансировщик всех минералов между комнатами.
+ * Запускается раз в 100 тиков из первой комнаты по алфавиту.
+ *
  * ЛОГИСТИКА РЕАГЕНТОВ (раз в 100 тиков):
  * Перебирает ВСЕ тройки лаб (labs, labs2, labs3...)
  * в каждой комнате и проверяет запас реагентов.
@@ -18,27 +22,23 @@
  * Продаём излишек энергии сверх STORAGE_ENERGY_BUFFER.
  * НО только если нет бедных комнат — сначала помогаем своим.
  *
- * ИСПРАВЛЕНО v5:
- * - runEnergyBalance и runLabSupply вынесены ДО проверки tradeEnabled.
- *   Раньше Memory.tradeEnabled = false останавливал весь run() целиком,
- *   включая балансировку энергии и логистику лаб — они переставали работать.
- *   Теперь флаг tradeEnabled управляет ТОЛЬКО продажей на рынке.
- *
  * Управление через консоль:
  *   Memory.tradeEnabled = false  — остановить ТОЛЬКО торговлю на рынке
  *   Memory.tradeEnabled = true   — возобновить торговлю
+ *   Memory.balancerEnabled = false — остановить балансировщик ресурсов
+ *   Memory.balancerDebug = true    — подробные логи балансировщика
  * ===================================================
  */
 
-const STORAGE_ENERGY_BUFFER = 50000; // Минимум для продажи излишков
-const TERMINAL_ENERGY_MIN = 20000; // Минимум энергии в терминале для операций
+const resourceBalancer = require("./resourceBalancer");
 
-// ── БАЛАНСИРОВКА ЭНЕРГИИ ──────────────────────────────────────────────────
-const ENERGY_POOR_THRESHOLD = 20000; // Меньше этого — комната "бедная"
-const ENERGY_RICH_THRESHOLD = 100000; // Больше этого — комната "богатая"
-const ENERGY_SEND_AMOUNT = 20000; // Сколько энергии отправляем за раз
+const STORAGE_ENERGY_BUFFER = 50000;
+const TERMINAL_ENERGY_MIN = 20000;
 
-// ── ЛОГИСТИКА ЛАБ ─────────────────────────────────────────────────────────
+const ENERGY_POOR_THRESHOLD = 20000;
+const ENERGY_RICH_THRESHOLD = 100000;
+const ENERGY_SEND_AMOUNT = 20000;
+
 const CHECK_INTERVAL = 50;
 const MIN_DEAL_AMOUNT = 100;
 const LAB_REAGENT_MIN = 3000;
@@ -48,9 +48,6 @@ const LAB_REAGENT_DONOR_MIN = 6000;
 let roomOffsets = {};
 
 const terminalManager = {
-  /**
-   * Возвращает список всех активных конфигов лаб в комнате.
-   */
   getLabConfigs: function (room) {
     const mem = room.memory;
     const configs = [];
@@ -62,19 +59,12 @@ const terminalManager = {
     return configs;
   },
 
-  /**
-   * Считает суммарный запас ресурса в комнате (терминал + storage).
-   */
   getTotal: function (room, resource) {
     const t = room.terminal ? room.terminal.store[resource] || 0 : 0;
     const s = room.storage ? room.storage.store[resource] || 0 : 0;
     return t + s;
   },
 
-  /**
-   * Добавляет запрос в очередь terminalNeeds донора.
-   * Не дублирует если запрос на этот ресурс уже есть.
-   */
   addNeed: function (donorRoom, resource, amount, toRoom) {
     if (!donorRoom.memory.terminalNeeds) {
       donorRoom.memory.terminalNeeds = [];
@@ -94,17 +84,14 @@ const terminalManager = {
   /**
    * ── БАЛАНСИРОВКА ЭНЕРГИИ МЕЖДУ КОМНАТАМИ ─────────────────────────────────
    * Раз в 100 тиков. Запускается глобально один раз (из первой комнаты).
-   * Работает ВСЕГДА — независимо от tradeEnabled.
    */
   runEnergyBalance: function () {
     if (Game.time % 100 !== 0) return;
 
-    // Все наши комнаты с терминалом и storage
     const ourRooms = Object.values(Game.rooms).filter(
       r => r.controller && r.controller.my && r.terminal && r.storage,
     );
 
-    // Бедные (мало энергии в storage) и богатые (много энергии в storage)
     const poorRooms = ourRooms.filter(
       r => (r.storage.store[RESOURCE_ENERGY] || 0) < ENERGY_POOR_THRESHOLD,
     );
@@ -117,7 +104,6 @@ const terminalManager = {
     if (poorRooms.length === 0 || richRooms.length === 0) return;
 
     for (const poorRoom of poorRooms) {
-      // Ищем донора у которого достаточно энергии в терминале для отправки
       const donor = richRooms.find(
         r =>
           r.name !== poorRoom.name &&
@@ -126,7 +112,6 @@ const terminalManager = {
       );
 
       if (!donor) {
-        // Энергии в терминале нет — просим terminalUnloader перенести из storage
         const richWithStorage = richRooms.find(
           r =>
             r.name !== poorRoom.name &&
@@ -150,7 +135,6 @@ const terminalManager = {
         continue;
       }
 
-      // Считаем стоимость транзакции
       const txCost = Game.market.calcTransactionCost(
         ENERGY_SEND_AMOUNT,
         donor.name,
@@ -158,7 +142,6 @@ const terminalManager = {
       );
       const donorTerminalEnergy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      // Проверяем что после транзакции в терминале донора останется минимум
       if (
         txCost + ENERGY_SEND_AMOUNT >
         donorTerminalEnergy - TERMINAL_ENERGY_MIN
@@ -173,7 +156,6 @@ const terminalManager = {
         continue;
       }
 
-      // Отправляем энергию
       const result = donor.terminal.send(
         RESOURCE_ENERGY,
         ENERGY_SEND_AMOUNT,
@@ -186,14 +168,12 @@ const terminalManager = {
             `(бедный: ${poorRoom.storage.store[RESOURCE_ENERGY]}, ` +
             `богатый: ${donor.storage.store[RESOURCE_ENERGY]})`,
         );
-        // Убираем запрос если был
         if (donor.memory.terminalNeeds) {
           donor.memory.terminalNeeds = donor.memory.terminalNeeds.filter(
             n =>
               !(n.resource === RESOURCE_ENERGY && n.toRoom === poorRoom.name),
           );
         }
-        // Терминал донора теперь на кулдауне — убираем из списка
         richRooms.splice(richRooms.indexOf(donor), 1);
       } else {
         console.log(`[EnergyBalance] ❌ Ошибка отправки energy: ${result}`);
@@ -204,17 +184,8 @@ const terminalManager = {
   /**
    * ── АВТОЛОГИСТИКА РЕАГЕНТОВ ──────────────────────────────────────────────
    * Проверяет ВСЕ тройки лаб в комнате раз в CHECK_INTERVAL тиков.
-   * Использует roomOffsets — каждая комната в свой тик, равномерно.
-   * Работает ВСЕГДА — независимо от tradeEnabled.
-   *
-   * ИСПРАВЛЕНО v6: убрана жёсткая привязка к Game.time % 100.
-   * Раньше функция работала только в один конкретный тик из 100 —
-   * ручной вызов из консоли никогда не попадал в нужный тик,
-   * а при загруженном сервере тик мог быть пропущен.
-   * Теперь каждая комната проверяется в свой offset-тик равномерно.
    */
   runLabSupply: function (room) {
-    // Проверяем через roomOffsets — каждая комната в свой тик
     if ((Game.time + (roomOffsets[room.name] || 0)) % CHECK_INTERVAL !== 0)
       return;
 
@@ -228,7 +199,6 @@ const terminalManager = {
     const labConfigs = this.getLabConfigs(room);
     if (labConfigs.length === 0) return;
 
-    // Собираем какие реагенты заканчиваются
     const needs = [];
     for (const { config } of labConfigs) {
       for (const resource of [config.reagent1, config.reagent2]) {
@@ -327,30 +297,30 @@ const terminalManager = {
         console.log(`[LabSupply] ❌ Ошибка отправки ${resource}: ${result}`);
       }
 
-      // Одна отправка за тик
       return;
     }
   },
 
   /**
    * ── ОСНОВНОЙ ЗАПУСК ───────────────────────────────────────────────────────
-   * ВАЖНО: балансировка и логистика лаб запускаются ДО проверки tradeEnabled,
-   * чтобы они работали всегда — даже когда торговля приостановлена.
    */
   run: function (room) {
-    // ── ШАГ 1: БАЛАНСИРОВКА ЭНЕРГИИ — всегда, независимо от tradeEnabled ──
-    // Запускаем глобально один раз — из комнаты с именем первым по алфавиту.
+    // Определяем список наших комнат по алфавиту
     const roomNames = Object.keys(Game.rooms)
       .filter(n => {
         const r = Game.rooms[n];
         return r.controller && r.controller.my;
       })
       .sort();
+
+    // ── ШАГ 1: ГЛОБАЛЬНЫЕ БАЛАНСИРОВЩИКИ — только из первой комнаты ────────
+    // Запускаем один раз за тик чтобы не дублировать работу
     if (roomNames[0] === room.name) {
       this.runEnergyBalance();
+      resourceBalancer.run();
     }
 
-    // ── ШАГ 2: ЛОГИСТИКА ЛАБ — всегда, независимо от tradeEnabled ──────────
+    // ── ШАГ 2: ЛОГИСТИКА ЛАБ — для каждой комнаты в свой тик ───────────────
     if (roomOffsets[room.name] === undefined) {
       const count = Object.keys(roomOffsets).length;
       const step = Math.floor(CHECK_INTERVAL / 5);
@@ -359,8 +329,6 @@ const terminalManager = {
     this.runLabSupply(room);
 
     // ── ШАГ 3: ПРОДАЖА — только если торговля включена ──────────────────────
-    // Memory.tradeEnabled = false  → выходим здесь, продажи нет
-    // Memory.tradeEnabled = true   → продолжаем
     if (Memory.tradeEnabled === false) return;
 
     if ((Game.time + roomOffsets[room.name]) % CHECK_INTERVAL !== 0) return;
@@ -374,7 +342,6 @@ const terminalManager = {
     const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (availableEnergy < TERMINAL_ENERGY_MIN) return;
 
-    // Не продаём если есть бедные комнаты — сначала помогаем своим
     const hasPoorRooms = Object.values(Game.rooms).some(
       r =>
         r.controller &&
