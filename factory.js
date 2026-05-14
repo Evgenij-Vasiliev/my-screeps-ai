@@ -81,7 +81,7 @@ const factory = {
     }),
 
     test_terminalUnloader: () => ({
-      body: prepareBody({ carry: 8, move: 4 }),
+      body: prepareBody({ carry: 10, move: 5 }),
       memory: {},
     }),
 
