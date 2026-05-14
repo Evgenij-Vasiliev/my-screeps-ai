@@ -12,10 +12,10 @@
  * - allCreeps: один цикл for...in
  * - roomCreeps: фильтр из уже собранного массива
  *
- * ИСПРАВЛЕНО v3:
- * - Умный спавн labWorker — один крип на каждый блок лаб
- * - Каждый labWorker получает assignedLab в памяти
- * - Количество labWorker определяется автоматически по памяти комнаты
+ * ИСПРАВЛЕНО v4:
+ * - terminalUnloader спавнится также когда есть очередь
+ *   terminalNeeds (запросы на перенос ресурсов/энергии
+ *   из storage в терминал для отправки другим комнатам)
  * ===================================================
  */
 
@@ -179,7 +179,6 @@ const roomManager = {
     let attackersHere = 0;
 
     // Считаем labWorker по assignedLab — чтобы знать какой блок уже покрыт
-    // Ключ: assignedLab ('labs', 'labs2'...), значение: количество крипов
     const labWorkersByBlock = {};
 
     // ОПТИМИЗАЦИЯ: fixedSourceCount инициализируем через Set
@@ -215,7 +214,6 @@ const roomManager = {
               (labWorkersByBlock[creep.memory.assignedLab] || 0) + 1;
           }
 
-          // ОПТИМИЗАЦИЯ: Set.has() вместо Array.includes()
           if (
             FIXED_SOURCE_ROLES.has(role) &&
             creep.memory.sourceIndex !== undefined &&
@@ -249,15 +247,24 @@ const roomManager = {
           .reduce((sum, [, amt]) => sum + amt, 0)
       : 0;
 
+    // ИСПРАВЛЕНИЕ v4: спавним terminalUnloader также когда есть
+    // очередь terminalNeeds — крип нужен чтобы перенести ресурсы
+    // (или энергию) из storage в терминал для отправки другим комнатам.
+    // Раньше крип спавнился только при наличии минералов в терминале —
+    // это значит запросы от balancer/labSupply могли висеть вечно.
+    const hasTerminalNeeds = (room.memory.terminalNeeds || []).length > 0;
+
     const localRolesConfig = [
       { role: "test_harvester", count: 1 },
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 0 },
       { role: "test_towerSupplier", count: 1 },
-      // Спавним разгрузчика если в терминале накопилось более 5000 минералов
+      // Спавним разгрузчика если:
+      // - в терминале накопилось более 5000 минералов, ИЛИ
+      // - есть запросы на перенос ресурсов (terminalNeeds)
       {
         role: "test_terminalUnloader",
-        count: terminalNonEnergy > 5000 ? 1 : 0,
+        count: terminalNonEnergy > 5000 || hasTerminalNeeds ? 1 : 0,
       },
       { role: "test_builder", count: hasSites ? 2 : 0 },
       { role: "test_upgrader", count: needsUpgrader },
@@ -281,7 +288,6 @@ const roomManager = {
     }
 
     // ── 10. СПАВН LABWORKER — умный, по блокам ────────────────────────────
-    // Определяем сколько блоков лаб настроено в этой комнате
     const labKeys = getLabKeys(room);
 
     // ── 11. СПАВН ─────────────────────────────────────────────────────────
@@ -301,7 +307,6 @@ const roomManager = {
       for (const labKey of labKeys) {
         const hasWorker = (labWorkersByBlock[labKey] || 0) >= 1;
         if (!hasWorker) {
-          // Спавним крипа с привязкой к конкретному блоку
           const result = spawn.spawnCreep(
             [CARRY, CARRY, MOVE, MOVE],
             `test_labWorker_${Game.time}`,
@@ -314,7 +319,6 @@ const roomManager = {
             },
           );
           if (result === OK) {
-            // Спавн занят — выходим из цикла спавна
             break;
           }
         }

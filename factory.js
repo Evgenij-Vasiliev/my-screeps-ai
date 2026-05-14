@@ -25,7 +25,7 @@ const factory = {
     test_miner: (spawn, bestIndex) => {
       const sourceId = (spawn.room.memory.sources || [])[bestIndex] || null;
       return {
-        body: prepareBody({ work: 5, carry: 1, move: 4 }),
+        body: prepareBody({ work: 6, carry: 1, move: 4 }),
         memory: { sourceId },
       };
     },
