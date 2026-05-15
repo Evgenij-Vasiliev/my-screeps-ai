@@ -12,10 +12,10 @@
  * - allCreeps: один цикл for...in
  * - roomCreeps: фильтр из уже собранного массива
  *
- * ИСПРАВЛЕНО v4:
- * - terminalUnloader спавнится также когда есть очередь
- *   terminalNeeds (запросы на перенос ресурсов/энергии
- *   из storage в терминал для отправки другим комнатам)
+ * ИСПРАВЛЕНО v7:
+ * - Добавлен спавн test_nukerFiller для комнаты E37S37.
+ *   Крип спавнится когда Nuker не заполнен.
+ *   Подключён role.nukerFiller.js
  * ===================================================
  */
 
@@ -24,16 +24,17 @@ const roleTower = require("./role.tower");
 const terminalManager = require("./terminalManager");
 const linkManager = require("./role.linkManager");
 const labManager = require("./role.labManager");
+const roleNukerFiller = require("./role.nukerFiller");
 
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
+const OBSERVER_ROOM = "E36S38";
+const NUKER_ROOM = "E37S37";
 
-// ── ЗАБЛАГОВРЕМЕННЫЙ СПАВН ─────────────────────────────────────────────────
 const EARLY_SPAWN_ROLES = {
   test_miner: { travelBuffer: 10 },
   test_remoteMiner: { travelBuffer: 80 },
 };
 
-// ОПТИМИЗАЦИЯ: Set вместо массива — проверка includes() за O(1)
 const FIXED_SOURCE_ROLES = new Set([
   "test_hauler",
   "test_miner",
@@ -45,9 +46,6 @@ const REMOTE_ROLES = new Set([
   "test_reserver",
 ]);
 
-/**
- * Считает время спавна крипа по его роли.
- */
 function getEarlySpawnThreshold(role, travelBuffer, spawn) {
   try {
     const blueprint = factory.blueprints[role]
@@ -60,20 +58,65 @@ function getEarlySpawnThreshold(role, travelBuffer, spawn) {
   return 50 + travelBuffer;
 }
 
-/**
- * Возвращает список ключей активных блоков лаб в комнате.
- * Например: ['labs', 'labs2', 'labs3']
- * Используется для умного спавна labWorker.
- */
-function getLabKeys(room) {
-  const keys = [];
+function hasLabConfig(room) {
   const mem = room.memory;
-  if (mem.labs) keys.push("labs");
-  if (mem.labs2) keys.push("labs2");
-  if (mem.labs3) keys.push("labs3");
-  if (mem.labs4) keys.push("labs4");
-  if (mem.labs5) keys.push("labs5");
-  return keys;
+  return !!(mem.labs || mem.labs2 || mem.labs3 || mem.labs4 || mem.labs5);
+}
+
+/**
+ * Проверяет нужен ли nukerFiller в комнате.
+ * Возвращает true если Nuker есть и не заполнен полностью.
+ */
+function nukerNeedsFilling(room) {
+  const nuker = room.find(FIND_MY_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_NUKER,
+  })[0];
+  if (!nuker) return false;
+  return (
+    nuker.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ||
+    nuker.store.getFreeCapacity(RESOURCE_GHODIUM) > 0
+  );
+}
+
+function generateScanList(roomName, radius) {
+  const match = roomName.match(/([EW])(\d+)([NS])(\d+)/);
+  if (!match) return [];
+  const xDir = match[1];
+  const x = parseInt(match[2]);
+  const yDir = match[3];
+  const y = parseInt(match[4]);
+  const list = [];
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0) continue;
+      list.push(`${xDir}${nx}${yDir}${ny}`);
+    }
+  }
+  return list;
+}
+
+function runObserver(room) {
+  const observer = room.find(FIND_MY_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_OBSERVER,
+  })[0];
+  if (!observer) return;
+  if (
+    !room.memory.observerScanList ||
+    room.memory.observerScanList.length === 0
+  ) {
+    room.memory.observerScanList = generateScanList(room.name, 10);
+    room.memory.observerIdx = 0;
+    console.log(
+      `[Observer ${room.name}] Список сгенерирован: ${room.memory.observerScanList.length} комнат`,
+    );
+  }
+  const list = room.memory.observerScanList;
+  const idx = room.memory.observerIdx || 0;
+  observer.observeRoom(list[idx % list.length]);
+  room.memory.observerIdx = (idx + 1) % list.length;
 }
 
 const roomManager = {
@@ -115,7 +158,6 @@ const roomManager = {
       room.memory.sourceContainers = [];
     }
     room._sourceContainers = [];
-
     room._sources.forEach((source, index) => {
       let container = null;
       const containerId = room.memory.sourceContainers[index];
@@ -178,10 +220,6 @@ const roomManager = {
     const roomCreeps = [];
     let attackersHere = 0;
 
-    // Считаем labWorker по assignedLab — чтобы знать какой блок уже покрыт
-    const labWorkersByBlock = {};
-
-    // ОПТИМИЗАЦИЯ: fixedSourceCount инициализируем через Set
     const fixedSourceCount = {};
     for (const role of FIXED_SOURCE_ROLES) {
       fixedSourceCount[role] = {};
@@ -196,24 +234,14 @@ const roomManager = {
 
       let countAsAlive = true;
       if (thresholds[role] !== undefined && creep.ticksToLive !== undefined) {
-        if (creep.ticksToLive < thresholds[role]) {
-          countAsAlive = false;
-        }
+        if (creep.ticksToLive < thresholds[role]) countAsAlive = false;
       }
 
       if (countAsAlive) {
         globalGroups[role] = (globalGroups[role] || 0) + 1;
-
         if (creep.room.name === room.name) {
           localGroups[role] = (localGroups[role] || 0) + 1;
           roomCreeps.push(creep);
-
-          // Считаем labWorker по блокам
-          if (role === "test_labWorker" && creep.memory.assignedLab) {
-            labWorkersByBlock[creep.memory.assignedLab] =
-              (labWorkersByBlock[creep.memory.assignedLab] || 0) + 1;
-          }
-
           if (
             FIXED_SOURCE_ROLES.has(role) &&
             creep.memory.sourceIndex !== undefined &&
@@ -224,9 +252,7 @@ const roomManager = {
           }
         }
       } else {
-        if (creep.room.name === room.name) {
-          roomCreeps.push(creep);
-        }
+        if (creep.room.name === room.name) roomCreeps.push(creep);
       }
 
       if (role === "test_attacker" && creep.memory.homeRoom === room.name) {
@@ -240,28 +266,19 @@ const roomManager = {
 
     const attackerCount = 1;
 
-    // Считаем сколько не-энергетических ресурсов в терминале
     const terminalNonEnergy = room.terminal
       ? Object.entries(room.terminal.store)
           .filter(([r]) => r !== RESOURCE_ENERGY)
           .reduce((sum, [, amt]) => sum + amt, 0)
       : 0;
 
-    // ИСПРАВЛЕНИЕ v4: спавним terminalUnloader также когда есть
-    // очередь terminalNeeds — крип нужен чтобы перенести ресурсы
-    // (или энергию) из storage в терминал для отправки другим комнатам.
-    // Раньше крип спавнился только при наличии минералов в терминале —
-    // это значит запросы от balancer/labSupply могли висеть вечно.
     const hasTerminalNeeds = (room.memory.terminalNeeds || []).length > 0;
 
     const localRolesConfig = [
-      { role: "test_harvester", count: 1 },
+      { role: "test_harvester", count: 2 },
       { role: "test_miner", count: 2 },
       { role: "test_hauler", count: 0 },
       { role: "test_towerSupplier", count: 1 },
-      // Спавним разгрузчика если:
-      // - в терминале накопилось более 5000 минералов, ИЛИ
-      // - есть запросы на перенос ресурсов (terminalNeeds)
       {
         role: "test_terminalUnloader",
         count: terminalNonEnergy > 5000 || hasTerminalNeeds ? 1 : 0,
@@ -278,6 +295,15 @@ const roomManager = {
             ? 2
             : 0,
       },
+      {
+        role: "test_labWorker",
+        count: hasLabConfig(room) ? 1 : 0,
+      },
+      // Спавним nukerFiller только в комнате с Nuker и только пока он не заряжен
+      {
+        role: "test_nukerFiller",
+        count: room.name === NUKER_ROOM && nukerNeedsFilling(room) ? 1 : 0,
+      },
     ];
 
     const globalRolesConfig = [];
@@ -287,10 +313,7 @@ const roomManager = {
       globalRolesConfig.push({ role: "test_remoteHauler", count: 2 });
     }
 
-    // ── 10. СПАВН LABWORKER — умный, по блокам ────────────────────────────
-    const labKeys = getLabKeys(room);
-
-    // ── 11. СПАВН ─────────────────────────────────────────────────────────
+    // ── 10. СПАВН ─────────────────────────────────────────────────────────
     const spawns = room.find(FIND_MY_SPAWNS, { filter: s => !s.spawning });
     const spawn = spawns[0];
 
@@ -300,27 +323,6 @@ const roomManager = {
         if (result === OK) {
           room._towers.forEach(tower => roleTower.run(tower));
           return;
-        }
-      }
-
-      // Спавним labWorker для каждого блока лаб которому не хватает крипа
-      for (const labKey of labKeys) {
-        const hasWorker = (labWorkersByBlock[labKey] || 0) >= 1;
-        if (!hasWorker) {
-          const result = spawn.spawnCreep(
-            [CARRY, CARRY, MOVE, MOVE],
-            `test_labWorker_${Game.time}`,
-            {
-              memory: {
-                role: "test_labWorker",
-                assignedLab: labKey,
-                working: false,
-              },
-            },
-          );
-          if (result === OK) {
-            break;
-          }
         }
       }
 
@@ -376,6 +378,13 @@ const roomManager = {
       }
     }
 
+    // ── Запускаем роли крипов ──────────────────────────────────────────────
+    for (const creep of roomCreeps) {
+      if (creep.memory.role === "test_nukerFiller") {
+        roleNukerFiller.run(creep);
+      }
+    }
+
     // ── Продажа ресурсов ───────────────────────────────────────────────────
     terminalManager.run(room);
 
@@ -385,7 +394,12 @@ const roomManager = {
     // ── ЛАБЫ ──────────────────────────────────────────────────────────────
     labManager.run(room);
 
-    // ── 12. БАШНИ ─────────────────────────────────────────────────────────
+    // ── OBSERVER — только в комнате E36S38 ────────────────────────────────
+    if (room.name === OBSERVER_ROOM) {
+      runObserver(room);
+    }
+
+    // ── 11. БАШНИ ─────────────────────────────────────────────────────────
     room._towers.forEach(tower => roleTower.run(tower));
   },
 };
