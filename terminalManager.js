@@ -18,12 +18,12 @@
  * Перебирает ВСЕ тройки лаб (labs, labs2, labs3...)
  * в каждой комнате и проверяет запас реагентов.
  *
- * ПРОДАЖА ЭНЕРГИИ:
- * Продаём излишек энергии сверх STORAGE_ENERGY_BUFFER.
- * НО только если нет бедных комнат — сначала помогаем своим.
+ * ПРОДАЖА МИНЕРАЛОВ (v2):
+ * Продаём излишки K, U, L, H сверх резерва MINERAL_RESERVE.
+ * Энергия не продаётся (управляется отдельно через tradeEnabled).
  *
  * Управление через консоль:
- *   Memory.tradeEnabled = false  — остановить ТОЛЬКО торговлю на рынке
+ *   Memory.tradeEnabled = false  — остановить торговлю минералами
  *   Memory.tradeEnabled = true   — возобновить торговлю
  *   Memory.balancerEnabled = false — остановить балансировщик ресурсов
  *   Memory.balancerDebug = true    — подробные логи балансировщика
@@ -44,6 +44,17 @@ const MIN_DEAL_AMOUNT = 100;
 const LAB_REAGENT_MIN = 3000;
 const LAB_REAGENT_SEND = 5000;
 const LAB_REAGENT_DONOR_MIN = 6000;
+
+// Минералы которые продаём и их резерв (ниже резерва — не продаём)
+const SELL_MINERALS = {
+  K: 20000,
+  U: 20000,
+  L: 20000,
+  H: 20000,
+};
+
+// Сколько продаём за одну сделку
+const MINERAL_SELL_AMOUNT = 5000;
 
 let roomOffsets = {};
 
@@ -83,7 +94,6 @@ const terminalManager = {
 
   /**
    * ── БАЛАНСИРОВКА ЭНЕРГИИ МЕЖДУ КОМНАТАМИ ─────────────────────────────────
-   * Раз в 100 тиков. Запускается глобально один раз (из первой комнаты).
    */
   runEnergyBalance: function () {
     if (Game.time % 100 !== 0) return;
@@ -183,7 +193,6 @@ const terminalManager = {
 
   /**
    * ── АВТОЛОГИСТИКА РЕАГЕНТОВ ──────────────────────────────────────────────
-   * Проверяет ВСЕ тройки лаб в комнате раз в CHECK_INTERVAL тиков.
    */
   runLabSupply: function (room) {
     if ((Game.time + (roomOffsets[room.name] || 0)) % CHECK_INTERVAL !== 0)
@@ -302,10 +311,92 @@ const terminalManager = {
   },
 
   /**
+   * ── ПРОДАЖА МИНЕРАЛОВ ────────────────────────────────────────────────────
+   * Продаём K, U, L, H сверх резерва MINERAL_RESERVE.
+   * Ищем лучший ордер на покупку и продаём.
+   */
+  runMineralSell: function (room) {
+    const terminal = room.terminal;
+    const storage = room.storage;
+    if (!terminal || !storage) return;
+    if (terminal.cooldown > 0) return;
+
+    const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
+    if (availableEnergy < TERMINAL_ENERGY_MIN) return;
+
+    // Перебираем минералы для продажи
+    for (const resource in SELL_MINERALS) {
+      const reserve = SELL_MINERALS[resource];
+      const totalInRoom = this.getTotal(room, resource);
+
+      // Не продаём если запас ниже резерва
+      if (totalInRoom <= reserve) continue;
+
+      const inTerminal = terminal.store[resource] || 0;
+
+      // Нет ресурса в терминале — просим terminalUnloader перенести
+      if (inTerminal < MINERAL_SELL_AMOUNT) {
+        const needed = MINERAL_SELL_AMOUNT - inTerminal;
+        const inStorage = storage.store[resource] || 0;
+        if (inStorage > 0) {
+          this.addNeed(room, resource, Math.min(needed, inStorage), "_sell_");
+        }
+        continue;
+      }
+
+      const sellAmount = Math.min(MINERAL_SELL_AMOUNT, inTerminal);
+
+      // Ищем лучший ордер на покупку
+      const orders = Game.market
+        .getAllOrders({ resourceType: resource })
+        .filter(
+          o => o.type === ORDER_BUY && o.remainingAmount >= MIN_DEAL_AMOUNT,
+        )
+        .sort((a, b) => b.price - a.price);
+
+      if (orders.length === 0) continue;
+
+      for (const order of orders.slice(0, 5)) {
+        let dealAmount = Math.min(sellAmount, order.remainingAmount);
+
+        while (dealAmount >= MIN_DEAL_AMOUNT) {
+          const txCost = Game.market.calcTransactionCost(
+            dealAmount,
+            room.name,
+            order.roomName,
+          );
+
+          if (txCost <= availableEnergy - TERMINAL_ENERGY_MIN) {
+            const result = Game.market.deal(order.id, dealAmount, room.name);
+            if (result === OK) {
+              console.log(
+                `[Terminal ${room.name}] ✅ Продано ${dealAmount} ${resource} ` +
+                  `по ${order.price} → ${order.roomName}`,
+              );
+              // Убираем запрос на перенос если был
+              if (room.memory.terminalNeeds) {
+                room.memory.terminalNeeds = room.memory.terminalNeeds.filter(
+                  n => !(n.resource === resource && n.toRoom === "_sell_"),
+                );
+              }
+            } else {
+              console.log(
+                `[Terminal ${room.name}] ❌ Ошибка сделки ${resource}: ${result}`,
+              );
+            }
+            return;
+          }
+
+          dealAmount = Math.floor(dealAmount / 2);
+        }
+      }
+    }
+  },
+
+  /**
    * ── ОСНОВНОЙ ЗАПУСК ───────────────────────────────────────────────────────
    */
   run: function (room) {
-    // Определяем список наших комнат по алфавиту
     const roomNames = Object.keys(Game.rooms)
       .filter(n => {
         const r = Game.rooms[n];
@@ -314,13 +405,12 @@ const terminalManager = {
       .sort();
 
     // ── ШАГ 1: ГЛОБАЛЬНЫЕ БАЛАНСИРОВЩИКИ — только из первой комнаты ────────
-    // Запускаем один раз за тик чтобы не дублировать работу
     if (roomNames[0] === room.name) {
       this.runEnergyBalance();
       resourceBalancer.run();
     }
 
-    // ── ШАГ 2: ЛОГИСТИКА ЛАБ — для каждой комнаты в свой тик ───────────────
+    // ── ШАГ 2: ЛОГИСТИКА ЛАБ ────────────────────────────────────────────────
     if (roomOffsets[room.name] === undefined) {
       const count = Object.keys(roomOffsets).length;
       const step = Math.floor(CHECK_INTERVAL / 5);
@@ -328,20 +418,25 @@ const terminalManager = {
     }
     this.runLabSupply(room);
 
-    // ── ШАГ 3: ПРОДАЖА — только если торговля включена ──────────────────────
+    // ── ШАГ 3: ТОРГОВЛЯ — только если включена ───────────────────────────────
     if (Memory.tradeEnabled === false) return;
 
     if ((Game.time + roomOffsets[room.name]) % CHECK_INTERVAL !== 0) return;
 
     const terminal = room.terminal;
     const storage = room.storage;
-
     if (!terminal || !storage) return;
     if (terminal.cooldown > 0) return;
 
     const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (availableEnergy < TERMINAL_ENERGY_MIN) return;
 
+    // ── ШАГ 3а: ПРОДАЖА МИНЕРАЛОВ (приоритет выше энергии) ──────────────────
+    this.runMineralSell(room);
+
+    // ── ШАГ 3б: ПРОДАЖА ЭНЕРГИИ — только если нет бедных комнат ────────────
+    // Энергия не продаётся пока Memory.tradeEnabled = false (см. выше)
+    // и пока есть бедные комнаты или storage ниже буфера
     const hasPoorRooms = Object.values(Game.rooms).some(
       r =>
         r.controller &&

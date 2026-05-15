@@ -71,7 +71,7 @@ const factory = {
     }),
 
     test_labWorker: () => ({
-      body: prepareBody({ carry: 4, move: 4 }),
+      body: prepareBody({ carry: 8, move: 8 }),
       memory: {},
     }),
 

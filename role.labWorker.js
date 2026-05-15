@@ -2,48 +2,30 @@
  * ===================================================
  * ROLE.LABWORKER.JS — Крип для обслуживания лабораторий
  * ===================================================
+ * ОПТИМИЗАЦИЯ v3: один крип на комнату вместо одного на тройку.
+ * Экономия ~10 крипов и ~2.5 CPU.
+ *
  * Задачи:
  * 1. Выгружает чужие ресурсы из лаб (если поменяли конфиг)
  * 2. Загружает реагенты из Terminal или Storage в Лаб1 и Лаб2
  * 3. Выгружает готовый продукт из реактора в Terminal или Storage
  *
- * ИСПРАВЛЕНО v2:
- * - Баг unload_reactor: крип с пустым store снова назначал
- *   unload_reactor если реактор не пуст → бесконечный цикл.
- *   Теперь unload_reactor назначается только если реактор
- *   содержит БОЛЬШЕ минимального порога (MIN_UNLOAD).
- * - Баг clear_lab: аналогичная защита — не назначаем задачу
- *   если крип уже пустой и в лабе 0 чужого ресурса.
- *
- * Поддерживает несколько троек лаб в одной комнате:
- *   Memory.rooms['E35S37'].labs  — первая тройка
- *   Memory.rooms['E35S37'].labs2 — вторая тройка
- *   и так далее...
+ * Крип перебирает ВСЕ тройки в комнате и берёт первую найденную задачу.
+ * assignedLab больше не используется.
  *
  * Память крипа:
- * - assignedLab {string} — закреплённая тройка (labs, labs2...)
- * - task        {string} — текущая задача
- * - resource    {string} — текущий ресурс
- * - amount      {number} — сколько взять
- * - labKey      {string} — какая тройка обслуживается сейчас
- * - targetId    {string} — ID структуры для текущей задачи
- * - sourceId    {string} — ID хранилища откуда брать реагент
+ * - task     {string} — текущая задача
+ * - resource {string} — текущий ресурс
+ * - targetId {string} — ID структуры назначения
+ * - sourceId {string} — ID хранилища откуда брать
+ * - labKey   {string} — какая тройка обслуживается
  * ===================================================
  */
 
 const LAB_CAPACITY = 3000;
-
-// Минимальный порог для выгрузки реактора.
-// Если продукта меньше — не назначаем unload_reactor.
-// Это предотвращает бесконечный цикл когда крип берёт
-// остатки (5-10 единиц) и реактор не успевает накопить.
 const MIN_UNLOAD = 50;
 
 module.exports = {
-  /**
-   * Находит хранилище где есть нужный ресурс.
-   * Сначала проверяет терминал, потом storage.
-   */
   findSource: function (room, resource) {
     const terminal = room.terminal;
     const storage = room.storage;
@@ -52,10 +34,6 @@ module.exports = {
     return null;
   },
 
-  /**
-   * Находит куда выгрузить продукт.
-   * Сначала терминал, потом storage.
-   */
   findDest: function (room) {
     const terminal = room.terminal;
     const storage = room.storage;
@@ -64,58 +42,51 @@ module.exports = {
     return null;
   },
 
+  // Возвращает все конфиги троек в комнате
+  getConfigs: function (room) {
+    const mem = room.memory;
+    const configs = [];
+    if (mem.labs) configs.push({ key: "labs", config: mem.labs });
+    if (mem.labs2) configs.push({ key: "labs2", config: mem.labs2 });
+    if (mem.labs3) configs.push({ key: "labs3", config: mem.labs3 });
+    if (mem.labs4) configs.push({ key: "labs4", config: mem.labs4 });
+    if (mem.labs5) configs.push({ key: "labs5", config: mem.labs5 });
+    return configs;
+  },
+
   run: function (creep) {
     if (!creep || !creep.room) return;
 
-    const mem = creep.room.memory;
-
-    // Собираем конфиги троек
-    const allConfigs = [];
-    if (creep.memory.assignedLab) {
-      const config = mem[creep.memory.assignedLab];
-      if (config) allConfigs.push({ key: creep.memory.assignedLab, config });
-    } else {
-      if (mem.labs) allConfigs.push({ key: "labs", config: mem.labs });
-      if (mem.labs2) allConfigs.push({ key: "labs2", config: mem.labs2 });
-      if (mem.labs3) allConfigs.push({ key: "labs3", config: mem.labs3 });
-      if (mem.labs4) allConfigs.push({ key: "labs4", config: mem.labs4 });
-      if (mem.labs5) allConfigs.push({ key: "labs5", config: mem.labs5 });
-    }
-
-    if (allConfigs.length === 0) {
-      creep.say("❌ нет конфига");
-      return;
-    }
-
-    // ИСПРАВЛЕНИЕ: сбрасываем задачу только если крип пустой
-    // И при этом НЕ находится в процессе доставки (working = true)
-    // Раньше сброс происходил всегда при пустом store —
-    // крип брал 5 единиц из реактора, нёс в storage,
-    // после transfer store снова становился пустым на следующий тик,
-    // и задача сбрасывалась до того как он успевал отнести груз.
+    // Сбрасываем задачу когда крип пустой
     if (creep.store.getUsedCapacity() === 0) {
       creep.memory.task = null;
       delete creep.memory.resource;
-      delete creep.memory.amount;
-      delete creep.memory.labKey;
       delete creep.memory.targetId;
       delete creep.memory.sourceId;
+      delete creep.memory.labKey;
     }
 
     // Ищем задачу если нет текущей
     if (!creep.memory.task) {
-      for (const { key, config } of allConfigs) {
+      const configs = this.getConfigs(creep.room);
+
+      if (configs.length === 0) {
+        creep.say("❌ нет конфига");
+        return;
+      }
+
+      for (const { key, config } of configs) {
         const lab1 = Game.getObjectById(config.lab1);
         const lab2 = Game.getObjectById(config.lab2);
         const reactor = Game.getObjectById(config.reactor);
 
         if (!lab1 || !lab2 || !reactor) continue;
 
-        // Приоритет 1: выгрузить чужой ресурс из lab1
-        for (const resource in lab1.store) {
-          if (resource !== config.reagent1 && lab1.store[resource] > 0) {
+        // Приоритет 1: чужой ресурс в lab1
+        for (const res in lab1.store) {
+          if (res !== config.reagent1 && lab1.store[res] > 0) {
             creep.memory.task = "clear_lab";
-            creep.memory.resource = resource;
+            creep.memory.resource = res;
             creep.memory.targetId = config.lab1;
             creep.memory.labKey = key;
             break;
@@ -123,11 +94,11 @@ module.exports = {
         }
         if (creep.memory.task) break;
 
-        // Приоритет 2: выгрузить чужой ресурс из lab2
-        for (const resource in lab2.store) {
-          if (resource !== config.reagent2 && lab2.store[resource] > 0) {
+        // Приоритет 2: чужой ресурс в lab2
+        for (const res in lab2.store) {
+          if (res !== config.reagent2 && lab2.store[res] > 0) {
             creep.memory.task = "clear_lab";
-            creep.memory.resource = resource;
+            creep.memory.resource = res;
             creep.memory.targetId = config.lab2;
             creep.memory.labKey = key;
             break;
@@ -135,11 +106,11 @@ module.exports = {
         }
         if (creep.memory.task) break;
 
-        // Приоритет 3: выгрузить чужой ресурс из реактора
-        for (const resource in reactor.store) {
-          if (resource !== config.product && reactor.store[resource] > 0) {
+        // Приоритет 3: чужой ресурс в реакторе
+        for (const res in reactor.store) {
+          if (res !== config.product && reactor.store[res] > 0) {
             creep.memory.task = "clear_lab";
-            creep.memory.resource = resource;
+            creep.memory.resource = res;
             creep.memory.targetId = config.reactor;
             creep.memory.labKey = key;
             break;
@@ -147,12 +118,11 @@ module.exports = {
         }
         if (creep.memory.task) break;
 
-        // Приоритет 4: выгрузить готовый продукт из реактора
-        // ИСПРАВЛЕНИЕ: только если накопилось достаточно (MIN_UNLOAD)
-        // Раньше крип брал даже 5 единиц → застревал в петле
+        // Приоритет 4: выгрузить продукт из реактора
         if ((reactor.store[config.product] || 0) >= MIN_UNLOAD) {
           creep.memory.task = "unload_reactor";
           creep.memory.resource = config.product;
+          creep.memory.targetId = config.reactor;
           creep.memory.labKey = key;
           break;
         }
@@ -164,13 +134,14 @@ module.exports = {
           if (src) {
             creep.memory.task = "load_lab1";
             creep.memory.resource = config.reagent1;
+            creep.memory.sourceId = src.id;
+            creep.memory.targetId = config.lab1;
+            creep.memory.labKey = key;
             creep.memory.amount = Math.min(
               needed,
               src.store[config.reagent1],
               creep.store.getFreeCapacity(),
             );
-            creep.memory.labKey = key;
-            creep.memory.sourceId = src.id;
             break;
           }
         }
@@ -182,174 +153,118 @@ module.exports = {
           if (src) {
             creep.memory.task = "load_lab2";
             creep.memory.resource = config.reagent2;
+            creep.memory.sourceId = src.id;
+            creep.memory.targetId = config.lab2;
+            creep.memory.labKey = key;
             creep.memory.amount = Math.min(
               needed,
               src.store[config.reagent2],
               creep.store.getFreeCapacity(),
             );
-            creep.memory.labKey = key;
-            creep.memory.sourceId = src.id;
             break;
           }
         }
       }
 
-      if (!creep.memory.task) {
-        // creep.say('✅ всё ок');
-        return;
-      }
+      if (!creep.memory.task) return;
     }
 
-    const currentConfig = mem[creep.memory.labKey];
-    if (!currentConfig) {
-      creep.memory.task = null;
-      return;
-    }
+    // ── ВЫПОЛНЕНИЕ ЗАДАЧИ ─────────────────────────────────────────────────
 
-    const lab1 = Game.getObjectById(currentConfig.lab1);
-    const lab2 = Game.getObjectById(currentConfig.lab2);
-    const reactor = Game.getObjectById(currentConfig.reactor);
-
-    // ── ОЧИСТКА ЛАБЫ ──────────────────────────────────────────────────────
+    // Очистка лабы от чужого ресурса
     if (creep.memory.task === "clear_lab") {
       const target = Game.getObjectById(creep.memory.targetId);
-      if (!target) {
+      const dest = this.findDest(creep.room);
+      if (!target || !dest) {
         creep.memory.task = null;
         return;
       }
 
-      const dest = this.findDest(creep.room);
-      if (!dest) {
-        creep.say("❌ некуда класть");
-        return;
-      }
-
       if (creep.store[creep.memory.resource] === 0) {
-        // Берём из лабы
-        const result = creep.withdraw(target, creep.memory.resource);
-        if (result === ERR_NOT_IN_RANGE) {
+        const r = creep.withdraw(target, creep.memory.resource);
+        if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(target, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ff0000" },
           });
-        }
       } else {
-        // Несём в хранилище
-        const result = creep.transfer(dest, creep.memory.resource);
-        if (result === ERR_NOT_IN_RANGE) {
+        const r = creep.transfer(dest, creep.memory.resource);
+        if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(dest, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ff0000" },
           });
-        }
-        if (result === OK) creep.memory.task = null;
+        if (r === OK) creep.memory.task = null;
       }
       return;
     }
 
-    // ── ВЫГРУЗКА РЕАКТОРА ─────────────────────────────────────────────────
+    // Выгрузка продукта из реактора
     if (creep.memory.task === "unload_reactor") {
+      const reactor = Game.getObjectById(creep.memory.targetId);
       const dest = this.findDest(creep.room);
       if (!dest) {
-        creep.say("❌ некуда класть");
+        creep.say("❌ некуда");
         return;
       }
 
       if (creep.store[creep.memory.resource] === 0) {
-        // ИСПРАВЛЕНИЕ: если реактор стал пустым пока мы шли — сбрасываем задачу
         if (!reactor || (reactor.store[creep.memory.resource] || 0) === 0) {
           creep.memory.task = null;
           return;
         }
-        const result = creep.withdraw(reactor, creep.memory.resource);
-        if (result === ERR_NOT_IN_RANGE) {
+        const r = creep.withdraw(reactor, creep.memory.resource);
+        if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(reactor, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#00ff00" },
           });
-        }
       } else {
-        // Несём в хранилище
-        const result = creep.transfer(dest, creep.memory.resource);
-        if (result === ERR_NOT_IN_RANGE) {
+        const r = creep.transfer(dest, creep.memory.resource);
+        if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(dest, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#00ff00" },
           });
-        }
-        if (result === OK) creep.memory.task = null;
+        if (r === OK) creep.memory.task = null;
       }
       return;
     }
 
-    // ── ЗАГРУЗКА LAB1 ─────────────────────────────────────────────────────
-    if (creep.memory.task === "load_lab1") {
+    // Загрузка реагента в lab1 или lab2
+    if (
+      creep.memory.task === "load_lab1" ||
+      creep.memory.task === "load_lab2"
+    ) {
       const src =
         Game.getObjectById(creep.memory.sourceId) ||
         this.findSource(creep.room, creep.memory.resource);
-      if (!src) {
+      const dest = Game.getObjectById(creep.memory.targetId);
+      if (!src || !dest) {
         creep.memory.task = null;
         return;
       }
 
       if (creep.store[creep.memory.resource] === 0) {
-        const result = creep.withdraw(
+        const r = creep.withdraw(
           src,
           creep.memory.resource,
           creep.memory.amount,
         );
-        if (result === ERR_NOT_IN_RANGE) {
+        if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(src, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ffff00" },
           });
-        }
-        if (result === OK) delete creep.memory.amount;
+        if (r === OK) delete creep.memory.amount;
       } else {
-        const result = creep.transfer(lab1, creep.memory.resource);
-        if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(lab1, {
+        const r = creep.transfer(dest, creep.memory.resource);
+        if (r === ERR_NOT_IN_RANGE)
+          creep.moveTo(dest, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#ffff00" },
           });
-        }
-        if (result === OK) creep.memory.task = null;
-      }
-      return;
-    }
-
-    // ── ЗАГРУЗКА LAB2 ─────────────────────────────────────────────────────
-    if (creep.memory.task === "load_lab2") {
-      const src =
-        Game.getObjectById(creep.memory.sourceId) ||
-        this.findSource(creep.room, creep.memory.resource);
-      if (!src) {
-        creep.memory.task = null;
-        return;
-      }
-
-      if (creep.store[creep.memory.resource] === 0) {
-        const result = creep.withdraw(
-          src,
-          creep.memory.resource,
-          creep.memory.amount,
-        );
-        if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(src, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#ffff00" },
-          });
-        }
-        if (result === OK) delete creep.memory.amount;
-      } else {
-        const result = creep.transfer(lab2, creep.memory.resource);
-        if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(lab2, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#ffff00" },
-          });
-        }
-        if (result === OK) creep.memory.task = null;
+        if (r === OK) creep.memory.task = null;
       }
       return;
     }
