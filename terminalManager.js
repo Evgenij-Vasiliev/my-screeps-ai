@@ -2,31 +2,13 @@
  * ===================================================
  * TERMINALMANAGER.JS — Автопродажа + Логистика лаб + Балансировка энергии
  * ===================================================
- * Запускается из roomManager каждый тик, но реально
- * работает раз в 50 тиков — каждая комната в свой тик.
- *
- * БАЛАНСИРОВКА ЭНЕРГИИ:
- * Если в комнате мало энергии (<20 000 в storage) —
- * богатая комната (>100 000 в storage) отправляет ей
- * энергию через терминал автоматически.
- *
- * БАЛАНСИРОВКА РЕСУРСОВ (resourceBalancer):
- * Глобальный балансировщик всех минералов между комнатами.
- * Запускается раз в 100 тиков из первой комнаты по алфавиту.
- *
- * ЛОГИСТИКА РЕАГЕНТОВ (раз в 100 тиков):
- * Перебирает ВСЕ тройки лаб (labs, labs2, labs3...)
- * в каждой комнате и проверяет запас реагентов.
- *
- * ПРОДАЖА МИНЕРАЛОВ (v2):
- * Продаём излишки K, U, L, H сверх резерва MINERAL_RESERVE.
- * Энергия не продаётся (управляется отдельно через tradeEnabled).
- *
- * Управление через консоль:
- *   Memory.tradeEnabled = false  — остановить торговлю минералами
- *   Memory.tradeEnabled = true   — возобновить торговлю
- *   Memory.balancerEnabled = false — остановить балансировщик ресурсов
- *   Memory.balancerDebug = true    — подробные логи балансировщика
+ * ИСПРАВЛЕНО v3:
+ * - runMineralNeeds() выделен отдельно от runMineralSell().
+ *   Запрос на перенос минерала в терминал создаётся каждые 10 тиков
+ *   независимо от интервала торговли (50 тиков).
+ *   Раньше addNeed("_sell_") вызывался только внутри runMineralSell()
+ *   который привязан к 50-тиковому интервалу — запрос мог не создаться
+ *   если terminalUnloader не был заспавнен в нужный тик.
  * ===================================================
  */
 
@@ -45,7 +27,6 @@ const LAB_REAGENT_MIN = 3000;
 const LAB_REAGENT_SEND = 5000;
 const LAB_REAGENT_DONOR_MIN = 6000;
 
-// Минералы которые продаём и их резерв (ниже резерва — не продаём)
 const SELL_MINERALS = {
   K: 20000,
   U: 20000,
@@ -53,7 +34,6 @@ const SELL_MINERALS = {
   H: 20000,
 };
 
-// Сколько продаём за одну сделку
 const MINERAL_SELL_AMOUNT = 5000;
 
 let roomOffsets = {};
@@ -90,6 +70,57 @@ const terminalManager = {
     }
     needs.push({ resource, amount, toRoom });
     return true;
+  },
+
+  /**
+   * ── ПОДГОТОВКА МИНЕРАЛОВ К ПРОДАЖЕ ───────────────────────────────────────
+   * Запускается каждые 10 тиков — независимо от интервала торговли.
+   * Создаёт запрос terminalNeeds если минерала мало в терминале
+   * но много в storage — terminalUnloader перенесёт.
+   *
+   * Это исправляет баг: раньше addNeed("_sell_") был внутри runMineralSell()
+   * который работает раз в 50 тиков и только если терминал не на cooldown.
+   * Из-за этого запрос мог не создаться и K так и оставался в storage.
+   */
+  runMineralNeeds: function (room) {
+    if (Game.time % 10 !== 0) return;
+
+    const terminal = room.terminal;
+    const storage = room.storage;
+    if (!terminal || !storage) return;
+
+    for (const resource in SELL_MINERALS) {
+      const reserve = SELL_MINERALS[resource];
+      const totalInRoom = this.getTotal(room, resource);
+
+      // Нет излишков — пропускаем
+      if (totalInRoom <= reserve) continue;
+
+      const inTerminal = terminal.store[resource] || 0;
+
+      // В терминале уже достаточно — не нужен перенос
+      if (inTerminal >= MINERAL_SELL_AMOUNT) continue;
+
+      const needed = MINERAL_SELL_AMOUNT - inTerminal;
+      const inStorage = storage.store[resource] || 0;
+
+      if (inStorage > 0) {
+        const isNew = this.addNeed(
+          room,
+          resource,
+          Math.min(needed, inStorage),
+          "_sell_",
+        );
+        if (isNew) {
+          console.log(
+            `[MineralNeeds ${room.name}] 📦 Запрос: перенести ${Math.min(
+              needed,
+              inStorage,
+            )} ${resource} в терминал для продажи`,
+          );
+        }
+      }
+    }
   },
 
   /**
@@ -312,8 +343,8 @@ const terminalManager = {
 
   /**
    * ── ПРОДАЖА МИНЕРАЛОВ ────────────────────────────────────────────────────
-   * Продаём K, U, L, H сверх резерва MINERAL_RESERVE.
-   * Ищем лучший ордер на покупку и продаём.
+   * Продаём K, U, L, H сверх резерва.
+   * Запрос на перенос создаётся в runMineralNeeds() — отдельно.
    */
   runMineralSell: function (room) {
     const terminal = room.terminal;
@@ -324,29 +355,19 @@ const terminalManager = {
     const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (availableEnergy < TERMINAL_ENERGY_MIN) return;
 
-    // Перебираем минералы для продажи
     for (const resource in SELL_MINERALS) {
       const reserve = SELL_MINERALS[resource];
       const totalInRoom = this.getTotal(room, resource);
 
-      // Не продаём если запас ниже резерва
       if (totalInRoom <= reserve) continue;
 
       const inTerminal = terminal.store[resource] || 0;
 
-      // Нет ресурса в терминале — просим terminalUnloader перенести
-      if (inTerminal < MINERAL_SELL_AMOUNT) {
-        const needed = MINERAL_SELL_AMOUNT - inTerminal;
-        const inStorage = storage.store[resource] || 0;
-        if (inStorage > 0) {
-          this.addNeed(room, resource, Math.min(needed, inStorage), "_sell_");
-        }
-        continue;
-      }
+      // Мало в терминале — запрос уже создан в runMineralNeeds(), ждём переноса
+      if (inTerminal < MINERAL_SELL_AMOUNT) continue;
 
       const sellAmount = Math.min(MINERAL_SELL_AMOUNT, inTerminal);
 
-      // Ищем лучший ордер на покупку
       const orders = Game.market
         .getAllOrders({ resourceType: resource })
         .filter(
@@ -373,7 +394,6 @@ const terminalManager = {
                 `[Terminal ${room.name}] ✅ Продано ${dealAmount} ${resource} ` +
                   `по ${order.price} → ${order.roomName}`,
               );
-              // Убираем запрос на перенос если был
               if (room.memory.terminalNeeds) {
                 room.memory.terminalNeeds = room.memory.terminalNeeds.filter(
                   n => !(n.resource === resource && n.toRoom === "_sell_"),
@@ -410,7 +430,12 @@ const terminalManager = {
       resourceBalancer.run();
     }
 
-    // ── ШАГ 2: ЛОГИСТИКА ЛАБ ────────────────────────────────────────────────
+    // ── ШАГ 2: ПОДГОТОВКА МИНЕРАЛОВ К ПРОДАЖЕ (каждые 10 тиков) ────────────
+    // Создаёт запросы terminalNeeds для переноса минералов в терминал.
+    // Работает независимо от интервала торговли.
+    this.runMineralNeeds(room);
+
+    // ── ШАГ 3: ЛОГИСТИКА ЛАБ ────────────────────────────────────────────────
     if (roomOffsets[room.name] === undefined) {
       const count = Object.keys(roomOffsets).length;
       const step = Math.floor(CHECK_INTERVAL / 5);
@@ -418,7 +443,7 @@ const terminalManager = {
     }
     this.runLabSupply(room);
 
-    // ── ШАГ 3: ТОРГОВЛЯ — только если включена ───────────────────────────────
+    // ── ШАГ 4: ТОРГОВЛЯ — только если включена ───────────────────────────────
     if (Memory.tradeEnabled === false) return;
 
     if ((Game.time + roomOffsets[room.name]) % CHECK_INTERVAL !== 0) return;
@@ -431,12 +456,10 @@ const terminalManager = {
     const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (availableEnergy < TERMINAL_ENERGY_MIN) return;
 
-    // ── ШАГ 3а: ПРОДАЖА МИНЕРАЛОВ (приоритет выше энергии) ──────────────────
+    // ── ШАГ 4а: ПРОДАЖА МИНЕРАЛОВ ───────────────────────────────────────────
     this.runMineralSell(room);
 
-    // ── ШАГ 3б: ПРОДАЖА ЭНЕРГИИ — только если нет бедных комнат ────────────
-    // Энергия не продаётся пока Memory.tradeEnabled = false (см. выше)
-    // и пока есть бедные комнаты или storage ниже буфера
+    // ── ШАГ 4б: ПРОДАЖА ЭНЕРГИИ ─────────────────────────────────────────────
     const hasPoorRooms = Object.values(Game.rooms).some(
       r =>
         r.controller &&

@@ -18,16 +18,18 @@
 
 module.exports = {
   // --- Базовые роли ---
-  test_harvester: require("./role.harvester"), // Копает и несёт энергию сам
+  // test_harvester: require("./role.harvester"), // Копает и несёт энергию сам
   test_miner: require("./role.miner"), // Сидит у источника, только копает
-  test_hauler: require("./role.hauler"), // Возит энергию из контейнеров
-  test_upgrader: require("./role.upgrader"), // Улучшает контроллер
-  test_builder: require("./role.builder"), // Строит конструкции
-  test_repairer: require("./role.repairer"), // Чинит дороги и контейнеры
-  test_towerSupplier: require("./role.towerSupplier"), // Заряжает башни энергией
+  // test_hauler: require("./role.hauler"), // Возит энергию из контейнеров
+  // test_upgrader: require("./role.upgrader"), // Улучшает контроллер
+  // test_builder: require("./role.builder"), // Строит конструкции
+  // test_repairer: require("./role.repairer"), // Чинит дороги и контейнеры
+  // test_towerSupplier: require("./role.towerSupplier"), // Заряжает башни энергией
   test_mineralMiner: require("./role.mineralMiner"), // Добывает минералы
   test_labWorker: require("./role.labWorker"), // Рабочий лабораторий
   test_terminalUnloader: require("./role.terminalUnloader"),
+  test_nukerFiller: require("./role.nukerFiller"), // Заряжает Nuker (запуск через main.js)
+  test_worker: require("./role.worker"), // Универсальный крип (система задач)
 
   // --- Удалённые операции ---
   test_remoteMiner: require("./role.remoteMiner"), // Майнер в соседней комнате

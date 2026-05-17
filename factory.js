@@ -35,10 +35,10 @@ const factory = {
     //   memory: {},
     // }),
 
-    test_harvester: () => ({
-      body: prepareBody({ work: 2, carry: 4, move: 6 }),
-      memory: {},
-    }),
+    // test_harvester: () => ({
+    //   body: prepareBody({ work: 2, carry: 4, move: 6 }),
+    //   memory: {},
+    // }),
 
     test_mineralMiner: spawn => {
       let mineralId = null;
@@ -55,30 +55,30 @@ const factory = {
       };
     },
 
-    test_builder: () => ({
-      body: prepareBody({ work: 5, carry: 5, move: 5 }),
-      memory: {},
-    }),
+    // test_builder: () => ({
+    //   body: prepareBody({ work: 5, carry: 5, move: 5 }),
+    //   memory: {},
+    // }),
 
-    test_repairer: () => ({
-      body: prepareBody({ work: 4, carry: 4, move: 4 }),
-      memory: {},
-    }),
+    // test_repairer: () => ({
+    //   body: prepareBody({ work: 4, carry: 4, move: 4 }),
+    //   memory: {},
+    // }),
 
-    test_upgrader: () => ({
-      body: prepareBody({ work: 15, carry: 8, move: 8 }),
-      memory: {},
-    }),
+    // test_upgrader: () => ({
+    //   body: prepareBody({ work: 15, carry: 8, move: 8 }),
+    //   memory: {},
+    // }),
 
     test_labWorker: () => ({
       body: prepareBody({ carry: 8, move: 8 }),
       memory: {},
     }),
 
-    test_towerSupplier: () => ({
-      body: prepareBody({ carry: 4, move: 4 }),
-      memory: {},
-    }),
+    // test_towerSupplier: () => ({
+    //   body: prepareBody({ carry: 4, move: 4 }),
+    //   memory: {},
+    // }),
 
     test_terminalUnloader: () => ({
       body: prepareBody({ carry: 10, move: 5 }),
@@ -108,6 +108,16 @@ const factory = {
         move: 20,
       }),
       memory: { targetRoom: null, homeRoom: spawn.room.name },
+    }),
+
+    // test_worker — универсальный крип системы задач.
+    // Заменяет builder и upgrader.
+    // work: 5 — строит и качает контроллер
+    // carry: 5 — носит энергию
+    // move: 5 — скорость 1 клетка за тик на дороге
+    test_worker: () => ({
+      body: prepareBody({ work: 5, carry: 5, move: 5 }),
+      memory: {},
     }),
 
     default: () => ({
