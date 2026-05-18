@@ -3,6 +3,7 @@ const roles = require("./roleRegistry");
 const cpuMonitor = require("./cpuMonitor");
 const cmd = require("./console");
 const empireResourceRegistry = require("./empireResourceRegistry");
+const economyManager = require("./economyManager");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -16,10 +17,16 @@ module.exports.loop = function () {
     }
   }
 
+  // Реестр ресурсов империи
+
   const firstRoom = Object.keys(Game.rooms)
     .filter(n => Game.rooms[n].controller && Game.rooms[n].controller.my)
     .sort()[0];
   if (firstRoom) empireResourceRegistry.run();
+
+  // Запуск Экономического менеджера
+
+  economyManager.run();
 
   /**
    * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
