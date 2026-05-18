@@ -2,6 +2,7 @@ const roomManager = require("./roomManager");
 const roles = require("./roleRegistry");
 const cpuMonitor = require("./cpuMonitor");
 const cmd = require("./console");
+const empireResourceRegistry = require("./empireResourceRegistry");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -14,6 +15,11 @@ module.exports.loop = function () {
       delete Memory.creeps[name];
     }
   }
+
+  const firstRoom = Object.keys(Game.rooms)
+    .filter(n => Game.rooms[n].controller && Game.rooms[n].controller.my)
+    .sort()[0];
+  if (firstRoom) empireResourceRegistry.run();
 
   /**
    * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
