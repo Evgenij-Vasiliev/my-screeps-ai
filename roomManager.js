@@ -40,6 +40,8 @@ const terminalManager = require("./terminalManager");
 const linkManager = require("./role.linkManager");
 // Управление лабораториями — варка бустов
 const labManager = require("./role.labManager");
+// Управление фабриками
+const factoryController = require("./factoryController");
 
 // Комнаты для удалённых операций (remoteMiner, remoteHauler, reserver)
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
@@ -52,7 +54,7 @@ const NUKER_ROOM = "E37S37";
 // ИСПРАВЛЕНО v2: снижен TERMINAL_ENERGY_OVERFLOW (было 50000)
 // и повышен STORAGE_ENERGY_MIN (было 10000) —
 // чтобы terminalUnloader активнее перекачивал энергию в storage.
-const TERMINAL_ENERGY_OVERFLOW = 20000;
+const TERMINAL_ENERGY_OVERFLOW = 100000;
 const STORAGE_ENERGY_MIN = 30000;
 
 // Комнаты с повышенным риском нападения — сканируем в первую очередь.
@@ -207,7 +209,8 @@ function runObserver(room) {
  * Аттакеры читают Memory.attackAlert в role.attacker.js и реагируют.
  * Memory.attackAlert = { room: "E35S38", time: Game.time }
  *
- * Фильтр: считаем только боевых крипов (ATTACK, RANGED_ATTACK, HEAL).
+ * Фильтр: считаем боевых крипов (ATTACK, RANGED_ATTACK, HEAL)
+ * И Invader Core — структуру которая захватывает контроллер.
  * Мирные крипы (например чужие hauler) тревогу не поднимают.
  *
  * ВАЖНО: комнаты дальней добычи (E36S37, E35S38) видны только если
@@ -238,10 +241,11 @@ function runAttackScanner() {
     return aRisk - bRisk;
   });
 
-  // Ищем комнату с боевыми врагами
+  // Ищем комнату с боевыми врагами или Invader Core
   for (const room of sorted) {
+    // ── БОЕВЫЕ КРИПЫ ──────────────────────────────────────────────────────
+    // Игнорируем мирных крипов — считаем только боевых
     const hostiles = room.find(FIND_HOSTILE_CREEPS, {
-      // Игнорируем мирных крипов — считаем только боевых
       filter: c =>
         c.body.some(
           b => b.type === ATTACK || b.type === RANGED_ATTACK || b.type === HEAL,
@@ -255,6 +259,25 @@ function runAttackScanner() {
       if (!prev || prev.room !== room.name) {
         console.log(
           `[AttackAlert] 🚨 Враги в ${room.name}! Поднимаем тревогу. Крипов: ${hostiles.length}`,
+        );
+      }
+      Memory.attackAlert = { room: room.name, time: Game.time };
+      return; // нашли — дальше не ищем
+    }
+
+    // ── INVADER CORE ──────────────────────────────────────────────────────
+    // Invader Core — вражеская структура которая захватывает контроллер.
+    // Это НЕ крип — обычный фильтр FIND_HOSTILE_CREEPS его не видит.
+    // Обнаружив Core — поднимаем тревогу и посылаем аттакеров.
+    const invaderCore = room.find(FIND_HOSTILE_STRUCTURES, {
+      filter: s => s.structureType === STRUCTURE_INVADER_CORE,
+    });
+
+    if (invaderCore.length > 0) {
+      const prev = Memory.attackAlert;
+      if (!prev || prev.room !== room.name) {
+        console.log(
+          `[AttackAlert] 🚨 Invader Core в ${room.name}! Поднимаем тревогу.`,
         );
       }
       Memory.attackAlert = { room: room.name, time: Game.time };
@@ -645,6 +668,9 @@ const roomManager = {
 
     // ── Продажа ресурсов и балансировка между комнатами ───────────────────
     terminalManager.run(room);
+
+    // -- Запуск фабрик-----------------------------------------------------
+    factoryController.run(room);
 
     // ── Передача энергии через линки ──────────────────────────────────────
     linkManager.run(room);

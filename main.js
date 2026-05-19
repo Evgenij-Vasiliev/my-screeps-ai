@@ -4,6 +4,8 @@ const cpuMonitor = require("./cpuMonitor");
 const cmd = require("./console");
 const empireResourceRegistry = require("./empireResourceRegistry");
 const economyManager = require("./economyManager");
+const factoryDirector = require("./factoryDirector");
+const logisticsDirector = require("./logisticsDirector");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -27,6 +29,14 @@ module.exports.loop = function () {
   // Запуск Экономического менеджера
 
   economyManager.run();
+
+  // Директор завода
+
+  factoryDirector.run();
+
+  // Логистика
+
+  logisticsDirector.run();
 
   /**
    * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
