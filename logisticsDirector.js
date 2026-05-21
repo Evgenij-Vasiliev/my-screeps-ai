@@ -2,8 +2,24 @@
  * ===================================================
  * LOGISTICSDIRECTOR.JS — Логистический оркестратор империи
  * ===================================================
- * VERSION: 1.0
+ * VERSION: 1.3
  * Logistics Orchestration Layer.
+ *
+ * ИЗМЕНЕНИЯ v1.3:
+ * - DELIVERY_AMOUNT увеличен с 2000 до 5000.
+ *   Причина: 2000 создавало слишком частые delivery cycles.
+ *   5000 уменьшает logistics churn и factory starvation.
+ *
+ * ИЗМЕНЕНИЯ v1.2:
+ * - Добавлен STALE CHECK: если воркер (assignedTo) мёртв
+ *   или delivery не обновлялась более STALE_TIMEOUT тиков —
+ *   статус сбрасывается обратно в queued.
+ *   Это исправляет баг: delivery зависала навсегда при смерти воркера.
+ *
+ * ИЗМЕНЕНИЯ v1.1:
+ * - Добавлен метод getQueuedDelivery(roomName)
+ *   для интеграции с Worker System (Этап 6)
+ * - Добавлено поле assignedTo в структуру delivery
  *
  * НАЗНАЧЕНИЕ:
  * - Анализирует logistics bottlenecks
@@ -20,25 +36,11 @@
  * - строит production queues
  * - изменяет creep.memory напрямую
  *
- * INPUTS:
- * factoryDirector.getAllTasks()
- * Memory.empire.factory.rooms[roomName].status
- * empireResourceRegistry.getInRoom()
- * economyManager.getState()
- *
- * OUTPUTS:
- * Memory.empire.logistics
- *
- * DELIVERY LIFECYCLE:
- * queued → assigned → delivering → completed
- *                   → cancelled
- *
- * OWNERSHIP (DATA_OWNERSHIP.md):
- * LogisticsDirector владеет:
- * - resource routing
- * - delivery priorities
- * - transfer scheduling
- * - balancing operations
+ * DATA OWNERSHIP:
+ * deliveries[]        — LogisticsDirector (создаёт, очищает)
+ * delivery.status     — Worker System (обновляет)
+ * delivery.assignedTo — Worker System (обновляет)
+ * creep.memory        — Worker System (владеет)
  * ===================================================
  */
 
@@ -48,32 +50,24 @@ const economyManager = require("./economyManager");
 
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
-/**
- * Интервал пересчёта в тиках.
- * Offset +3 — после Registry(+0), EconomyManager(+1), FactoryDirector(+2).
- */
 const UPDATE_INTERVAL = 20;
-const UPDATE_OFFSET = 3;
+const UPDATE_OFFSET = 3; // после Registry(+0), EconomyManager(+1), FactoryDirector(+2)
 
-/**
- * Версия формата данных.
- */
-const LOGISTICS_VERSION = 1;
+const LOGISTICS_VERSION = 3;
 
 /**
  * Статусы delivery task — lifecycle.
+ * queued → assigned → delivering → completed
+ *                   → cancelled
  */
 const DELIVERY_STATUS = {
-  QUEUED: "queued", // создана, ждёт исполнителя
-  ASSIGNED: "assigned", // назначена worker'у
-  DELIVERING: "delivering", // worker в процессе доставки
-  COMPLETED: "completed", // доставка завершена
-  CANCELLED: "cancelled", // отменена (задача исчезла или ресурс доставлен)
+  QUEUED: "queued",
+  ASSIGNED: "assigned",
+  DELIVERING: "delivering",
+  COMPLETED: "completed",
+  CANCELLED: "cancelled",
 };
 
-/**
- * Приоритеты delivery.
- */
 const PRIORITY = {
   HIGH: "high",
   NORMAL: "normal",
@@ -81,8 +75,7 @@ const PRIORITY = {
 
 /**
  * Карта: что нужно как сырьё для производства ресурса.
- * v1 поддерживает только ENERGY → FACTORY.
- * Расширяется в следующих версиях.
+ * v1: только ENERGY → FACTORY.
  */
 const FACTORY_INPUT_MAP = {
   [RESOURCE_BATTERY]: RESOURCE_ENERGY,
@@ -90,15 +83,28 @@ const FACTORY_INPUT_MAP = {
 };
 
 /**
- * Количество энергии которое запрашиваем за один delivery task.
+ * Количество ресурса за один delivery task.
+ * ИЗМЕНЕНО v1.3: 2000 → 5000.
+ * 5000 уменьшает количество рейсов и factory starvation.
  */
-const DELIVERY_AMOUNT = 2000;
+const DELIVERY_AMOUNT = 5000;
 
 /**
  * Сколько тиков держим completed/cancelled delivery перед очисткой.
- * Нужно чтобы worker мог прочитать финальный статус.
+ * Worker должен успеть прочитать финальный статус.
  */
 const CLEANUP_AFTER_TICKS = 50;
+
+/**
+ * Сколько тиков delivery может не обновляться прежде чем
+ * считается зависшей (воркер умер или завис).
+ *
+ * Почему 100?
+ * - Воркер обновляет updatedAt каждый тик пока активен.
+ * - 100 тиков без обновления = воркер точно мёртв.
+ * - Меньше 50 нельзя — воркер может просто идти к цели.
+ */
+const STALE_TIMEOUT = 100;
 
 // ── МОДУЛЬ ─────────────────────────────────────────────────────────────────
 
@@ -106,35 +112,20 @@ const logisticsDirector = {
   /**
    * Главная точка входа.
    * Вызывать из main.js после factoryDirector.run().
-   *
-   * CPU стратегия:
-   * - Работает по интервалу UPDATE_INTERVAL
-   * - Читает только из существующих data layers
-   * - Не делает heavy scans каждый тик
    */
   run: function () {
     if (!Memory.empire) Memory.empire = {};
-
-    // Offset +3: после всех предыдущих layers
     if (Game.time % UPDATE_INTERVAL !== UPDATE_OFFSET) return;
-
     this.plan();
   },
 
   /**
    * Планирует delivery tasks.
-   *
-   * Алгоритм:
-   * 1. Читаем все factory tasks из FactoryDirector
-   * 2. Находим фабрики со статусом waiting_input
-   * 3. Для каждой создаём delivery task (с защитой от дублей)
-   * 4. Очищаем завершённые/отменённые tasks
-   * 5. Публикуем в Memory.empire.logistics
+   * Находит фабрики в waiting_input → создаёт queued deliveries.
    */
   plan: function () {
     const startCpu = Game.cpu.getUsed();
 
-    // Инициализируем структуру если нет
     if (!Memory.empire.logistics) {
       Memory.empire.logistics = { deliveries: {} };
     }
@@ -147,9 +138,9 @@ const logisticsDirector = {
     let waitingCount = 0;
     let activeCount = 0;
     let createdCount = 0;
+    let recoveredCount = 0; // сколько зависших deliveries восстановлено
 
-    // ── ШАГ 1: CLEANUP ────────────────────────────────────────────────────
-    // Удаляем завершённые и отменённые deliveries старше CLEANUP_AFTER_TICKS
+    // ── CLEANUP: удаляем завершённые/отменённые старше 50 тиков ──────────
     for (const roomName in deliveries) {
       deliveries[roomName] = deliveries[roomName].filter(d => {
         const isDone =
@@ -161,34 +152,67 @@ const logisticsDirector = {
       });
     }
 
-    // ── ШАГ 2: АНАЛИЗ BOTTLENECKS ─────────────────────────────────────────
-    // Читаем все активные factory tasks из FactoryDirector
-    const activeTasks = factoryDirector.getAllTasks();
+    // ── STALE CHECK: сбрасываем зависшие deliveries ───────────────────────
+    //
+    // Проблема: воркер умирает в процессе доставки.
+    // Delivery остаётся в статусе assigned/delivering навсегда.
+    // LogisticsDirector видит "активную" delivery и не создаёт новую.
+    // Фабрика голодает.
+    //
+    // Решение: проверяем каждую активную delivery:
+    // 1. Если assignedTo — мёртвый крип → сбрасываем в queued немедленно.
+    // 2. Если updatedAt не менялся более STALE_TIMEOUT тиков → сбрасываем.
+    //
+    // CPU: Game.creeps — это уже загруженный объект, обращение бесплатное.
+    for (const roomName in deliveries) {
+      for (const d of deliveries[roomName]) {
+        // Проверяем только активные deliveries (не завершённые)
+        if (
+          d.status !== DELIVERY_STATUS.ASSIGNED &&
+          d.status !== DELIVERY_STATUS.DELIVERING
+        ) {
+          continue;
+        }
 
+        // Проверка 1: воркер мёртв?
+        const workerDead = d.assignedTo && !Game.creeps[d.assignedTo];
+
+        // Проверка 2: delivery не обновлялась слишком долго?
+        const lastUpdate = d.updatedAt || d.createdAt;
+        const isStale = Game.time - lastUpdate > STALE_TIMEOUT;
+
+        if (workerDead || isStale) {
+          // Сбрасываем обратно в очередь — другой воркер подхватит
+          const reason = workerDead ? "воркер мёртв" : "timeout";
+          console.log(
+            `[LogisticsDirector] ♻️  ${roomName}: delivery восстановлена` +
+              ` (${reason}, был: ${d.assignedTo}, статус был: ${d.status})`,
+          );
+
+          d.status = DELIVERY_STATUS.QUEUED;
+          d.assignedTo = null;
+          d.updatedAt = Game.time;
+          recoveredCount++;
+        }
+      }
+    }
+
+    // ── АНАЛИЗ BOTTLENECKS ────────────────────────────────────────────────
     for (const roomName in factoryRooms) {
       const roomData = factoryRooms[roomName];
 
-      // Нас интересуют только фабрики в состоянии waiting_input
       if (roomData.status !== "waiting_input") continue;
       if (!roomData.task) continue;
 
       waitingCount++;
 
-      const task = roomData.task;
-
-      // Определяем какое сырьё нужно фабрике
-      // v1: только RESOURCE_ENERGY → FACTORY
-      const inputResource = FACTORY_INPUT_MAP[task.resource];
+      const inputResource = FACTORY_INPUT_MAP[roomData.task.resource];
       if (!inputResource) continue;
+      if (inputResource !== RESOURCE_ENERGY) continue; // v1: только ENERGY
 
-      // v1 scope: обрабатываем только доставку ENERGY
-      if (inputResource !== RESOURCE_ENERGY) continue;
-
-      // ── DUPLICATE PROTECTION ─────────────────────────────────────────
-      // Не создаём новый task если уже есть активный для этой комнаты
-      // и этого ресурса в статусе queued/assigned/delivering
       if (!deliveries[roomName]) deliveries[roomName] = [];
 
+      // DUPLICATE PROTECTION: не создаём если уже есть активный
       const alreadyActive = deliveries[roomName].some(
         d =>
           d.resource === inputResource &&
@@ -203,14 +227,11 @@ const logisticsDirector = {
         continue;
       }
 
-      // ── PRIORITY ─────────────────────────────────────────────────────
-      // Спрашиваем EconomyManager — не анализируем сами
-      const priority = economyManager.isCritical(task.resource)
+      const priority = economyManager.isCritical(roomData.task.resource)
         ? PRIORITY.HIGH
         : PRIORITY.NORMAL;
 
-      // ── CREATE DELIVERY TASK ──────────────────────────────────────────
-      const delivery = {
+      deliveries[roomName].push({
         resource: inputResource,
         target: "factory",
         amount: DELIVERY_AMOUNT,
@@ -218,22 +239,19 @@ const logisticsDirector = {
         status: DELIVERY_STATUS.QUEUED,
         createdAt: Game.time,
         updatedAt: Game.time,
-      };
+        assignedTo: null, // заполняет Worker System
+      });
 
-      deliveries[roomName].push(delivery);
       createdCount++;
-
       console.log(
         `[LogisticsDirector] 📦 ${roomName}: создана доставка` +
-          ` ${inputResource} x${DELIVERY_AMOUNT}` +
-          ` → factory [${priority}]`,
+          ` ${inputResource} x${DELIVERY_AMOUNT} → factory [${priority}]`,
       );
     }
 
-    // ── ШАГ 3: ПУБЛИКАЦИЯ ─────────────────────────────────────────────────
+    // ── ПУБЛИКАЦИЯ ────────────────────────────────────────────────────────
     const planDuration = Game.cpu.getUsed() - startCpu;
 
-    // Считаем итоговую статистику
     for (const roomName in deliveries) {
       activeCount += deliveries[roomName].filter(
         d =>
@@ -250,15 +268,15 @@ const logisticsDirector = {
       waitingCount,
       activeCount,
       createdCount,
+      recoveredCount, // новое поле — для мониторинга
       planDuration: Math.round(planDuration * 1000) / 1000,
     };
 
-    // Throttled logging — раз в 100 тиков
     if (Game.time % 100 <= UPDATE_OFFSET) {
       console.log(
         `[LogisticsDirector] 🚚 Планирование: waiting_input=${waitingCount}` +
-          ` | active deliveries=${activeCount}` +
-          ` | created=${createdCount}` +
+          ` | active=${activeCount} | created=${createdCount}` +
+          ` | recovered=${recoveredCount}` +
           ` | CPU: ${planDuration.toFixed(3)}ms`,
       );
     }
@@ -267,10 +285,34 @@ const logisticsDirector = {
   // ── ПУБЛИЧНОЕ API ────────────────────────────────────────────────────────
 
   /**
+   * Получить первый queued delivery для комнаты.
+   * Используется Worker System для взятия задачи.
+   *
+   * Возвращает объект delivery из Memory — по ссылке.
+   * Worker обновляет status/assignedTo напрямую в этом объекте.
+   *
+   * @param {string} roomName
+   * @returns {Object|null} delivery или null
+   */
+  getQueuedDelivery: function (roomName) {
+    if (
+      !Memory.empire ||
+      !Memory.empire.logistics ||
+      !Memory.empire.logistics.deliveries
+    )
+      return null;
+
+    const list = Memory.empire.logistics.deliveries[roomName];
+    if (!list) return null;
+
+    return list.find(d => d.status === DELIVERY_STATUS.QUEUED) || null;
+  },
+
+  /**
    * Получить все delivery tasks для комнаты.
    *
    * @param {string} roomName
-   * @returns {Array} массив delivery tasks или []
+   * @returns {Array}
    */
   getDeliveries: function (roomName) {
     if (
@@ -298,9 +340,9 @@ const logisticsDirector = {
   },
 
   /**
-   * Получить все активные deliveries по всем комнатам.
+   * Получить все deliveries по всем комнатам.
    *
-   * @returns {Object} { roomName: [delivery, ...] }
+   * @returns {Object}
    */
   getAllDeliveries: function () {
     if (
@@ -310,24 +352,6 @@ const logisticsDirector = {
     )
       return {};
     return Memory.empire.logistics.deliveries;
-  },
-
-  /**
-   * Обновить статус delivery task.
-   * Вызывается будущим worker/task system.
-   *
-   * @param {string} roomName
-   * @param {string} resource
-   * @param {string} newStatus — один из DELIVERY_STATUS.*
-   */
-  updateStatus: function (roomName, resource, newStatus) {
-    const deliveries = this.getDeliveries(roomName);
-    const delivery = deliveries.find(
-      d => d.resource === resource && d.target === "factory",
-    );
-    if (!delivery) return;
-    delivery.status = newStatus;
-    delivery.updatedAt = Game.time;
   },
 
   /**

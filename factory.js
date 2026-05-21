@@ -116,7 +116,24 @@ const factory = {
     // carry: 5 — носит энергию
     // move: 5 — скорость 1 клетка за тик на дороге
     test_worker: () => ({
-      body: prepareBody({ work: 5, carry: 5, move: 5 }),
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      memory: {},
+    }),
+
+    /**
+     * test_deliveryWorker — логистический исполнитель.
+     * Только доставка ресурсов в фабрику.
+     *
+     * Тело: 10 CARRY + 5 MOVE
+     * - CARRY: вместимость 500 energy за рейс
+     * - MOVE: скорость 1 клетка/тик на дороге (2:1 = дорога)
+     * - Стоимость: 10×50 + 5×50 = 750 energy
+     *
+     * 10 CARRY выбрано чтобы доставлять 5000 за 10 рейсов —
+     * баланс между скоростью и стоимостью спавна.
+     */
+    test_deliveryWorker: () => ({
+      body: prepareBody({ carry: 1, move: 1 }),
       memory: {},
     }),
 

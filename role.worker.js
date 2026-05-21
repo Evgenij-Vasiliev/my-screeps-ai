@@ -2,21 +2,23 @@
  * ===================================================
  * ROLE.WORKER.JS — Универсальный крип
  * ===================================================
+ * VERSION: 3.0
  * Роль в памяти крипа: test_worker
  *
- * Логика работы:
+ * ИЗМЕНЕНИЯ v3.0:
+ * - Delivery логика полностью удалена.
+ *   Доставкой в фабрику занимается role.deliveryWorker.js.
+ * - Воркер отвечает только за room work:
+ *   UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD
+ * - UPGRADE оставлен как fallback но на 8 уровне
+ *   taskManager его не назначает (ticksToDowngrade > 100000).
  *
- * ШАГ 0 (вне цикла working):
- * - UNLOAD_LINK — проверяется первым делом.
- *   Только ОДИН воркер может разгружать линк за раз.
- *   Блокировка через creep.memory.unloadingLink = true.
- *   Пока первый разгружает — второй идёт к обычным задачам.
- *
- * ШАГ 1 (обычный цикл working):
- * - TOWER    → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
+ * ЛОГИКА:
+ * ШАГ 0: UNLOAD_LINK — один воркер за раз разгружает линк в storage.
+ * ШАГ 1: рабочий цикл — набрать энергию → выполнить задачу.
  *
  * Память крипа:
- * - working        {boolean} — false = сбор, true = работа
+ * - working        {boolean} — false = сбор энергии, true = работа
  * - task           {string}  — текущая задача
  * - taskTargetId   {string}  — ID цели
  * - unloadingLink  {boolean} — этот воркер разгружает линк
@@ -33,15 +35,15 @@ const roleWorker = {
       creep.memory.working = false;
     }
 
-    // ── ШАГ 0: РАЗГРУЗКА ЛИНКА — вне цикла working ───────────────────────
-    // Проверяем линк ДО всего остального.
-    // Только один воркер разгружает линк за раз —
-    // остальные пропускают этот шаг и идут к обычным задачам.
+    const storage = creep.room.storage;
+
+    // ── ШАГ 0: РАЗГРУЗКА ЛИНКА ───────────────────────────────────────────
+    // Выполняется ДО рабочего цикла.
+    // Только ОДИН воркер разгружает линк за раз.
     const linksConfig = creep.room.memory.links;
     const storageLink = linksConfig
       ? Game.getObjectById(linksConfig.storage)
       : null;
-    const storage = creep.room.storage;
 
     if (
       storageLink &&
@@ -49,7 +51,6 @@ const roleWorker = {
       storage &&
       storage.store.getFreeCapacity() > 0
     ) {
-      // Проверяем — не разгружает ли линк уже другой воркер
       const anotherUnloading = Object.values(Game.creeps).some(
         c =>
           c.name !== creep.name &&
@@ -59,13 +60,10 @@ const roleWorker = {
       );
 
       if (!anotherUnloading || creep.memory.unloadingLink) {
-        // Мы разгружаем линк — помечаем себя
         creep.memory.unloadingLink = true;
 
-        // Несём энергию из линка в storage
         if (creep.store[RESOURCE_ENERGY] > 0) {
-          const r = creep.transfer(storage, RESOURCE_ENERGY);
-          if (r === ERR_NOT_IN_RANGE) {
+          if (creep.transfer(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
             creep.moveTo(storage, {
               reusePath: 5,
               visualizePathStyle: { stroke: "#00ff00" },
@@ -74,9 +72,7 @@ const roleWorker = {
           return;
         }
 
-        // Крип пустой — идём к линку
-        const r = creep.withdraw(storageLink, RESOURCE_ENERGY);
-        if (r === ERR_NOT_IN_RANGE) {
+        if (creep.withdraw(storageLink, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
           creep.moveTo(storageLink, {
             reusePath: 5,
             visualizePathStyle: { stroke: "#00ff00" },
@@ -85,13 +81,11 @@ const roleWorker = {
         return;
       }
     } else {
-      // Линк пустой — снимаем флаг
       creep.memory.unloadingLink = false;
     }
 
-    // ── ШАГ 1: обычный цикл working ──────────────────────────────────────
+    // ── ШАГ 1: РАБОЧИЙ ЦИКЛ ──────────────────────────────────────────────
 
-    // Переключение состояний
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
       creep.memory.task = null;
@@ -107,8 +101,8 @@ const roleWorker = {
     if (creep.memory.working) {
       taskManager.assignTask(creep, creep.room);
 
-      // Нет задач — отходим от storage чтобы не блокировать проход
       if (!creep.memory.task) {
+        // Нет задач — отходим от storage чтобы не блокировать проход
         if (storage && creep.pos.getRangeTo(storage) < 4) {
           creep.moveTo(creep.room.controller, {
             reusePath: 20,
@@ -125,9 +119,7 @@ const roleWorker = {
   },
 
   doWork: function (creep) {
-    if (!creep.memory.task) {
-      creep.memory.task = TASKS.UPGRADE;
-    }
+    if (!creep.memory.task) return;
 
     switch (creep.memory.task) {
       // ── ЗАПРАВКА БАШНИ ────────────────────────────────────────────────
@@ -137,7 +129,6 @@ const roleWorker = {
         if (!storage || storage.store[RESOURCE_ENERGY] === 0) {
           creep.memory.task = null;
           creep.memory.taskTargetId = null;
-          creep.say("⏳ нет энергии");
           return;
         }
 
@@ -172,7 +163,7 @@ const roleWorker = {
         break;
       }
 
-      // ── ЗАПРАВКА ТЕРМИНАЛА ЭНЕРГИЕЙ ───────────────────────────────────
+      // ── ЗАПРАВКА ТЕРМИНАЛА ────────────────────────────────────────────
       case TASKS.TERMINAL: {
         const terminal = creep.room.terminal;
         const storage = creep.room.storage;
@@ -206,9 +197,9 @@ const roleWorker = {
         break;
       }
 
-      // ── ЗАПРАВКА SPAWN/EXTENSIONS ──────────────────────────────────────
+      // ── ЗАПРАВКА SPAWN/EXTENSIONS ─────────────────────────────────────
       case TASKS.SUPPLY: {
-        let target = Game.getObjectById(creep.memory.taskTargetId);
+        const target = Game.getObjectById(creep.memory.taskTargetId);
 
         if (!target || target.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
           creep.memory.task = null;
@@ -227,7 +218,7 @@ const roleWorker = {
 
       // ── РЕМОНТ ────────────────────────────────────────────────────────
       case TASKS.REPAIR: {
-        let target = Game.getObjectById(creep.memory.taskTargetId);
+        const target = Game.getObjectById(creep.memory.taskTargetId);
 
         if (!target || target.hits === target.hitsMax) {
           creep.memory.task = null;
@@ -246,7 +237,7 @@ const roleWorker = {
 
       // ── СТРОИТЕЛЬСТВО ─────────────────────────────────────────────────
       case TASKS.BUILD: {
-        let site = Game.getObjectById(creep.memory.taskTargetId);
+        const site = Game.getObjectById(creep.memory.taskTargetId);
 
         if (!site) {
           creep.memory.task = null;
@@ -263,7 +254,7 @@ const roleWorker = {
         break;
       }
 
-      // ── АПГРЕЙД ───────────────────────────────────────────────────────
+      // ── АПГРЕЙД (fallback) ────────────────────────────────────────────
       case TASKS.UPGRADE: {
         const controller = creep.room.controller;
         if (!controller) return;
@@ -296,7 +287,7 @@ const roleWorker = {
       return;
     }
 
-    // Аварийный режим — storage пуст, копаем сами
+    // Аварийный режим — storage пуст, копаем из источника
     creep.say("⚠️ авария");
     const source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
     if (source) {
