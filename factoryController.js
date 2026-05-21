@@ -2,8 +2,13 @@
  * ===================================================
  * FACTORYCONTROLLER.JS — Промышленный исполнитель (room-level)
  * ===================================================
- * VERSION: 1.0
+ * VERSION: 1.1
  * Industrial Runtime Execution Layer.
+ *
+ * ИЗМЕНЕНИЯ v1.1:
+ * - MIN_INPUT_AMOUNT снижен с 1000 до 200.
+ *   Ранее фабрика простаивала при 964 energy (не хватало 36 единиц).
+ *   200 достаточно для одного цикла produce() — 10 energy = 1 battery.
  *
  * НАЗНАЧЕНИЕ:
  * - Исполняет factory tasks из FactoryDirector
@@ -18,18 +23,6 @@
  * - назначает задачи
  * - управляет market
  * - управляет logistics
- * - хранит production strategy
- * - меняет priorities
- * - сканирует все комнаты
- *
- * DESIGN: per-room — вызывается из roomManager для каждой комнаты.
- *
- * INPUTS:
- * factoryDirector.getTask(room.name)
- * factoryDirector.hasTask(room.name)
- *
- * OUTPUTS:
- * Memory.empire.factory.rooms[roomName].status
  *
  * STATUS FLOW:
  * queued → producing
@@ -43,31 +36,27 @@ const factoryDirector = require("./factoryDirector");
 
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
-/**
- * Статусы выполнения задачи.
- * Обновляются в Memory.empire.factory.rooms[roomName].status
- */
 const STATUS = {
-  QUEUED: "queued", // задача назначена, ждёт выполнения
-  PRODUCING: "producing", // factory.produce() вызван успешно
-  COOLDOWN: "cooldown", // фабрика на cooldown — ждём
-  WAITING_INPUT: "waiting_input", // нет сырья — ждём логистику
-  DONE: "done", // производство завершено
-  ERROR: "error", // ошибка: нет фабрики или API error
+  QUEUED: "queued",
+  PRODUCING: "producing",
+  COOLDOWN: "cooldown",
+  WAITING_INPUT: "waiting_input",
+  DONE: "done",
+  ERROR: "error",
 };
 
 /**
  * Минимальное количество сырья для запуска produce().
- * Соответствует MIN_INPUT_AMOUNT в FactoryDirector.
+ *
+ * ИЗМЕНЕНО v1.1: 1000 → 200.
+ * Причина: фабрика простаивала при 964 energy в store.
+ * 200 достаточно для нескольких циклов produce().
+ * Delivery Worker доставит ещё пока фабрика работает.
  */
-const MIN_INPUT_AMOUNT = 1000;
+const MIN_INPUT_AMOUNT = 200;
 
 /**
  * Карта: что нужно как сырьё для производства ресурса.
- * Battery производится из energy (10:1).
- * Energy производится из battery (1:10).
- *
- * FactoryController не знает о стратегии — только о физике производства.
  */
 const INPUT_MAP = {
   [RESOURCE_BATTERY]: RESOURCE_ENERGY,
@@ -79,24 +68,13 @@ const INPUT_MAP = {
 const factoryController = {
   /**
    * Главная точка входа — per-room execution.
-   * Вызывается из roomManager.run(room) для каждой нашей комнаты.
+   * Вызывается из roomManager.run(room).
    *
-   * Алгоритм:
-   * 1. Проверяем наличие задачи от FactoryDirector
-   * 2. Проверяем наличие фабрики в комнате
-   * 3. Проверяем cooldown
-   * 4. Проверяем сырьё
-   * 5. Вызываем factory.produce()
-   * 6. Обновляем status
-   *
-   * @param {Room} room — объект комнаты Screeps
+   * @param {Room} room
    */
   run: function (room) {
     // ── ШАГ 1: ПРОВЕРКА ЗАДАЧИ ────────────────────────────────────────────
-    // FactoryDirector — единственный источник задач.
-    // Если задачи нет — нечего исполнять.
     if (!factoryDirector.hasTask(room.name)) {
-      // Нет задачи — обновляем статус если была предыдущая запись
       this._setStatus(room.name, STATUS.DONE);
       return;
     }
@@ -104,7 +82,6 @@ const factoryController = {
     const task = factoryDirector.getTask(room.name);
 
     // ── ШАГ 2: ПРОВЕРКА ФАБРИКИ ───────────────────────────────────────────
-    // Ищем фабрику в комнате — она может ещё строиться.
     const factory = room.find(FIND_MY_STRUCTURES, {
       filter: s => s.structureType === STRUCTURE_FACTORY,
     })[0];
@@ -118,16 +95,12 @@ const factoryController = {
     }
 
     // ── ШАГ 3: ПРОВЕРКА COOLDOWN ──────────────────────────────────────────
-    // factory.cooldown — количество тиков до следующего produce().
-    // Пока cooldown > 0 — ждём, статус = cooldown.
     if (factory.cooldown > 0) {
       this._setStatus(room.name, STATUS.COOLDOWN);
       return;
     }
 
-    // ── ШАГ 4: ПРОВЕРКА СЫРЬЯ ────────────────────────────────────────────
-    // Проверяем наличие input ресурса в фабрике.
-    // НЕ вызываем produce() если сырья нет.
+    // ── ШАГ 4: ПРОВЕРКА СЫРЬЯ ─────────────────────────────────────────────
     const inputResource = INPUT_MAP[task.resource];
 
     if (inputResource) {
@@ -146,7 +119,6 @@ const factoryController = {
     }
 
     // ── ШАГ 5: EXECUTION ──────────────────────────────────────────────────
-    // Все проверки пройдены — запускаем производство.
     const result = factory.produce(task.resource);
 
     // ── ШАГ 6: RESULT HANDLING ────────────────────────────────────────────
@@ -159,14 +131,10 @@ const factoryController = {
         );
       }
     } else if (result === ERR_TIRED) {
-      // factory.produce() вернул ERR_TIRED — cooldown только что начался
       this._setStatus(room.name, STATUS.COOLDOWN);
     } else if (result === ERR_NOT_ENOUGH_RESOURCES) {
-      // Сырья не хватило — несмотря на проверку выше
-      // (могло измениться между тиками)
       this._setStatus(room.name, STATUS.WAITING_INPUT);
     } else {
-      // Неожиданная ошибка API
       this._setStatus(room.name, STATUS.ERROR);
       console.log(
         `[FactoryController] ❌ ${room.name}: ошибка produce()` +
@@ -177,15 +145,10 @@ const factoryController = {
 
   /**
    * Обновляет статус в Memory.empire.factory.rooms[roomName].
-   * FactoryController владеет только полем status —
-   * остальные поля (task, assignedAt) принадлежат FactoryDirector.
-   *
    * @param {string} roomName
-   * @param {string} status — одно из STATUS.*
+   * @param {string} status
    */
   _setStatus: function (roomName, status) {
-    // Защита: Memory.empire.factory может не существовать
-    // если FactoryDirector ещё не запускался
     if (
       !Memory.empire ||
       !Memory.empire.factory ||
@@ -199,11 +162,8 @@ const factoryController = {
     Memory.empire.factory.rooms[roomName].updatedAt = Game.time;
   },
 
-  // ── ПУБЛИЧНОЕ API ────────────────────────────────────────────────────────
-
   /**
    * Получить текущий статус фабрики в комнате.
-   *
    * @param {string} roomName
    * @returns {string|null}
    */

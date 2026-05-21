@@ -341,24 +341,25 @@ const roomManager = {
     // Контейнер у каждого источника — место куда майнер скидывает энергию.
     // Ищем один раз и кэшируем. Если контейнер сломан — ищем заново.
     // _sourceContainers[0] — контейнер у первого источника и т.д.
-    if (!room.memory.sourceContainers) {
-      room.memory.sourceContainers = [];
-    }
-    room._sourceContainers = [];
-    room._sources.forEach((source, index) => {
-      let container = null;
-      const containerId = room.memory.sourceContainers[index];
-      if (containerId) container = Game.getObjectById(containerId);
-      if (!container) {
-        // Ищем контейнер в радиусе 2 клеток от источника
-        container =
-          source.pos.findInRange(FIND_STRUCTURES, 2, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER,
-          })[0] || null;
-        room.memory.sourceContainers[index] = container ? container.id : null;
-      }
-      room._sourceContainers[index] = container;
-    });
+
+    // if (!room.memory.sourceContainers) {
+    //   room.memory.sourceContainers = [];
+    // }
+    // room._sourceContainers = [];
+    // room._sources.forEach((source, index) => {
+    //   let container = null;
+    //   const containerId = room.memory.sourceContainers[index];
+    //   if (containerId) container = Game.getObjectById(containerId);
+    //   if (!container) {
+    //     // Ищем контейнер в радиусе 2 клеток от источника
+    //     container =
+    //       source.pos.findInRange(FIND_STRUCTURES, 2, {
+    //         filter: s => s.structureType === STRUCTURE_CONTAINER,
+    //       })[0] || null;
+    //     room.memory.sourceContainers[index] = container ? container.id : null;
+    //   }
+    //   room._sourceContainers[index] = container;
+    // });
 
     // ── 5. МИНЕРАЛ — раз в 100 тиков ──────────────────────────────────────
     // В каждой комнате один минерал (O, H, K, U, L, Z, X, G).
@@ -517,6 +518,8 @@ const roomManager = {
 
     // Локальные роли — крипы работают в этой комнате
     const localRolesConfig = [
+      // 1 универсальный worker на комнату
+      // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
       { role: "test_worker", count: 2 },
       // test_harvester закомментирован — заменён на test_worker (задача SUPPLY)
       // { role: "test_harvester", count: 1 },
@@ -544,7 +547,7 @@ const roomManager = {
       },
 
       // test_builder закомментирован — заменён на test_worker (задача BUILD)
-      // { role: "test_builder", count: hasSites ? 2 : 0 },
+      { role: "test_builder", count: hasSites ? 2 : 0 },
 
       // test_upgrader закомментирован — заменён на test_worker (задача UPGRADE)
       // { role: "test_upgrader", count: needsUpgrader },
@@ -576,6 +579,7 @@ const roomManager = {
         // Только в комнате с Nuker и только пока он не заряжен
         count: room.name === NUKER_ROOM && nukerNeedsFilling(room) ? 1 : 0,
       },
+      { role: "test_deliveryWorker", count: 1 },
 
       // 1 универсальный worker на комнату
       // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
