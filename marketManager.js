@@ -2,11 +2,17 @@
  * ===================================================
  * MARKETMANAGER.JS — Market Intelligence Layer
  * ===================================================
- * VERSION: 1.0
+ * VERSION: 1.1 — BUY POLICY WHITELIST
+ *
+ * ИЗМЕНЕНИЯ v1.1:
+ * - Добавлен BUYABLE_RESOURCES whitelist (Set для O(1) lookup)
+ * - Buy intent создаётся ТОЛЬКО для ресурсов из whitelist
+ * - Бусты и lab products больше не попадают в buy intents
+ * - SELL_MINERALS не изменён
  *
  * НАЗНАЧЕНИЕ:
  * - Анализирует surplus/deficit по EconomyManager
- * - Определяет что покупать (critical resources)
+ * - Определяет что покупать (только raw minerals + energy)
  * - Определяет что продавать (surplus resources)
  * - Публикует market intents в Memory.empire.market
  *
@@ -26,9 +32,6 @@
  *
  * OUTPUTS:
  * Memory.empire.market
- *
- * БУДУЩИЙ PIPELINE:
- * MarketManager (intelligence) → MarketExecutor (execution)
  * ===================================================
  */
 
@@ -43,10 +46,36 @@ const empireResourceRegistry = require("./empireResourceRegistry");
  */
 const UPDATE_INTERVAL = 100;
 
-const MARKET_VERSION = 1;
+const MARKET_VERSION = 1.1;
 
 /**
- * Только эти ресурсы разрешены к продаже в v1.
+ * WHITELIST — только эти ресурсы разрешены к ПОКУПКЕ.
+ *
+ * Используем Set для O(1) lookup.
+ *
+ * РАЗРЕШЕНО: raw minerals + energy economy.
+ * ЗАПРЕЩЕНО: tier1/tier2/tier3 бусты — их производят лабы.
+ *
+ * ПОЧЕМУ:
+ * Market должен закрывать сырьевые bottlenecks,
+ * а НЕ заменять lab production pipeline.
+ */
+const BUYABLE_RESOURCES = new Set([
+  RESOURCE_ENERGY, // энергия
+  RESOURCE_BATTERY, // батарейки
+
+  RESOURCE_UTRIUM, // U  — сырьё
+  RESOURCE_LEMERGIUM, // L  — сырьё
+  RESOURCE_KEANIUM, // K  — сырьё
+  RESOURCE_ZYNTHIUM, // Z  — сырьё
+  RESOURCE_OXYGEN, // O  — сырьё
+  RESOURCE_HYDROGEN, // H  — сырьё
+  RESOURCE_CATALYST, // X  — сырьё
+  RESOURCE_GHODIUM, // G  — сырьё (нужен для nukes/boosts)
+]);
+
+/**
+ * Только эти ресурсы разрешены к ПРОДАЖЕ в v1.
  * Защита от случайной продажи редких бустов.
  */
 const SELLABLE_RESOURCES = new Set([RESOURCE_ENERGY, RESOURCE_BATTERY]);
@@ -86,15 +115,15 @@ const marketManager = {
 
     const buyIntents = [];
     const sellIntents = [];
+    const blockedBoosts = []; // для отладки — что заблокировано
 
     const economy = Memory.empire && Memory.empire.economy;
     if (!economy) return;
 
     // ── BUY ANALYSIS ──────────────────────────────────────────────────────
-    // Покупаем critical resources
+    // Покупаем ТОЛЬКО critical resources из BUYABLE_RESOURCES whitelist.
+    // Бусты и lab products — НЕ покупаем, их производят лабы.
     for (const resource in economy) {
-      const state = economy[resource];
-
       if (!economyManager.isCritical(resource)) continue;
 
       const deficit = economyManager.getDeficit(resource);
@@ -102,6 +131,13 @@ const marketManager = {
 
       // Не создаём дубликаты
       if (buyIntents.find(i => i.resource === resource)) continue;
+
+      // ── WHITELIST CHECK (v1.1) ────────────────────────────────────────
+      // Если ресурс не в whitelist — блокируем, лабы сами произведут.
+      if (!BUYABLE_RESOURCES.has(resource)) {
+        blockedBoosts.push(resource);
+        continue;
+      }
 
       buyIntents.push({
         resource,
@@ -112,7 +148,8 @@ const marketManager = {
     }
 
     // ── SELL ANALYSIS ─────────────────────────────────────────────────────
-    // Продаём только разрешённые ресурсы с surplus
+    // Продаём только разрешённые ресурсы с surplus.
+    // SELL логика не изменена в v1.1.
     for (const resource of SELLABLE_RESOURCES) {
       // Не продаём critical
       if (economyManager.isCritical(resource)) continue;
@@ -151,6 +188,7 @@ const marketManager = {
       criticalBuyCount: buyIntents.filter(i => i.priority === PRIORITY.HIGH)
         .length,
       surplusSellCount: sellIntents.length,
+      blockedBoostCount: blockedBoosts.length, // v1.1 — сколько бустов заблокировано
       analyzeDuration: Math.round(duration * 1000) / 1000,
     };
 
@@ -158,6 +196,7 @@ const marketManager = {
     console.log(
       `[MarketManager] 📊 Анализ: buy=${buyIntents.length}` +
         ` sell=${sellIntents.length}` +
+        ` blocked=${blockedBoosts.length}` +
         ` | CPU: ${duration.toFixed(3)}ms`,
     );
 
@@ -176,6 +215,14 @@ const marketManager = {
           sellIntents
             .map(i => `${i.resource} x${i.amount} [${i.priority}]`)
             .join(", "),
+      );
+    }
+
+    // v1.1 — логируем заблокированные бусты раз в 500 тиков
+    if (blockedBoosts.length > 0 && Game.time % 500 === 0) {
+      console.log(
+        `[MarketManager] 🚫 Заблокированы (производятся лабами): ` +
+          blockedBoosts.join(", "),
       );
     }
   },

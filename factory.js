@@ -30,6 +30,11 @@ const factory = {
       };
     },
 
+    test_worker: () => ({
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      memory: {},
+    }),
+
     // test_hauler: () => ({
     //   body: prepareBody({ carry: 12, move: 12 }),
     //   memory: {},
@@ -55,10 +60,10 @@ const factory = {
       };
     },
 
-    // test_builder: () => ({
-    //   body: prepareBody({ work: 5, carry: 5, move: 5 }),
-    //   memory: {},
-    // }),
+    test_builder: () => ({
+      body: prepareBody({ work: 5, carry: 5, move: 5 }),
+      memory: {},
+    }),
 
     // test_repairer: () => ({
     //   body: prepareBody({ work: 4, carry: 4, move: 4 }),
@@ -75,10 +80,10 @@ const factory = {
       memory: {},
     }),
 
-    // test_towerSupplier: () => ({
-    //   body: prepareBody({ carry: 4, move: 4 }),
-    //   memory: {},
-    // }),
+    test_towerSupplier: () => ({
+      body: prepareBody({ carry: 4, move: 4 }),
+      memory: {},
+    }),
 
     test_terminalUnloader: () => ({
       body: prepareBody({ carry: 10, move: 5 }),
@@ -115,10 +120,6 @@ const factory = {
     // work: 5 — строит и качает контроллер
     // carry: 5 — носит энергию
     // move: 5 — скорость 1 клетка за тик на дороге
-    test_worker: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
-      memory: {},
-    }),
 
     /**
      * test_deliveryWorker — логистический исполнитель.
