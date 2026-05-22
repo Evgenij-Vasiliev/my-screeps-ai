@@ -520,7 +520,7 @@ const roomManager = {
     const localRolesConfig = [
       // 1 универсальный worker на комнату
       // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
-      { role: "test_worker", count: 2 },
+      { role: "test_worker", count: 1 },
       // test_harvester закомментирован — заменён на test_worker (задача SUPPLY)
       // { role: "test_harvester", count: 1 },
 
@@ -532,7 +532,7 @@ const roomManager = {
       // { role: "test_hauler", count: 0 },
 
       // 1 towerSupplier — заряжает башни и разгружает линк у storage
-      // { role: "test_towerSupplier", count: 1 },
+      { role: "test_towerSupplier", count: 1 },
 
       {
         role: "test_terminalUnloader",
@@ -547,7 +547,7 @@ const roomManager = {
       },
 
       // test_builder закомментирован — заменён на test_worker (задача BUILD)
-      { role: "test_builder", count: hasSites ? 2 : 0 },
+      { role: "test_builder", count: hasSites ? 1 : 0 },
 
       // test_upgrader закомментирован — заменён на test_worker (задача UPGRADE)
       // { role: "test_upgrader", count: needsUpgrader },
