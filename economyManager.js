@@ -72,7 +72,7 @@ const ECONOMY_VERSION = 1;
 const RESERVE_TARGETS = {
   // ── CORE RESOURCES ──────────────────────────────────────────────────────
   [RESOURCE_ENERGY]: 1000000, // энергия — критически важна
-  [RESOURCE_BATTERY]: 50000, // батареи — буфер для power economy
+  [RESOURCE_BATTERY]: 200000, // батареи — буфер для power economy
 
   // ── BASE MINERALS ────────────────────────────────────────────────────────
   // Добываются в комнатах — умеренные резервы

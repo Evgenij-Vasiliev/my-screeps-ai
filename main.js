@@ -6,6 +6,9 @@ const empireResourceRegistry = require("./empireResourceRegistry");
 const economyManager = require("./economyManager");
 const factoryDirector = require("./factoryDirector");
 const logisticsDirector = require("./logisticsDirector");
+const labDirector = require("./labDirector");
+const labController = require("./labController");
+const marketManager = require("./marketManager");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -37,6 +40,18 @@ module.exports.loop = function () {
   // Логистика
 
   logisticsDirector.run();
+
+  // Лаб Директор
+
+  labDirector.run();
+
+  // Лаб Контроллер
+
+  labController.run();
+
+  // marketManager
+
+  marketManager.run();
 
   /**
    * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
