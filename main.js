@@ -10,6 +10,7 @@ const labDirector = require("./labDirector");
 const labController = require("./labController");
 const marketManager = require("./marketManager");
 const marketExecutor = require("./marketExecutor");
+const marketDirector = require("./marketDirector");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -55,6 +56,8 @@ module.exports.loop = function () {
   marketManager.run();
 
   marketExecutor.run();
+
+  marketDirector.run();
 
   /**
    * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
