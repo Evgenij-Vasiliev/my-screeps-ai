@@ -6,6 +6,7 @@ const empireResourceRegistry = require("./empireResourceRegistry");
 const economyManager = require("./economyManager");
 const factoryDirector = require("./factoryDirector");
 const logisticsDirector = require("./logisticsDirector");
+const taskDispatcher = require("./taskDispatcher"); // ← НОВЫЙ МОДУЛЬ
 const labDirector = require("./labDirector");
 const labController = require("./labController");
 const marketManager = require("./marketManager");
@@ -24,35 +25,33 @@ module.exports.loop = function () {
     }
   }
 
-  // Реестр ресурсов империи
-
+  // Реестр ресурсов империи (offset 0, каждые 20 тиков)
   const firstRoom = Object.keys(Game.rooms)
     .filter(n => Game.rooms[n].controller && Game.rooms[n].controller.my)
     .sort()[0];
   if (firstRoom) empireResourceRegistry.run();
 
-  // Запуск Экономического менеджера
-
+  // Экономический менеджер (offset 1, каждые 20 тиков)
   economyManager.run();
 
-  // Директор завода
-
+  // Директор завода (offset 2, каждые 20 тиков)
   factoryDirector.run();
 
-  // Логистика
-
+  // Логистический директор (offset 3, каждые 20 тиков)
   logisticsDirector.run();
 
-  // Лаб Директор
+  // Диспетчер задач (каждые 5 тиков)
+  // Читает queued deliveries → назначает воркерам
+  // Должен запускаться ПОСЛЕ logisticsDirector
+  taskDispatcher.run();
 
+  // Лаб Директор
   labDirector.run();
 
   // Лаб Контроллер
-
   labController.run();
-
+  //
   // marketManager
-
   marketManager.run();
 
   marketExecutor.run();

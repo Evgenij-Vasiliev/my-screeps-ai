@@ -498,7 +498,8 @@ const cmd = {
    * Запускайте вручную когда нужно пополнить запасы
    */
   autoRefill(threshold = 10000) {
-    const toBuy = ["O", "X"];
+    const toBuy = [];
+    // const toBuy = ["O", "X"];
 
     for (const roomName in Game.rooms) {
       const room = Game.rooms[roomName];
