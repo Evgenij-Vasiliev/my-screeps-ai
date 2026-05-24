@@ -31,7 +31,7 @@ const factory = {
     },
 
     test_worker: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      body: prepareBody({ work: 1, carry: 10, move: 10 }),
       memory: {},
     }),
 

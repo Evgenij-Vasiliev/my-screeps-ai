@@ -197,11 +197,6 @@ const roleDeliveryWorker = {
     creep.memory._deliveryId = null; // нет logistics delivery
 
     creep.say("📦 прямо");
-
-    // console.log(
-    //   `[DeliveryWorker] ${creep.name}: проактивная доставка` +
-    //     ` ${inputResource} x${amount} → фабрика (в фабрике: ${inFactory})`,
-    // );
   },
 
   // ── PICKUP ─────────────────────────────────────────────────────────────
@@ -299,9 +294,6 @@ const roleDeliveryWorker = {
 
     if (result === OK) {
       creep.say("✅ сдал");
-      // console.log(
-      //   `[DeliveryWorker] ${creep.name}: доставлено` + ` ${resource} → фабрика`,
-      // );
       this._updateLogistics(creep, DELIVERY_STATUS.COMPLETED);
       this._reset(creep);
       return;
