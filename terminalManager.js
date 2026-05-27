@@ -2,45 +2,48 @@
  * ===================================================
  * TERMINALMANAGER.JS — Terminal Infrastructure Layer
  * ===================================================
- * VERSION: 4.0
+ * VERSION: 4.1
+ *
+ * ИЗМЕНЕНИЯ v4.1:
+ * - Добавлен runSellPrep() — подготовка ресурсов к продаже.
+ *   Если marketManager имеет sell intent для ресурса,
+ *   а в терминале его мало — запрашиваем перенос из storage
+ *   через addNeed() (terminalUnloader выполнит перенос).
  *
  * ИЗМЕНЕНИЯ v4.0:
  * - Удалён runMineralSell() — ownership передан MarketExecutor
- * - Удалена продажа energy — ownership передан MarketExecutor
- * - Удалён runMineralNeeds() — больше не нужен без продажи
- * - Оставлена только terminal infrastructure:
- *     terminal.send() между комнатами
- *     inter-room energy balancing
- *     lab reagent logistics
- *     terminal cooldown handling
- *
- * OWNERSHIP:
- * terminalManager  → terminal.send(), inter-room logistics
- * MarketExecutor   → Game.market.deal(), market orders
+ * - Оставлена только terminal infrastructure
  * ===================================================
  */
 
 const resourceBalancer = require("./resourceBalancer");
+const marketManager = require("./marketManager");
 
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
 const TERMINAL_ENERGY_MIN = 20000;
-
 const ENERGY_POOR_THRESHOLD = 20000;
 const ENERGY_RICH_THRESHOLD = 100000;
 const ENERGY_SEND_AMOUNT = 20000;
-
 const CHECK_INTERVAL = 50;
 const LAB_REAGENT_MIN = 3000;
 const LAB_REAGENT_SEND = 5000;
 const LAB_REAGENT_DONOR_MIN = 6000;
 
+/**
+ * Сколько держим в терминале для продажи.
+ * Если меньше — запрашиваем перенос из storage.
+ */
+const SELL_TERMINAL_TARGET = 10000;
+
+/**
+ * Максимум в терминале для продажи — не накапливаем слишком много.
+ */
+const SELL_TERMINAL_MAX = 20000;
+
 let roomOffsets = {};
 
 const terminalManager = {
-  /**
-   * Возвращает все конфиги лаб из room.memory.
-   */
   getLabConfigs: function (room) {
     const mem = room.memory;
     const configs = [];
@@ -52,19 +55,12 @@ const terminalManager = {
     return configs;
   },
 
-  /**
-   * Суммарный запас ресурса в storage + terminal комнаты.
-   */
   getTotal: function (room, resource) {
     const t = room.terminal ? room.terminal.store[resource] || 0 : 0;
     const s = room.storage ? room.storage.store[resource] || 0 : 0;
     return s + t;
   },
 
-  /**
-   * Добавляет запрос на перенос ресурса в терминал.
-   * terminalUnloader читает room.memory.terminalNeeds и выполняет перенос.
-   */
   addNeed: function (donorRoom, resource, amount, toRoom) {
     if (!donorRoom.memory.terminalNeeds) {
       donorRoom.memory.terminalNeeds = [];
@@ -81,11 +77,70 @@ const terminalManager = {
     return true;
   },
 
+  // ── SELL PREP ─────────────────────────────────────────────────────────────
+
   /**
-   * ── БАЛАНСИРОВКА ЭНЕРГИИ МЕЖДУ КОМНАТАМИ ─────────────────────────────────
-   * Отправляет energy из богатых комнат в бедные через terminal.send().
-   * НЕ использует Game.market.deal().
+   * Подготовка ресурсов к продаже: storage → terminal.
+   *
+   * Алгоритм:
+   * 1. Читаем sell intents из marketManager
+   * 2. Для каждого intent ищем комнату с ресурсом в storage
+   * 3. Если в терминале этой комнаты < SELL_TERMINAL_TARGET
+   *    → addNeed() чтобы terminalUnloader перенёс из storage в terminal
+   *
+   * Вызывается только из первой комнаты (глобальный балансировщик).
    */
+  runSellPrep: function () {
+    if (Game.time % 100 !== 0) return;
+
+    const sellIntents = marketManager.getSellIntents();
+    if (sellIntents.length === 0) return;
+
+    const ourRooms = Object.values(Game.rooms).filter(
+      r => r.controller && r.controller.my && r.storage && r.terminal,
+    );
+
+    for (const intent of sellIntents) {
+      const resource = intent.resource;
+
+      // Ищем комнату где ресурс есть в storage но мало в терминале
+      for (const room of ourRooms) {
+        const inStorage = room.storage.store[resource] || 0;
+        const inTerminal = room.terminal.store[resource] || 0;
+
+        // В терминале уже достаточно — пропускаем
+        if (inTerminal >= SELL_TERMINAL_TARGET) continue;
+
+        // В storage нет — пропускаем
+        if (inStorage < 100) continue;
+
+        // Сколько нужно добавить в терминал
+        const needed = Math.min(
+          SELL_TERMINAL_TARGET - inTerminal,
+          inStorage,
+          SELL_TERMINAL_MAX,
+        );
+
+        if (needed < 100) continue;
+
+        // Запрашиваем перенос: storage → terminal (toRoom = null = локально)
+        const isNew = this.addNeed(room, resource, needed, null);
+
+        if (isNew) {
+          console.log(
+            `[SellPrep] 📦 ${room.name}: запрос ${needed}` +
+              ` ${resource} storage→terminal для продажи`,
+          );
+        }
+
+        // Одна комната на один ресурс — берём первую подходящую
+        break;
+      }
+    }
+  },
+
+  // ── ENERGY BALANCE ────────────────────────────────────────────────────────
+
   runEnergyBalance: function () {
     if (Game.time % 100 !== 0) return;
 
@@ -163,8 +218,7 @@ const terminalManager = {
       );
       if (result === OK) {
         console.log(
-          `[EnergyBalance] ✅ ${donor.name} → ${poorRoom.name}: ` +
-            `${ENERGY_SEND_AMOUNT} energy`,
+          `[EnergyBalance] ✅ ${donor.name} → ${poorRoom.name}: ${ENERGY_SEND_AMOUNT} energy`,
         );
         if (donor.memory.terminalNeeds) {
           donor.memory.terminalNeeds = donor.memory.terminalNeeds.filter(
@@ -179,11 +233,8 @@ const terminalManager = {
     }
   },
 
-  /**
-   * ── АВТОЛОГИСТИКА РЕАГЕНТОВ ──────────────────────────────────────────────
-   * Отправляет реагенты для лаб между комнатами через terminal.send().
-   * НЕ использует Game.market.deal().
-   */
+  // ── LAB SUPPLY ────────────────────────────────────────────────────────────
+
   runLabSupply: function (room) {
     if ((Game.time + (roomOffsets[room.name] || 0)) % CHECK_INTERVAL !== 0)
       return;
@@ -299,9 +350,8 @@ const terminalManager = {
     }
   },
 
-  /**
-   * ── ОСНОВНОЙ ЗАПУСК ───────────────────────────────────────────────────────
-   */
+  // ── ОСНОВНОЙ ЗАПУСК ───────────────────────────────────────────────────────
+
   run: function (room) {
     const roomNames = Object.keys(Game.rooms)
       .filter(n => {
@@ -313,10 +363,11 @@ const terminalManager = {
     // ── ШАГ 1: ГЛОБАЛЬНЫЕ БАЛАНСИРОВЩИКИ — только из первой комнаты ────────
     if (roomNames[0] === room.name) {
       this.runEnergyBalance();
+      this.runSellPrep(); // v4.1: подготовка ресурсов к продаже
       resourceBalancer.run();
     }
 
-    // ── ШАГ 2: ЛОГИСТИКА ЛАБ ────────────────────────────────────────────────
+    // ── ШАГ 2: ЛОГИСТИКА ЛАБ ─────────────────────────────────────────────────
     if (roomOffsets[room.name] === undefined) {
       const count = Object.keys(roomOffsets).length;
       const step = Math.floor(CHECK_INTERVAL / 5);

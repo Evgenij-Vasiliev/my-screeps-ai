@@ -31,7 +31,7 @@ const factory = {
     },
 
     test_worker: () => ({
-      body: prepareBody({ work: 1, carry: 10, move: 10 }),
+      body: prepareBody({ work: 1, carry: 10, move: 11 }),
       memory: {},
     }),
 
@@ -108,9 +108,9 @@ const factory = {
     test_attacker: spawn => ({
       body: prepareBody({
         tough: 0,
-        ranged_attack: 10,
+        move: 10,
         heal: 0,
-        move: 20,
+        ranged_attack: 10,
       }),
       memory: { targetRoom: null, homeRoom: spawn.room.name },
     }),

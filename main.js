@@ -52,6 +52,7 @@ module.exports.loop = function () {
   labController.run();
   //
   // marketManager
+
   marketManager.run();
 
   marketExecutor.run();

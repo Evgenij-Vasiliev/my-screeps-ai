@@ -2,19 +2,22 @@
  * ===================================================
  * MARKETEXECUTOR.JS — Safe Trading Execution Layer
  * ===================================================
- * VERSION: 1.1 — VALIDATION & SAFETY
+ * VERSION: 1.3
+ *
+ * ИЗМЕНЕНИЯ v1.3:
+ * - ИСПРАВЛЕН главный баг: execute() теперь продаёт
+ *   ВСЕ готовые ресурсы за один запуск (один deal на терминал).
+ *   Раньше: один deal на весь запуск → продавался только K.
+ *   Теперь: один deal на терминал → продаются все готовые ресурсы.
+ *
+ * - _executeSell() принимает Set usedRooms чтобы не использовать
+ *   один терминал дважды за один запуск.
+ *
+ * ИЗМЕНЕНИЯ v1.2:
+ * - Перебор всех sell intents вместо первого.
  *
  * ИЗМЕНЕНИЯ v1.1:
- * - Добавлен execution lock (lastExecutedAt) — защита от дублей
- * - Добавлен partial sell handling — remaining amount обновляется
- * - Intent completion — amount уменьшается после сделки
- * - History структура исправлена согласно ТЗ
- * - Credits safety подтверждён runtime validation
- * - Transaction cost validation усилен
- *
- * OWNERSHIP:
- * MarketExecutor  → Game.market.deal()
- * terminalManager → terminal.send()
+ * - Execution lock, partial sell, credits safety.
  * ===================================================
  */
 
@@ -24,18 +27,13 @@ const economyManager = require("./economyManager");
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
 const UPDATE_INTERVAL = 100;
-const MAX_DEALS_PER_RUN = 1;
 const MIN_CREDITS = 100000;
 const MIN_SELL_AMOUNT = 10000;
 const TERMINAL_ENERGY_MIN = 20000;
 const MAX_HISTORY = 20;
 
-const EXECUTOR_VERSION = 1.1;
+const EXECUTOR_VERSION = 1.3;
 
-/**
- * Максимальная цена покупки.
- * Защита от market spikes.
- */
 const MAX_BUY_PRICE = {
   [RESOURCE_ENERGY]: 0.25,
   [RESOURCE_BATTERY]: 8.0,
@@ -56,16 +54,8 @@ const marketExecutor = {
     if (!Memory.empire) Memory.empire = {};
     if (Game.time % UPDATE_INTERVAL !== 0) return;
 
-    // ── EXECUTION LOCK ────────────────────────────────────────────────────
-    // Защита от дублей — один запуск за UPDATE_INTERVAL тиков.
-    // Если уже выполняли в этом цикле — пропускаем.
     const meta = Memory.empire.marketMeta || {};
-    if (meta.lastExecutedAt === Game.time) {
-      console.log(
-        `[MarketExecutor] ⚠️ Execution lock — уже выполнен в тик ${Game.time}`,
-      );
-      return;
-    }
+    if (meta.lastExecutedAt === Game.time) return;
 
     this.execute();
   },
@@ -73,7 +63,6 @@ const marketExecutor = {
   execute: function () {
     const startCpu = Game.cpu.getUsed();
 
-    // Торговля отключена
     if (Memory.tradeEnabled === false) {
       this._saveMeta(0, 0, 0, 0, 0, 0, "disabled");
       return;
@@ -85,23 +74,31 @@ const marketExecutor = {
     let creditsSpent = 0;
     let creditsEarned = 0;
 
-    // ── SELL ──────────────────────────────────────────────────────────────
-    if (executedDeals < MAX_DEALS_PER_RUN) {
-      const r = this._executeSell();
+    // ── SELL: один deal на терминал ───────────────────────────────────────
+    // Перебираем все sell intents.
+    // Каждый терминал используем максимум один раз за запуск.
+    const usedRooms = new Set();
+    const sellIntents = marketManager.getSellIntents();
+
+    for (const intent of sellIntents) {
+      if (economyManager.isCritical(intent.resource)) continue;
+
+      const r = this._executeSellIntent(intent, usedRooms);
       executedDeals += r.executed;
       skippedDeals += r.skipped;
       failedDeals += r.failed;
       creditsEarned += r.creditsEarned;
+
+      // Если нашли и использовали терминал — он уже в usedRooms
+      // Продолжаем для следующего ресурса
     }
 
-    // ── BUY ───────────────────────────────────────────────────────────────
-    if (executedDeals < MAX_DEALS_PER_RUN) {
-      const r = this._executeBuy();
-      executedDeals += r.executed;
-      skippedDeals += r.skipped;
-      failedDeals += r.failed;
-      creditsSpent += r.creditsSpent;
-    }
+    // ── BUY: один deal если кредиты позволяют ────────────────────────────
+    const r = this._executeBuy(usedRooms);
+    executedDeals += r.executed;
+    skippedDeals += r.skipped;
+    failedDeals += r.failed;
+    creditsSpent += r.creditsSpent;
 
     const duration = Game.cpu.getUsed() - startCpu;
     this._saveMeta(
@@ -114,7 +111,6 @@ const marketExecutor = {
       "ok",
     );
 
-    // Throttled logging
     if (executedDeals > 0 || failedDeals > 0 || Game.time % 500 === 0) {
       console.log(
         `[MarketExecutor] 💹 executed=${executedDeals}` +
@@ -127,30 +123,21 @@ const marketExecutor = {
     }
   },
 
-  _executeSell: function () {
+  /**
+   * Продаёт один ресурс из лучшего доступного терминала.
+   * Терминал добавляется в usedRooms после сделки.
+   *
+   * @param {Object} intent    — sell intent из marketManager
+   * @param {Set}    usedRooms — уже использованные терминалы за этот запуск
+   */
+  _executeSellIntent: function (intent, usedRooms) {
     const result = { executed: 0, skipped: 0, failed: 0, creditsEarned: 0 };
 
-    const sellIntents = marketManager.getSellIntents();
-    if (sellIntents.length === 0) return result;
-
-    const intent = sellIntents[0];
     const resource = intent.resource;
 
-    // Проверяем что ресурс не стал critical
-    if (economyManager.isCritical(resource)) {
-      console.log(
-        `[MarketExecutor] SKIP_CRITICAL ${resource} стал critical — не продаём`,
-      );
-      result.skipped++;
-      return result;
-    }
-
-    // Ищем комнату с наибольшим запасом в терминале
-    const room = this._findSellRoom(resource);
+    // Ищем лучший терминал с этим ресурсом (не использованный)
+    const room = this._findSellRoom(resource, usedRooms);
     if (!room) {
-      console.log(
-        `[MarketExecutor] SKIP_NO_ROOM нет комнаты для продажи ${resource}`,
-      );
       result.skipped++;
       return result;
     }
@@ -159,14 +146,11 @@ const marketExecutor = {
     const inTerminal = terminal.store[resource] || 0;
 
     if (inTerminal < MIN_SELL_AMOUNT) {
-      console.log(
-        `[MarketExecutor] SKIP_LOW_AMOUNT ${resource} в терминале: ${inTerminal} < ${MIN_SELL_AMOUNT}`,
-      );
       result.skipped++;
       return result;
     }
 
-    // Ищем лучший buy ордер (highest price)
+    // Лучший buy ордер
     const orders = Game.market
       .getAllOrders({
         type: ORDER_BUY,
@@ -176,38 +160,34 @@ const marketExecutor = {
       .sort((a, b) => b.price - a.price);
 
     if (orders.length === 0) {
-      console.log(
-        `[MarketExecutor] SKIP_NO_ORDERS нет покупателей для ${resource}`,
-      );
       result.skipped++;
       return result;
     }
 
     const order = orders[0];
+    const dealAmount = Math.min(
+      inTerminal,
+      order.remainingAmount,
+      intent.amount,
+    );
 
-    // ── PARTIAL SELL ──────────────────────────────────────────────────────
-    // intent.amount может быть больше order.remainingAmount.
-    // Продаём сколько можем — остаток остаётся в intent для следующего цикла.
-    let dealAmount = Math.min(inTerminal, order.remainingAmount, intent.amount);
-
-    // Transaction cost validation
+    // Transaction cost
     const txCost = Game.market.calcTransactionCost(
       dealAmount,
       room.name,
       order.roomName,
     );
-    const terminalEnergy = terminal.store[RESOURCE_ENERGY] || 0;
+    const termEnergy = terminal.store[RESOURCE_ENERGY] || 0;
 
-    if (txCost > terminalEnergy - TERMINAL_ENERGY_MIN) {
+    if (txCost > termEnergy - TERMINAL_ENERGY_MIN) {
       console.log(
-        `[MarketExecutor] SKIP_LOW_ENERGY ${room.name}: нужно ${txCost} energy,` +
-          ` есть ${terminalEnergy} для продажи ${resource}`,
+        `[MarketExecutor] SKIP_LOW_ENERGY ${room.name}:` +
+          ` нужно ${txCost} energy для продажи ${resource}`,
       );
       result.skipped++;
       return result;
     }
 
-    // Выполняем сделку
     const res = Game.market.deal(order.id, dealAmount, room.name);
 
     if (res === OK) {
@@ -215,16 +195,15 @@ const marketExecutor = {
       result.executed++;
       result.creditsEarned += earned;
 
-      // ── INTENT COMPLETION ─────────────────────────────────────────────
-      // Уменьшаем remaining amount в intent.
-      // MarketManager пересчитает в следующем цикле (каждые 100 тиков).
       intent.amount = Math.max(0, intent.amount - dealAmount);
+
+      // Помечаем терминал как использованный
+      usedRooms.add(room.name);
 
       console.log(
         `[MarketExecutor] ✅ SELL ${dealAmount} ${resource}` +
           ` @ ${order.price} → ${order.roomName}` +
-          ` (+${earned.toFixed(0)} credits)` +
-          ` remaining=${intent.amount}`,
+          ` (+${earned.toFixed(0)} credits)`,
       );
 
       this._addHistory({
@@ -244,16 +223,10 @@ const marketExecutor = {
     return result;
   },
 
-  _executeBuy: function () {
+  _executeBuy: function (usedRooms) {
     const result = { executed: 0, skipped: 0, failed: 0, creditsSpent: 0 };
 
-    // ── CREDITS SAFETY ────────────────────────────────────────────────────
-    // TEST B: credits < MIN_CREDITS → сделки НЕ выполняются
     if (Game.market.credits < MIN_CREDITS) {
-      console.log(
-        `[MarketExecutor] SKIP_LOW_CREDITS` +
-          ` credits=${Game.market.credits.toFixed(0)} < ${MIN_CREDITS}`,
-      );
       result.skipped++;
       return result;
     }
@@ -264,19 +237,16 @@ const marketExecutor = {
     const intent = buyIntents[0];
     const resource = intent.resource;
 
-    const room = this._findBuyRoom();
+    // Ищем свободный терминал (не использованный при продаже)
+    const room = this._findBuyRoom(usedRooms);
     if (!room) {
-      console.log(
-        `[MarketExecutor] SKIP_NO_ROOM нет комнаты для покупки ${resource}`,
-      );
       result.skipped++;
       return result;
     }
 
     const terminal = room.terminal;
-
-    // Ищем лучший sell ордер (lowest price) в рамках MAX_BUY_PRICE
     const maxPrice = MAX_BUY_PRICE[resource] || 999;
+
     const orders = Game.market
       .getAllOrders({
         type: ORDER_SELL,
@@ -286,42 +256,27 @@ const marketExecutor = {
       .sort((a, b) => a.price - b.price);
 
     if (orders.length === 0) {
-      console.log(
-        `[MarketExecutor] SKIP_NO_ORDERS нет продавцов для ${resource} (maxPrice=${maxPrice})`,
-      );
       result.skipped++;
       return result;
     }
 
     const order = orders[0];
-
-    // ── PARTIAL BUY ───────────────────────────────────────────────────────
     const dealAmount = Math.min(intent.amount, order.remainingAmount, 10000);
 
-    // Transaction cost validation
     const txCost = Game.market.calcTransactionCost(
       dealAmount,
       room.name,
       order.roomName,
     );
-    const terminalEnergy = terminal.store[RESOURCE_ENERGY] || 0;
+    const termEnergy = terminal.store[RESOURCE_ENERGY] || 0;
 
-    if (txCost > terminalEnergy - TERMINAL_ENERGY_MIN) {
-      console.log(
-        `[MarketExecutor] SKIP_LOW_ENERGY ${room.name}: нужно ${txCost} energy` +
-          ` для покупки ${resource}`,
-      );
+    if (txCost > termEnergy - TERMINAL_ENERGY_MIN) {
       result.skipped++;
       return result;
     }
 
-    // Credits на сделку
     const dealCost = dealAmount * order.price;
     if (Game.market.credits - dealCost < MIN_CREDITS) {
-      console.log(
-        `[MarketExecutor] SKIP_LOW_CREDITS после сделки останется мало credits` +
-          ` (нужно: ${dealCost.toFixed(0)})`,
-      );
       result.skipped++;
       return result;
     }
@@ -331,15 +286,12 @@ const marketExecutor = {
     if (res === OK) {
       result.executed++;
       result.creditsSpent += dealCost;
-
-      // Intent completion — уменьшаем remaining
       intent.amount = Math.max(0, intent.amount - dealAmount);
 
       console.log(
         `[MarketExecutor] ✅ BUY ${dealAmount} ${resource}` +
           ` @ ${order.price} from ${order.roomName}` +
-          ` (-${dealCost.toFixed(0)} credits)` +
-          ` remaining=${intent.amount}`,
+          ` (-${dealCost.toFixed(0)} credits)`,
       );
 
       this._addHistory({
@@ -360,13 +312,19 @@ const marketExecutor = {
   },
 
   /**
-   * Ищет комнату с наибольшим запасом ресурса в терминале.
+   * Ищет терминал с наибольшим запасом ресурса.
+   * Пропускает уже использованные терминалы.
+   *
+   * @param {string} resource
+   * @param {Set}    usedRooms
    */
-  _findSellRoom: function (resource) {
+  _findSellRoom: function (resource, usedRooms) {
     let best = null;
     let bestAmount = 0;
 
     for (const roomName in Game.rooms) {
+      if (usedRooms && usedRooms.has(roomName)) continue;
+
       const room = Game.rooms[roomName];
       if (!room.controller || !room.controller.my) continue;
       if (!room.terminal) continue;
@@ -383,39 +341,34 @@ const marketExecutor = {
   },
 
   /**
-   * Ищет комнату с терминалом и достаточной энергией для покупки.
+   * Ищет терминал с достаточной энергией для покупки.
+   * Пропускает уже использованные терминалы.
+   *
+   * @param {Set} usedRooms
    */
-  _findBuyRoom: function () {
+  _findBuyRoom: function (usedRooms) {
     for (const roomName in Game.rooms) {
+      if (usedRooms && usedRooms.has(roomName)) continue;
+
       const room = Game.rooms[roomName];
       if (!room.controller || !room.controller.my) continue;
       if (!room.terminal) continue;
       if (room.terminal.cooldown > 0) continue;
 
-      const terminalEnergy = room.terminal.store[RESOURCE_ENERGY] || 0;
-      if (terminalEnergy >= TERMINAL_ENERGY_MIN * 2) return room;
+      const termEnergy = room.terminal.store[RESOURCE_ENERGY] || 0;
+      if (termEnergy >= TERMINAL_ENERGY_MIN * 2) return room;
     }
     return null;
   },
 
-  /**
-   * Добавляет запись в историю сделок.
-   * Хранит последние MAX_HISTORY записей.
-   */
   _addHistory: function (entry) {
-    if (!Memory.empire.marketHistory) {
-      Memory.empire.marketHistory = [];
-    }
+    if (!Memory.empire.marketHistory) Memory.empire.marketHistory = [];
     Memory.empire.marketHistory.unshift(entry);
     if (Memory.empire.marketHistory.length > MAX_HISTORY) {
       Memory.empire.marketHistory.length = MAX_HISTORY;
     }
   },
 
-  /**
-   * Сохраняет метаданные запуска.
-   * lastExecutedAt — основа execution lock.
-   */
   _saveMeta: function (
     executed,
     skipped,
@@ -427,7 +380,7 @@ const marketExecutor = {
   ) {
     Memory.empire.marketMeta = {
       version: EXECUTOR_VERSION,
-      lastExecutedAt: Game.time, // execution lock
+      lastExecutedAt: Game.time,
       status,
       executedDeals: executed,
       skippedDeals: skipped,
@@ -438,12 +391,9 @@ const marketExecutor = {
     };
   },
 
-  // ── ПУБЛИЧНОЕ API ─────────────────────────────────────────────────────────
-
   getLastDeals: function () {
     return Memory.empire.marketHistory || [];
   },
-
   getMeta: function () {
     return Memory.empire.marketMeta || {};
   },

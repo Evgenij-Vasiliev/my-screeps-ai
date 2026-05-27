@@ -2,28 +2,23 @@
  * ===================================================
  * ROLE.TERMINALUNLOADER.JS — Двусторонний логист терминала
  * ===================================================
- * Логика (в порядке приоритета):
+ * VERSION: 5.0
  *
- * 1. ТЕРМИНАЛ → STORAGE (энергия):
- *    Если терминал переполнен энергией (> 50000)
- *    и Storage почти пуст (< 10000).
+ * ИЗМЕНЕНИЯ v5.0:
+ * - ИСПРАВЛЕН конфликт: приоритет 3 (разгрузка терминала) теперь
+ *   пропускает ресурсы которые marketManager хочет продать.
+ *   Раньше: загружали KO в терминал → тут же выгружали обратно.
+ *   Теперь: sell-ресурсы остаются в терминале до продажи.
+ * - addNeed теперь использует toRoom="_sell_" для sell запросов.
  *
- * 2. STORAGE → ТЕРМИНАЛ (очередь terminalNeeds):
- *    Обрабатывает запросы из room.memory.terminalNeeds.
- *    toRoom === "_sell_" означает "перенести в терминал для продажи"
- *    (запрос создаётся terminalManager когда K/U/L/H мало в терминале).
- *    toRoom === реальная комната — перенести для отправки через terminal.send().
- *
- * 3. ТЕРМИНАЛ → STORAGE (разгрузка не-энергетических ресурсов):
- *    Если очередь пуста — разгружаем терминал в storage.
- *
- * ИСПРАВЛЕНО v4:
- * - Запросы с toRoom === "_sell_" теперь обрабатываются корректно:
- *   крип переносит ресурс из storage в терминал.
- *   Раньше такие запросы создавались но никогда не выполнялись —
- *   крип не знал что "_sell_" это тоже задача загрузки терминала.
+ * ЛОГИКА (в порядке приоритета):
+ * 1. ТЕРМИНАЛ → STORAGE (энергия переполнена > 50000 и storage < 10000)
+ * 2. STORAGE → ТЕРМИНАЛ (очередь terminalNeeds, включая "_sell_")
+ * 3. ТЕРМИНАЛ → STORAGE (только НЕ-sell ресурсы)
  * ===================================================
  */
+
+const marketManager = require("./marketManager");
 
 const TERMINAL_ENERGY_OVERFLOW = 50000;
 const STORAGE_ENERGY_MIN = 10000;
@@ -40,7 +35,7 @@ module.exports = {
       return;
     }
 
-    // Переключение режима
+    // ── ПЕРЕКЛЮЧЕНИЕ РЕЖИМА ───────────────────────────────────────────────
     if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
       creep.memory.working = false;
       delete creep.memory.resource;
@@ -80,9 +75,8 @@ module.exports = {
       }
 
       // ── ПРИОРИТЕТ 2: STORAGE → ТЕРМИНАЛ (очередь terminalNeeds) ──────
-      // Обрабатываем ВСЕ запросы включая toRoom === "_sell_".
-      // "_sell_" — запрос от terminalManager на подготовку минерала к продаже.
-      // Логика одинакова: берём из storage, кладём в терминал.
+      // Обрабатывает все запросы включая toRoom="_sell_".
+      // "_sell_" = подготовка ресурса к продаже через marketExecutor.
       const needs = creep.room.memory.terminalNeeds;
       if (needs && needs.length > 0) {
         const need = needs[0];
@@ -95,7 +89,8 @@ module.exports = {
         if (remaining <= 0) {
           console.log(
             `[TerminalUnloader ${creep.room.name}] ✅ ` +
-              `${need.resource} перенесён в терминал (${need.amount} ед.) → ${need.toRoom}`,
+              `${need.resource} перенесён в терминал (${need.amount} ед.)` +
+              ` → ${need.toRoom || "продажа"}`,
           );
           creep.room.memory.terminalNeeds = needs.slice(1);
           delete creep.memory.transferred;
@@ -135,8 +130,16 @@ module.exports = {
       }
 
       // ── ПРИОРИТЕТ 3: ТЕРМИНАЛ → STORAGE (не-энергетические) ─────────
+      // ВАЖНО: пропускаем ресурсы которые marketManager хочет продать.
+      // Иначе мы загрузим ресурс в терминал и тут же выгрузим обратно.
+      const sellIntents = marketManager.getSellIntents();
+      const sellResources = new Set(sellIntents.map(i => i.resource));
+
       const resource = Object.keys(terminal.store).find(
-        r => r !== RESOURCE_ENERGY && terminal.store[r] > 0,
+        r =>
+          r !== RESOURCE_ENERGY &&
+          terminal.store[r] > 0 &&
+          !sellResources.has(r), // ← пропускаем sell-ресурсы
       );
 
       if (!resource) return;
@@ -173,7 +176,7 @@ module.exports = {
         return;
       }
 
-      // Storage → Терминал (включая "_sell_" запросы)
+      // Storage → Терминал (все запросы включая "_sell_")
       if (creep.memory.task === "load_terminal") {
         const result = creep.transfer(terminal, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {
@@ -192,7 +195,7 @@ module.exports = {
         return;
       }
 
-      // Терминал → Storage (не-энергетические)
+      // Терминал → Storage (не-энергетические, не-sell)
       if (creep.memory.task === "unload_terminal") {
         const result = creep.transfer(storage, creep.memory.resource);
         if (result === ERR_NOT_IN_RANGE) {

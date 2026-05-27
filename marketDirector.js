@@ -2,20 +2,16 @@
  * ===================================================
  * MARKETDIRECTOR.JS — Empire Economic Intelligence Layer
  * ===================================================
- * VERSION: 2.1
+ * VERSION: 2.2
+ *
+ * ИЗМЕНЕНИЯ v2.2:
+ * - Добавлен BOOST_SELL_THRESHOLD = 10,000 для compounds.
+ *   DEFAULT_SELL_THRESHOLD (100,000) был слишком высок —
+ *   ZK, KO, KH2O, UHO2, ZHO2 никогда не попадали в sell.
  *
  * ИЗМЕНЕНИЯ v2.1:
- * - Добавлен BOOST_CHAIN — все tier1/tier2/tier3 бусты
- *   получают mode='produce' а не 'buy'
- * - Исправлены пороги продажи O и X — не продаём
- *   стратегические минералы
- * - NOT_FOR_SALE — минералы которые не продаём никогда
- *
- * DIRECTIVE MODES:
- * produce  — производить внутри империи (лабы)
- * buy      — покупать на рынке (сырьё)
- * sell     — продавать surplus
- * stockpile — стратегический резерв
+ * - BOOST_CHAIN → mode='produce' если critical
+ * - NOT_FOR_SALE — O, X, Z, G не продаём
  * ===================================================
  */
 
@@ -26,14 +22,18 @@ const labDirector = require("./labDirector");
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
 const UPDATE_INTERVAL = 100;
-const DIRECTOR_VERSION = 2.1;
+const DIRECTOR_VERSION = 2.2;
 
 const ENERGY_SELL_THRESHOLD = 500000;
 const DEFAULT_SELL_THRESHOLD = 100000;
 
 /**
- * Сырьевые минералы — если critical → buy.
+ * Порог продажи для compounds (T1/T2).
+ * Снижен до 10,000 — compounds производятся в меньших объёмах
+ * чем raw minerals.
  */
+const BOOST_SELL_THRESHOLD = 10000;
+
 const RAW_MINERALS = new Set([
   RESOURCE_UTRIUM,
   RESOURCE_LEMERGIUM,
@@ -45,15 +45,10 @@ const RAW_MINERALS = new Set([
   RESOURCE_GHODIUM,
 ]);
 
-/**
- * Стратегические резервы — stockpile даже при surplus.
- */
 const STRATEGIC_RESERVES = new Set([RESOURCE_BATTERY, RESOURCE_GHODIUM]);
 
 /**
  * Минералы которые НИКОГДА не продаём.
- * O и X — закупаем сами, X нужен для tier3 бустов.
- * Z — накопился исторически, не продаём автоматически.
  */
 const NOT_FOR_SALE = new Set([
   RESOURCE_OXYGEN,
@@ -64,45 +59,44 @@ const NOT_FOR_SALE = new Set([
 
 /**
  * Все boost chain продукты tier1/tier2/tier3.
- * Производятся лабами — НЕ покупаем на рынке.
- * mode = 'produce' если critical, иначе 'stockpile'.
+ * Производятся лабами.
  */
 const BOOST_CHAIN = new Set([
   // Tier 1
-  RESOURCE_UTRIUM_HYDRIDE, // UH
-  RESOURCE_UTRIUM_OXIDE, // UO
-  RESOURCE_KEANIUM_HYDRIDE, // KH
-  RESOURCE_KEANIUM_OXIDE, // KO
-  RESOURCE_LEMERGIUM_HYDRIDE, // LH
-  RESOURCE_LEMERGIUM_OXIDE, // LO
-  RESOURCE_ZYNTHIUM_HYDRIDE, // ZH
-  RESOURCE_ZYNTHIUM_OXIDE, // ZO
-  RESOURCE_GHODIUM_HYDRIDE, // GH
-  RESOURCE_GHODIUM_OXIDE, // GO
-  RESOURCE_HYDROXIDE, // OH
-  RESOURCE_ZYNTHIUM_KEANITE, // ZK
+  RESOURCE_UTRIUM_HYDRIDE,
+  RESOURCE_UTRIUM_OXIDE,
+  RESOURCE_KEANIUM_HYDRIDE,
+  RESOURCE_KEANIUM_OXIDE,
+  RESOURCE_LEMERGIUM_HYDRIDE,
+  RESOURCE_LEMERGIUM_OXIDE,
+  RESOURCE_ZYNTHIUM_HYDRIDE,
+  RESOURCE_ZYNTHIUM_OXIDE,
+  RESOURCE_GHODIUM_HYDRIDE,
+  RESOURCE_GHODIUM_OXIDE,
+  RESOURCE_HYDROXIDE,
+  RESOURCE_ZYNTHIUM_KEANITE,
   // Tier 2
-  RESOURCE_UTRIUM_ACID, // UH2O
-  RESOURCE_UTRIUM_ALKALIDE, // UHO2
-  RESOURCE_KEANIUM_ACID, // KH2O
-  RESOURCE_KEANIUM_ALKALIDE, // KHO2
-  RESOURCE_LEMERGIUM_ACID, // LH2O
-  RESOURCE_LEMERGIUM_ALKALIDE, // LHO2
-  RESOURCE_ZYNTHIUM_ACID, // ZH2O
-  RESOURCE_ZYNTHIUM_ALKALIDE, // ZHO2
-  RESOURCE_GHODIUM_ACID, // GH2O
-  RESOURCE_GHODIUM_ALKALIDE, // GHO2
+  RESOURCE_UTRIUM_ACID,
+  RESOURCE_UTRIUM_ALKALIDE,
+  RESOURCE_KEANIUM_ACID,
+  RESOURCE_KEANIUM_ALKALIDE,
+  RESOURCE_LEMERGIUM_ACID,
+  RESOURCE_LEMERGIUM_ALKALIDE,
+  RESOURCE_ZYNTHIUM_ACID,
+  RESOURCE_ZYNTHIUM_ALKALIDE,
+  RESOURCE_GHODIUM_ACID,
+  RESOURCE_GHODIUM_ALKALIDE,
   // Tier 3
-  RESOURCE_CATALYZED_UTRIUM_ACID, // XUH2O
-  RESOURCE_CATALYZED_UTRIUM_ALKALIDE, // XUHO2
-  RESOURCE_CATALYZED_KEANIUM_ACID, // XKH2O
-  RESOURCE_CATALYZED_KEANIUM_ALKALIDE, // XKHO2
-  RESOURCE_CATALYZED_LEMERGIUM_ACID, // XLH2O
-  RESOURCE_CATALYZED_LEMERGIUM_ALKALIDE, // XLHO2
-  RESOURCE_CATALYZED_ZYNTHIUM_ACID, // XZH2O
-  RESOURCE_CATALYZED_ZYNTHIUM_ALKALIDE, // XZHO2
-  RESOURCE_CATALYZED_GHODIUM_ACID, // XGH2O
-  RESOURCE_CATALYZED_GHODIUM_ALKALIDE, // XGHO2
+  RESOURCE_CATALYZED_UTRIUM_ACID,
+  RESOURCE_CATALYZED_UTRIUM_ALKALIDE,
+  RESOURCE_CATALYZED_KEANIUM_ACID,
+  RESOURCE_CATALYZED_KEANIUM_ALKALIDE,
+  RESOURCE_CATALYZED_LEMERGIUM_ACID,
+  RESOURCE_CATALYZED_LEMERGIUM_ALKALIDE,
+  RESOURCE_CATALYZED_ZYNTHIUM_ACID,
+  RESOURCE_CATALYZED_ZYNTHIUM_ALKALIDE,
+  RESOURCE_CATALYZED_GHODIUM_ACID,
+  RESOURCE_CATALYZED_GHODIUM_ALKALIDE,
 ]);
 
 // ── МОДУЛЬ ─────────────────────────────────────────────────────────────────
@@ -123,9 +117,7 @@ const marketDirector = {
     let sellCount = 0;
     let stockpileCount = 0;
 
-    // Продукты лаб — активно производятся прямо сейчас
     const labProducts = this._getLabProducts();
-
     const economy = Memory.empire && Memory.empire.economy;
     if (!economy) return;
 
@@ -153,11 +145,10 @@ const marketDirector = {
           reason = "critical";
         } else {
           mode = "stockpile";
-          priority = "normal";
           reason = "energy_reserve";
         }
 
-        // ── СТРАТЕГИЧЕСКИЕ РЕЗЕРВЫ ───────────────────────────────────────
+        // ── СТРАТЕГИЧЕСКИЕ РЕЗЕРВЫ ─────────────────────────────────────────
       } else if (STRATEGIC_RESERVES.has(resource)) {
         if (critical) {
           mode = "buy";
@@ -165,65 +156,56 @@ const marketDirector = {
           reason = "critical_strategic";
         } else {
           mode = "stockpile";
-          priority = "normal";
           reason = "strategic_reserve";
         }
 
-        // ── BOOST CHAIN — всегда produce, никогда buy ────────────────────
+        // ── BOOST CHAIN ────────────────────────────────────────────────────
       } else if (BOOST_CHAIN.has(resource)) {
         if (critical) {
-          // Производим в лабах — не покупаем
           mode = "produce";
           priority = "high";
           reason = "critical_boost";
         } else if (
-          surplus > DEFAULT_SELL_THRESHOLD &&
+          surplus > BOOST_SELL_THRESHOLD &&
           !NOT_FOR_SALE.has(resource)
         ) {
+          // v2.2: используем BOOST_SELL_THRESHOLD (10K) вместо DEFAULT (100K)
           mode = "sell";
-          priority = "normal";
           reason = "boost_surplus";
         } else {
           mode = "stockpile";
-          priority = "normal";
           reason = "boost_reserve";
         }
 
-        // ── RAW MINERALS ─────────────────────────────────────────────────
+        // ── RAW MINERALS ────────────────────────────────────────────────────
       } else if (RAW_MINERALS.has(resource)) {
         if (NOT_FOR_SALE.has(resource)) {
-          // O, X, Z, G — не продаём никогда
           if (critical) {
             mode = "buy";
             priority = "high";
             reason = "critical_raw";
           } else {
             mode = "stockpile";
-            priority = "normal";
             reason = "protected_raw";
           }
         } else {
-          // H, K, L, U — продаём если surplus
           if (critical) {
             mode = "buy";
             priority = "high";
             reason = "critical_raw";
           } else if (surplus > DEFAULT_SELL_THRESHOLD) {
             mode = "sell";
-            priority = "normal";
             reason = "raw_surplus";
           } else {
             mode = "stockpile";
-            priority = "normal";
             reason = "raw_reserve";
           }
         }
 
-        // ── ОСТАЛЬНЫЕ РЕСУРСЫ ────────────────────────────────────────────
+        // ── ОСТАЛЬНЫЕ РЕСУРСЫ ───────────────────────────────────────────────
       } else {
         if (surplus > DEFAULT_SELL_THRESHOLD && !NOT_FOR_SALE.has(resource)) {
           mode = "sell";
-          priority = "normal";
           reason = "surplus";
         } else {
           mode = "stockpile";
@@ -255,7 +237,6 @@ const marketDirector = {
     const duration = Game.cpu.getUsed() - startCpu;
 
     Memory.empire.marketDirectives = directives;
-
     Memory.empire.marketDirectivesMeta = {
       version: DIRECTOR_VERSION,
       generatedAt: Game.time,
@@ -268,7 +249,6 @@ const marketDirector = {
       analyzeDuration: Math.round(duration * 1000) / 1000,
     };
 
-    // Throttled logging
     console.log(
       `[MarketDirector] 🎯 Директивы:` +
         ` produce=${produceCount} buy=${buyCount}` +
@@ -276,12 +256,11 @@ const marketDirector = {
         ` | CPU: ${duration.toFixed(3)}ms`,
     );
 
-    // Предупреждения — critical boost без лаб
     for (const [resource, d] of Object.entries(directives)) {
       if (d.critical && d.mode === "produce" && !labProducts.has(resource)) {
         if (Game.time % 500 === 0) {
           console.log(
-            `[MarketDirector] ⚠️ ${resource}: critical boost` +
+            `[MarketDirector] ⚠️ ${resource}: critical` +
               ` но не производится в лабах — настройте lab config`,
           );
         }
@@ -289,14 +268,9 @@ const marketDirector = {
     }
   },
 
-  /**
-   * Собирает все продукты лаб по всем комнатам.
-   * @returns {Set<string>}
-   */
   _getLabProducts: function () {
     const products = new Set();
     const allReactions = labDirector.getAllReactions();
-
     for (const roomName in allReactions) {
       const data = allReactions[roomName];
       if (!data || !data.reactions) continue;
@@ -304,7 +278,6 @@ const marketDirector = {
         if (r.product) products.add(r.product);
       }
     }
-
     return products;
   },
 
@@ -323,12 +296,10 @@ const marketDirector = {
     const d = this.getDirective(resource);
     return d ? d.mode === "buy" : false;
   },
-
   shouldSell: function (resource) {
     const d = this.getDirective(resource);
     return d ? d.mode === "sell" : false;
   },
-
   shouldProduce: function (resource) {
     const d = this.getDirective(resource);
     return d ? d.mode === "produce" : false;
