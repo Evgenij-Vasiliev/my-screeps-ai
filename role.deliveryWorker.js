@@ -1,45 +1,57 @@
 /**
  * ===================================================
- * ROLE.DELIVERYWORKER.JS — Dedicated Logistics Execution
+ * ROLE.DELIVERYWORKER.JS — Pure Delivery Execution Layer
  * ===================================================
- * VERSION: 1.1
+ * VERSION: 2.0
  * Роль в памяти крипа: deliveryWorker
  *
- * ИЗМЕНЕНИЯ v1.1:
- * - ИСПРАВЛЕН корневой баг: крип больше не зависит от
- *   logisticsDirector.getQueuedDelivery() как единственного
- *   источника задач. Теперь крип проактивно доставляет energy
- *   в фабрику если у фабрики есть task и мало сырья в store.
- * - Полная изоляция от worker/taskManager state machine.
- * - Только private memory fields: deliveryState, deliveryTarget,
- *   deliveryResource, deliveryAmount.
+ * ИЗМЕНЕНИЯ v2.0:
+ * - Убрана ВСЯ логика поиска и назначения deliveries.
+ * - Убрана зависимость от logisticsDirector.getQueuedDelivery().
+ * - Убрана проактивная проверка фабрики.
+ * - Воркер только читает creep.memory.deliveryAssignment
+ *   (которое устанавливает TaskDispatcher) и везёт.
+ * - Добавлена поддержка target: 'lab' (targetLabId).
+ * - Добавлен terminal как fallback источник ресурса.
  *
  * НАЗНАЧЕНИЕ:
- * Единственная обязанность — доставлять ресурсы в фабрику.
+ * Единственная обязанность — физически выполнить уже
+ * назначенную доставку.
  *
  * ЭТОТ КРИП НЕ:
- * - не строит
- * - не ремонтирует
- * - не апгрейдит
+ * - не ищет deliveries
+ * - не назначает tasks
+ * - не анализирует priorities
+ * - не строит, не ремонтирует, не апгрейдит
  * - не использует taskManager
- * - не использует creep.memory.working
- * - не использует creep.memory.task
+ * - не использует creep.memory.working / creep.memory.task
+ *
+ * OWNERSHIP:
+ * DeliveryWorker owns:
+ *   creep.memory.deliveryState
+ *
+ * TaskDispatcher owns:
+ *   creep.memory.deliveryAssignment
+ *
+ * LogisticsDirector owns:
+ *   Memory.empire.logistics.deliveries
  *
  * СОСТОЯНИЯ (creep.memory.deliveryState):
- * 'idle'    — ищем задачу
- * 'pickup'  — идём в storage за ресурсом
- * 'deliver' — несём ресурс к фабрике
+ * 'idle'    — нет назначения, ждём TaskDispatcher
+ * 'pickup'  — идём в storage/terminal за ресурсом
+ * 'deliver' — несём ресурс к цели
  *
- * ПАМЯТЬ КРИПА (только private fields):
- * - deliveryState    {string} — текущее состояние
- * - deliveryTarget   {string} — ID цели (фабрики)
- * - deliveryResource {string} — какой ресурс везём
- * - deliveryAmount   {number} — сколько везём
+ * СТРУКТУРА creep.memory.deliveryAssignment (устанавливает TaskDispatcher):
+ * {
+ *   deliveryId:  number  — createdAt из logistics delivery (ключ)
+ *   roomName:    string  — имя комнаты
+ *   resource:    string  — какой ресурс везём
+ *   amount:      number  — сколько везём
+ *   target:      string  — 'factory' | 'lab'
+ *   targetLabId: string  — ID лаба (только для target='lab')
+ * }
  * ===================================================
  */
-
-const factoryDirector = require("./factoryDirector");
-const logisticsDirector = require("./logisticsDirector");
 
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
@@ -57,34 +69,16 @@ const DELIVERY_STATUS = {
   CANCELLED: "cancelled",
 };
 
-/**
- * Порог energy в фабрике ниже которого доставляем.
- * Если в фабрике меньше этого — нужна доставка.
- */
-const FACTORY_ENERGY_THRESHOLD = 5000;
-
-/**
- * Сколько energy везём за один рейс.
- */
-const DELIVERY_AMOUNT = 5000;
-
-/**
- * Карта: что нужно как сырьё для производства ресурса.
- */
-const INPUT_MAP = {
-  [RESOURCE_BATTERY]: RESOURCE_ENERGY,
-  [RESOURCE_ENERGY]: RESOURCE_BATTERY,
-};
-
 // ── МОДУЛЬ ─────────────────────────────────────────────────────────────────
 
 const roleDeliveryWorker = {
   /**
    * Главная точка входа.
+   * Вызывается из main.js для каждого крипа с role='deliveryWorker'.
    * @param {Creep} creep
    */
   run: function (creep) {
-    // Инициализация
+    // Инициализируем состояние если нет
     if (!creep.memory.deliveryState) {
       creep.memory.deliveryState = STATE.IDLE;
     }
@@ -100,6 +94,7 @@ const roleDeliveryWorker = {
         this._doDeliver(creep);
         break;
       default:
+        // Неизвестное состояние — сброс
         this._reset(creep);
         break;
     }
@@ -108,248 +103,291 @@ const roleDeliveryWorker = {
   // ── IDLE ───────────────────────────────────────────────────────────────
 
   /**
-   * Ищем фабрику которой нужна доставка.
+   * Состояние ожидания назначения от TaskDispatcher.
    *
-   * Алгоритм:
-   * 1. Сначала проверяем LogisticsDirector — есть ли queued delivery
-   * 2. Если нет — проверяем фабрику напрямую:
-   *    есть task + мало сырья в store → доставляем проактивно
+   * ВАЖНО: воркер сам НИЧЕГО не ищет.
+   * Он только проверяет creep.memory.deliveryAssignment.
+   * Если есть — переходит в PICKUP.
+   * Если нет — ждёт.
    *
    * @param {Creep} creep
    */
   _doIdle: function (creep) {
-    // ── ПУТЬ 1: через LogisticsDirector ───────────────────────────────────
-    const delivery = logisticsDirector.getQueuedDelivery(creep.room.name);
+    const assignment = creep.memory.deliveryAssignment;
 
-    if (delivery) {
-      // Берём delivery task
-      delivery.status = DELIVERY_STATUS.ASSIGNED;
-      delivery.assignedTo = creep.name;
-      delivery.updatedAt = Game.time;
-
-      // Находим фабрику
-      const factory = this._getFactory(creep.room);
-      if (!factory) {
-        delivery.status = DELIVERY_STATUS.CANCELLED;
-        delivery.updatedAt = Game.time;
-        this._reset(creep);
-        return;
-      }
-
-      creep.memory.deliveryState = STATE.PICKUP;
-      creep.memory.deliveryTarget = factory.id;
-      creep.memory.deliveryResource = delivery.resource;
-      creep.memory.deliveryAmount = delivery.amount;
-      creep.memory._deliveryId = delivery.createdAt;
-
-      creep.say("📦 лог");
-      return;
-    }
-
-    // ── ПУТЬ 2: проактивная проверка фабрики ──────────────────────────────
-    const factory = this._getFactory(creep.room);
-    if (!factory) {
+    // Нет назначения от TaskDispatcher — ждём
+    if (!assignment) {
       creep.say("💤 жду");
       return;
     }
 
-    // Есть ли task для этой фабрики?
-    const task = factoryDirector.getTask(creep.room.name);
-    if (!task) {
-      creep.say("💤 жду");
+    // Валидация назначения
+    if (!assignment.resource || !assignment.target) {
+      // Некорректное назначение — сбрасываем
+      console.log(
+        `[DeliveryWorker] ${creep.name}: некорректное assignment, сброс`,
+      );
+      this._cancelAssignment(creep, "invalid_assignment");
       return;
     }
 
-    // Какое сырьё нужно?
-    const inputResource = INPUT_MAP[task.resource];
-    if (!inputResource) {
-      creep.say("💤 жду");
+    // Уже несём нужный ресурс (например, крип выжил после перезагрузки)
+    if ((creep.store[assignment.resource] || 0) > 0) {
+      creep.memory.deliveryState = STATE.DELIVER;
+      this._updateDelivery(creep, DELIVERY_STATUS.DELIVERING);
       return;
     }
 
-    // Сколько сырья в фабрике?
-    const inFactory = factory.store[inputResource] || 0;
-
-    if (inFactory >= FACTORY_ENERGY_THRESHOLD) {
-      // Фабрика не голодает — ждём
-      creep.say("✅ сыта");
-      return;
-    }
-
-    // Есть ли сырьё в storage?
-    const storage = creep.room.storage;
-    if (!storage || (storage.store[inputResource] || 0) < 100) {
-      creep.say("⚠️ нет");
-      return;
-    }
-
-    // ── НАЗНАЧАЕМ ПРОАКТИВНУЮ ДОСТАВКУ ───────────────────────────────────
-    const amount = Math.min(
-      DELIVERY_AMOUNT,
-      creep.store.getCapacity(),
-      storage.store[inputResource],
-    );
-
+    // Начинаем pickup
     creep.memory.deliveryState = STATE.PICKUP;
-    creep.memory.deliveryTarget = factory.id;
-    creep.memory.deliveryResource = inputResource;
-    creep.memory.deliveryAmount = amount;
-    creep.memory._deliveryId = null; // нет logistics delivery
-
-    creep.say("📦 прямо");
+    this._updateDelivery(creep, DELIVERY_STATUS.ASSIGNED);
+    creep.say("📦 иду");
   },
 
   // ── PICKUP ─────────────────────────────────────────────────────────────
 
   /**
-   * Идём в storage, забираем ресурс.
+   * Идём в storage (или terminal как fallback), забираем ресурс.
+   *
+   * Порядок источников:
+   * 1. storage — основной
+   * 2. terminal — fallback если в storage нет
+   *
    * @param {Creep} creep
    */
   _doPickup: function (creep) {
-    const resource = creep.memory.deliveryResource;
-    const amount = creep.memory.deliveryAmount;
+    const assignment = creep.memory.deliveryAssignment;
 
-    // Уже несём ресурс — идём сдавать
-    if ((creep.store[resource] || 0) > 0) {
-      creep.memory.deliveryState = STATE.DELIVER;
-      this._updateLogistics(creep, DELIVERY_STATUS.DELIVERING);
-      return;
-    }
-
-    const storage = creep.room.storage;
-    if (!storage || (storage.store[resource] || 0) === 0) {
-      console.log(`[DeliveryWorker] ${creep.name}: нет ${resource} в storage`);
-      this._updateLogistics(creep, DELIVERY_STATUS.CANCELLED);
+    // Назначение пропало пока шли — отмена
+    if (!assignment) {
       this._reset(creep);
       return;
     }
 
+    const resource = assignment.resource;
+
+    // Уже взяли ресурс — идём сдавать
+    if ((creep.store[resource] || 0) > 0) {
+      creep.memory.deliveryState = STATE.DELIVER;
+      this._updateDelivery(creep, DELIVERY_STATUS.DELIVERING);
+      return;
+    }
+
+    // ── Ищем источник ресурса ─────────────────────────────────────────────
+
+    const source = this._findSource(creep, resource);
+
+    if (!source) {
+      // Ресурса нет нигде — отмена
+      console.log(
+        `[DeliveryWorker] ${creep.name}: нет ${resource}` +
+          ` в storage/terminal — отмена`,
+      );
+      this._cancelAssignment(creep, "no_source");
+      return;
+    }
+
+    // ── Withdraw ──────────────────────────────────────────────────────────
+
     const toWithdraw = Math.min(
-      amount,
+      assignment.amount,
       creep.store.getFreeCapacity(resource),
-      storage.store[resource],
+      source.store[resource],
     );
 
-    const result = creep.withdraw(storage, resource, toWithdraw);
+    const result = creep.withdraw(source, resource, toWithdraw);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, {
+      creep.moveTo(source, {
         reusePath: 5,
         visualizePathStyle: { stroke: "#ffaa00" },
       });
-      creep.say("🏃 storage");
-      this._updateLogistics(creep, DELIVERY_STATUS.ASSIGNED);
+      creep.say("🏃 взять");
       return;
     }
 
     if (result === OK) {
       creep.memory.deliveryState = STATE.DELIVER;
-      this._updateLogistics(creep, DELIVERY_STATUS.DELIVERING);
+      this._updateDelivery(creep, DELIVERY_STATUS.DELIVERING);
       creep.say("✅ взял");
       return;
     }
 
-    // Ошибка
-    console.log(`[DeliveryWorker] ${creep.name}: withdraw error ${result}`);
-    this._updateLogistics(creep, DELIVERY_STATUS.CANCELLED);
-    this._reset(creep);
+    // Ошибка withdraw
+    console.log(
+      `[DeliveryWorker] ${creep.name}: withdraw error ${result}` +
+        ` (${resource})`,
+    );
+    this._cancelAssignment(creep, `withdraw_error_${result}`);
   },
 
   // ── DELIVER ────────────────────────────────────────────────────────────
 
   /**
-   * Несём ресурс к фабрике, сдаём.
+   * Несём ресурс к цели, делаем transfer().
+   *
+   * Поддерживаемые targets:
+   * - 'factory' → StructureFactory комнаты
+   * - 'lab'     → конкретный lab по targetLabId
+   *
    * @param {Creep} creep
    */
   _doDeliver: function (creep) {
-    const resource = creep.memory.deliveryResource;
+    const assignment = creep.memory.deliveryAssignment;
 
+    // Назначение пропало — сброс
+    if (!assignment) {
+      this._reset(creep);
+      return;
+    }
+
+    const resource = assignment.resource;
+
+    // Ресурс уже сдан (store пуст) — завершаем
     if ((creep.store[resource] || 0) === 0) {
-      // Всё сдали
-      this._updateLogistics(creep, DELIVERY_STATUS.COMPLETED);
-      this._reset(creep);
+      this._completeAssignment(creep);
       return;
     }
 
-    // Получаем фабрику по ID
-    const factory = Game.getObjectById(creep.memory.deliveryTarget);
-    if (!factory) {
-      console.log(`[DeliveryWorker] ${creep.name}: фабрика не найдена`);
-      this._updateLogistics(creep, DELIVERY_STATUS.CANCELLED);
-      this._reset(creep);
+    // ── Находим цель ──────────────────────────────────────────────────────
+
+    const target = this._findTarget(creep, assignment);
+
+    if (!target) {
+      // Цель не найдена — отмена
+      console.log(
+        `[DeliveryWorker] ${creep.name}: цель не найдена` +
+          ` (target=${assignment.target}, labId=${assignment.targetLabId})`,
+      );
+      this._cancelAssignment(creep, "target_missing");
       return;
     }
 
-    const result = creep.transfer(factory, resource);
+    // ── Transfer ──────────────────────────────────────────────────────────
+
+    const result = creep.transfer(target, resource);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(factory, {
+      creep.moveTo(target, {
         reusePath: 5,
         visualizePathStyle: { stroke: "#00aaff" },
       });
       creep.say("🏭 несу");
-      this._updateLogistics(creep, DELIVERY_STATUS.DELIVERING);
       return;
     }
 
     if (result === OK) {
       creep.say("✅ сдал");
-      this._updateLogistics(creep, DELIVERY_STATUS.COMPLETED);
-      this._reset(creep);
+      this._completeAssignment(creep);
       return;
     }
 
     if (result === ERR_FULL) {
-      // Фабрика полная — сдаём в storage
+      // Цель полная — сдаём обратно в storage
+      creep.say("⚠️ полн");
       const storage = creep.room.storage;
       if (storage) {
         if (creep.transfer(storage, resource) === ERR_NOT_IN_RANGE) {
           creep.moveTo(storage, { reusePath: 5 });
         }
       }
-      this._updateLogistics(creep, DELIVERY_STATUS.CANCELLED);
-      this._reset(creep);
+      this._cancelAssignment(creep, "target_full");
       return;
     }
 
+    // Другая ошибка transfer
     console.log(`[DeliveryWorker] ${creep.name}: transfer error ${result}`);
-    this._updateLogistics(creep, DELIVERY_STATUS.CANCELLED);
-    this._reset(creep);
+    this._cancelAssignment(creep, `transfer_error_${result}`);
   },
 
   // ── ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ─────────────────────────────────────────────
 
   /**
-   * Находим фабрику в комнате.
-   * @param {Room} room
-   * @returns {StructureFactory|null}
+   * Ищет источник ресурса: сначала storage, потом terminal.
+   *
+   * @param {Creep} creep
+   * @param {string} resource
+   * @returns {StructureStorage|StructureTerminal|null}
    */
-  _getFactory: function (room) {
-    return (
-      room.find(FIND_MY_STRUCTURES, {
-        filter: s => s.structureType === STRUCTURE_FACTORY,
-      })[0] || null
-    );
+  _findSource: function (creep, resource) {
+    const room = creep.room;
+
+    // 1. storage
+    if (room.storage && (room.storage.store[resource] || 0) >= 100) {
+      return room.storage;
+    }
+
+    // 2. terminal как fallback
+    if (room.terminal && (room.terminal.store[resource] || 0) >= 100) {
+      return room.terminal;
+    }
+
+    return null;
   },
 
   /**
-   * Обновляем статус в LogisticsDirector если есть привязанная delivery.
-   * Если доставка проактивная (нет _deliveryId) — ничего не делаем.
+   * Находит цель доставки по assignment.
+   *
    * @param {Creep} creep
-   * @param {string} status
+   * @param {Object} assignment
+   * @returns {Structure|null}
    */
-  _updateLogistics: function (creep, status) {
-    if (!creep.memory._deliveryId) return;
+  _findTarget: function (creep, assignment) {
+    if (assignment.target === "factory") {
+      // Ищем фабрику в комнате
+      return (
+        creep.room.find(FIND_MY_STRUCTURES, {
+          filter: s => s.structureType === STRUCTURE_FACTORY,
+        })[0] || null
+      );
+    }
 
-    const list =
+    if (assignment.target === "lab") {
+      // Конкретный лаб по ID
+      if (!assignment.targetLabId) return null;
+      return Game.getObjectById(assignment.targetLabId) || null;
+    }
+
+    // Неизвестный тип цели
+    return null;
+  },
+
+  /**
+   * Находит delivery запись в LogisticsDirector по deliveryId.
+   * deliveryId — это createdAt из записи (используется как ключ).
+   *
+   * @param {Creep} creep
+   * @returns {Object|null} ссылка на delivery запись (live reference)
+   */
+  _findDelivery: function (creep) {
+    const assignment = creep.memory.deliveryAssignment;
+    if (
+      !assignment ||
+      assignment.deliveryId === undefined ||
+      assignment.deliveryId === null
+    ) {
+      return null;
+    }
+
+    const deliveries =
       Memory.empire &&
       Memory.empire.logistics &&
       Memory.empire.logistics.deliveries &&
-      Memory.empire.logistics.deliveries[creep.room.name];
+      Memory.empire.logistics.deliveries[assignment.roomName];
 
-    if (!list) return;
+    if (!deliveries) return null;
 
-    const delivery = list.find(d => d.createdAt === creep.memory._deliveryId);
+    return deliveries.find(d => d.createdAt === assignment.deliveryId) || null;
+  },
+
+  /**
+   * Обновляет статус delivery в LogisticsDirector.
+   *
+   * @param {Creep} creep
+   * @param {string} status
+   */
+  _updateDelivery: function (creep, status) {
+    const delivery = this._findDelivery(creep);
     if (!delivery) return;
 
     delivery.status = status;
@@ -357,15 +395,51 @@ const roleDeliveryWorker = {
   },
 
   /**
-   * Сброс памяти крипа → IDLE.
+   * Завершает delivery: status=completed, очищает assignment.
+   *
+   * @param {Creep} creep
+   */
+  _completeAssignment: function (creep) {
+    this._updateDelivery(creep, DELIVERY_STATUS.COMPLETED);
+
+    // Очищаем только deliveryAssignment — TaskDispatcher его выдал
+    delete creep.memory.deliveryAssignment;
+
+    // Сбрасываем состояние
+    creep.memory.deliveryState = STATE.IDLE;
+  },
+
+  /**
+   * Отменяет delivery: status=cancelled, очищает assignment.
+   *
+   * @param {Creep} creep
+   * @param {string} reason — для лога
+   */
+  _cancelAssignment: function (creep, reason) {
+    const assignment = creep.memory.deliveryAssignment;
+    if (assignment) {
+      console.log(
+        `[DeliveryWorker] ${creep.name}: отмена delivery` +
+          ` [${reason}] resource=${assignment.resource}` +
+          ` target=${assignment.target}`,
+      );
+    }
+
+    this._updateDelivery(creep, DELIVERY_STATUS.CANCELLED);
+
+    delete creep.memory.deliveryAssignment;
+    creep.memory.deliveryState = STATE.IDLE;
+  },
+
+  /**
+   * Полный сброс состояния крипа.
+   * Используется при неизвестных ошибках.
+   *
    * @param {Creep} creep
    */
   _reset: function (creep) {
     creep.memory.deliveryState = STATE.IDLE;
-    creep.memory.deliveryTarget = null;
-    creep.memory.deliveryResource = null;
-    creep.memory.deliveryAmount = null;
-    creep.memory._deliveryId = null;
+    delete creep.memory.deliveryAssignment;
   },
 };
 

@@ -2,36 +2,23 @@
  * ===================================================
  * MARKETMANAGER.JS — Market Intelligence Layer
  * ===================================================
- * VERSION: 1.1 — BUY POLICY WHITELIST
+ * VERSION: 1.2 — EXPANDED SELL LIST
+ *
+ * ИЗМЕНЕНИЯ v1.2:
+ * - Расширен SELLABLE_RESOURCES:
+ *   + K  (Keanium)          — сырьё в большом избытке
+ *   + ZK (Zynthium Keanite) — T1 compound
+ *   + KO (Keanium Oxide)    — T1 compound
+ *   + KH2O                  — T2 compound
+ *   + UHO2                  — T2 compound
+ *   + LHO2                  — T2 compound
+ *   + ZHO2                  — T2 compound
+ * - MIN_SELL_SURPLUS снижен до 10,000 для compounds
+ *   (у T2 surplus меньше чем у raw minerals)
  *
  * ИЗМЕНЕНИЯ v1.1:
- * - Добавлен BUYABLE_RESOURCES whitelist (Set для O(1) lookup)
- * - Buy intent создаётся ТОЛЬКО для ресурсов из whitelist
- * - Бусты и lab products больше не попадают в buy intents
- * - SELL_MINERALS не изменён
- *
- * НАЗНАЧЕНИЕ:
- * - Анализирует surplus/deficit по EconomyManager
- * - Определяет что покупать (только raw minerals + energy)
- * - Определяет что продавать (surplus resources)
- * - Публикует market intents в Memory.empire.market
- *
- * СИСТЕМА НЕ:
- * - не вызывает Game.market.deal()
- * - не отправляет ресурсы
- * - не управляет терминалами
- * - не двигает ресурсы между комнатами
- * - не сканирует рынок каждый тик
- *
- * INPUTS:
- * economyManager.getState(resource)
- * economyManager.getSurplus(resource)
- * economyManager.getDeficit(resource)
- * economyManager.isCritical(resource)
- * empireResourceRegistry.getTotal(resource)
- *
- * OUTPUTS:
- * Memory.empire.market
+ * - Добавлен BUYABLE_RESOURCES whitelist
+ * - Buy intent только для raw minerals + energy
  * ===================================================
  */
 
@@ -40,55 +27,75 @@ const empireResourceRegistry = require("./empireResourceRegistry");
 
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
-/**
- * Интервал пересчёта — 100 тиков.
- * Market analysis не нужен каждый тик.
- */
 const UPDATE_INTERVAL = 100;
-
-const MARKET_VERSION = 1.1;
+const MARKET_VERSION = 1.2;
 
 /**
  * WHITELIST — только эти ресурсы разрешены к ПОКУПКЕ.
- *
- * Используем Set для O(1) lookup.
- *
- * РАЗРЕШЕНО: raw minerals + energy economy.
- * ЗАПРЕЩЕНО: tier1/tier2/tier3 бусты — их производят лабы.
- *
- * ПОЧЕМУ:
- * Market должен закрывать сырьевые bottlenecks,
- * а НЕ заменять lab production pipeline.
+ * Только raw minerals + energy.
  */
 const BUYABLE_RESOURCES = new Set([
-  RESOURCE_ENERGY, // энергия
-  RESOURCE_BATTERY, // батарейки
-
-  RESOURCE_UTRIUM, // U  — сырьё
-  RESOURCE_LEMERGIUM, // L  — сырьё
-  RESOURCE_KEANIUM, // K  — сырьё
-  RESOURCE_ZYNTHIUM, // Z  — сырьё
-  RESOURCE_OXYGEN, // O  — сырьё
-  RESOURCE_HYDROGEN, // H  — сырьё
-  RESOURCE_CATALYST, // X  — сырьё
-  RESOURCE_GHODIUM, // G  — сырьё (нужен для nukes/boosts)
+  // RESOURCE_ENERGY,
+  RESOURCE_BATTERY,
+  RESOURCE_UTRIUM,
+  RESOURCE_LEMERGIUM,
+  RESOURCE_KEANIUM,
+  RESOURCE_ZYNTHIUM,
+  RESOURCE_OXYGEN,
+  RESOURCE_HYDROGEN,
+  RESOURCE_CATALYST,
+  RESOURCE_GHODIUM,
 ]);
 
 /**
- * Только эти ресурсы разрешены к ПРОДАЖЕ в v1.
- * Защита от случайной продажи редких бустов.
+ * WHITELIST — только эти ресурсы разрешены к ПРОДАЖЕ.
+ *
+ * v1.2: добавлены compounds которые производим в избытке.
+ * НЕ продаём: OH, X, O, Z (сами закупаем).
  */
-const SELLABLE_RESOURCES = new Set([RESOURCE_ENERGY, RESOURCE_BATTERY]);
+const SELLABLE_RESOURCES = new Set([
+  RESOURCE_ENERGY,
+  // Energy economy
+  RESOURCE_BATTERY,
+
+  // Raw minerals в избытке
+  RESOURCE_KEANIUM, // K  — 289,130 в империи
+
+  // T1 compounds
+  RESOURCE_ZYNTHIUM_KEANITE, // ZK  — 83,705
+  RESOURCE_KEANIUM_OXIDE, // KO  — 89,070
+
+  // T2 compounds
+  RESOURCE_KEANIUM_ACID, // KH2O — 34,240
+  RESOURCE_UTRIUM_ALKALIDE, // UHO2 — 31,050
+  RESOURCE_LEMERGIUM_ALKALIDE, // LHO2 — 144,400
+  RESOURCE_ZYNTHIUM_ALKALIDE, // ZHO2 — 20,460
+]);
 
 /**
- * Минимальный surplus для создания sell intent.
- * Не продаём если surplus слишком мал.
+ * Минимальный surplus для RAW minerals и energy.
  */
 const MIN_SELL_SURPLUS = 50000;
 
 /**
- * Приоритеты.
+ * Минимальный surplus для compounds (T1/T2).
+ * Меньше порог — compounds производятся в меньших количествах.
  */
+const MIN_SELL_SURPLUS_COMPOUND = 10000;
+
+/**
+ * Ресурсы которые считаются compounds (не raw).
+ * Для них используем пониженный порог продажи.
+ */
+const COMPOUND_RESOURCES = new Set([
+  RESOURCE_ZYNTHIUM_KEANITE,
+  RESOURCE_KEANIUM_OXIDE,
+  RESOURCE_KEANIUM_ACID,
+  RESOURCE_UTRIUM_ALKALIDE,
+  RESOURCE_LEMERGIUM_ALKALIDE,
+  RESOURCE_ZYNTHIUM_ALKALIDE,
+]);
+
 const PRIORITY = {
   HIGH: "high",
   NORMAL: "normal",
@@ -97,43 +104,31 @@ const PRIORITY = {
 // ── МОДУЛЬ ─────────────────────────────────────────────────────────────────
 
 const marketManager = {
-  /**
-   * Главная точка входа.
-   * Вызывать из main.js.
-   */
   run: function () {
     if (!Memory.empire) Memory.empire = {};
     if (Game.time % UPDATE_INTERVAL !== 0) return;
     this.analyze();
   },
 
-  /**
-   * Анализирует economy state и публикует market intents.
-   */
   analyze: function () {
     const startCpu = Game.cpu.getUsed();
 
     const buyIntents = [];
     const sellIntents = [];
-    const blockedBoosts = []; // для отладки — что заблокировано
+    const blockedBoosts = [];
 
     const economy = Memory.empire && Memory.empire.economy;
     if (!economy) return;
 
     // ── BUY ANALYSIS ──────────────────────────────────────────────────────
-    // Покупаем ТОЛЬКО critical resources из BUYABLE_RESOURCES whitelist.
-    // Бусты и lab products — НЕ покупаем, их производят лабы.
     for (const resource in economy) {
       if (!economyManager.isCritical(resource)) continue;
 
       const deficit = economyManager.getDeficit(resource);
       if (deficit <= 0) continue;
 
-      // Не создаём дубликаты
       if (buyIntents.find(i => i.resource === resource)) continue;
 
-      // ── WHITELIST CHECK (v1.1) ────────────────────────────────────────
-      // Если ресурс не в whitelist — блокируем, лабы сами произведут.
       if (!BUYABLE_RESOURCES.has(resource)) {
         blockedBoosts.push(resource);
         continue;
@@ -148,20 +143,22 @@ const marketManager = {
     }
 
     // ── SELL ANALYSIS ─────────────────────────────────────────────────────
-    // Продаём только разрешённые ресурсы с surplus.
-    // SELL логика не изменена в v1.1.
     for (const resource of SELLABLE_RESOURCES) {
-      // Не продаём critical
       if (economyManager.isCritical(resource)) continue;
 
       const surplus = economyManager.getSurplus(resource);
-      if (surplus < MIN_SELL_SURPLUS) continue;
 
-      // Не создаём дубликаты
+      // Используем пониженный порог для compounds
+      const minSurplus = COMPOUND_RESOURCES.has(resource)
+        ? MIN_SELL_SURPLUS_COMPOUND
+        : MIN_SELL_SURPLUS;
+
+      if (surplus < minSurplus) continue;
+
       if (sellIntents.find(i => i.resource === resource)) continue;
 
       const priority =
-        surplus > MIN_SELL_SURPLUS * 3 ? PRIORITY.HIGH : PRIORITY.NORMAL;
+        surplus > minSurplus * 3 ? PRIORITY.HIGH : PRIORITY.NORMAL;
 
       sellIntents.push({
         resource,
@@ -188,11 +185,10 @@ const marketManager = {
       criticalBuyCount: buyIntents.filter(i => i.priority === PRIORITY.HIGH)
         .length,
       surplusSellCount: sellIntents.length,
-      blockedBoostCount: blockedBoosts.length, // v1.1 — сколько бустов заблокировано
+      blockedBoostCount: blockedBoosts.length,
       analyzeDuration: Math.round(duration * 1000) / 1000,
     };
 
-    // Throttled logging — раз в 100 тиков (каждый запуск)
     console.log(
       `[MarketManager] 📊 Анализ: buy=${buyIntents.length}` +
         ` sell=${sellIntents.length}` +
@@ -218,57 +214,33 @@ const marketManager = {
       );
     }
 
-    // v1.1 — логируем заблокированные бусты раз в 500 тиков
     if (blockedBoosts.length > 0 && Game.time % 500 === 0) {
       console.log(
-        `[MarketManager] 🚫 Заблокированы (производятся лабами): ` +
-          blockedBoosts.join(", "),
+        `[MarketManager] 🚫 Заблокированы (лабы): ` + blockedBoosts.join(", "),
       );
     }
   },
 
   // ── ПУБЛИЧНОЕ API ─────────────────────────────────────────────────────────
 
-  /**
-   * Получить все buy intents.
-   * @returns {Array}
-   */
   getBuyIntents: function () {
     const market = Memory.empire && Memory.empire.market;
     return market ? market.buy : [];
   },
 
-  /**
-   * Получить все sell intents.
-   * @returns {Array}
-   */
   getSellIntents: function () {
     const market = Memory.empire && Memory.empire.market;
     return market ? market.sell : [];
   },
 
-  /**
-   * Проверить есть ли buy intent для ресурса.
-   * @param {string} resource
-   * @returns {boolean}
-   */
   hasBuyIntent: function (resource) {
     return this.getBuyIntents().some(i => i.resource === resource);
   },
 
-  /**
-   * Проверить есть ли sell intent для ресурса.
-   * @param {string} resource
-   * @returns {boolean}
-   */
   hasSellIntent: function (resource) {
     return this.getSellIntents().some(i => i.resource === resource);
   },
 
-  /**
-   * Метаданные последнего анализа.
-   * @returns {Object}
-   */
   getMeta: function () {
     return (Memory.empire && Memory.empire.marketMeta) || {};
   },

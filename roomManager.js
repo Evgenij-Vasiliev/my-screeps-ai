@@ -54,7 +54,7 @@ const NUKER_ROOM = "E37S37";
 // ИСПРАВЛЕНО v2: снижен TERMINAL_ENERGY_OVERFLOW (было 50000)
 // и повышен STORAGE_ENERGY_MIN (было 10000) —
 // чтобы terminalUnloader активнее перекачивал энергию в storage.
-const TERMINAL_ENERGY_OVERFLOW = 100000;
+const TERMINAL_ENERGY_OVERFLOW = 50000;
 const STORAGE_ENERGY_MIN = 30000;
 
 // Комнаты с повышенным риском нападения — сканируем в первую очередь.
@@ -494,7 +494,7 @@ const roomManager = {
       room.controller && room.controller.ticksToDowngrade < 100000 ? 1 : 0;
 
     // Всегда держим 1 атакера в комнате для защиты
-    const attackerCount = 1;
+    const attackerCount = 0;
 
     // Суммарное количество не-энергетических ресурсов в терминале
     // Если > 5000 — нужен unloader чтобы разгрузить терминал в storage
@@ -520,7 +520,7 @@ const roomManager = {
     const localRolesConfig = [
       // 1 универсальный worker на комнату
       // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
-      { role: "test_worker", count: 1 },
+      { role: "test_worker", count: 2 },
       // test_harvester закомментирован — заменён на test_worker (задача SUPPLY)
       // { role: "test_harvester", count: 1 },
 
@@ -540,6 +540,7 @@ const roomManager = {
         // - в терминале накопились не-энергетические ресурсы (> 5000)
         // - есть очередь запросов (балансировка или продажа минералов)
         // - терминал переполнен энергией при пустом storage
+
         count:
           terminalNonEnergy > 5000 || hasTerminalNeeds || terminalEnergyOverflow
             ? 1
@@ -547,10 +548,11 @@ const roomManager = {
       },
 
       // test_builder закомментирован — заменён на test_worker (задача BUILD)
+
       { role: "test_builder", count: hasSites ? 1 : 0 },
 
       // test_upgrader закомментирован — заменён на test_worker (задача UPGRADE)
-      // { role: "test_upgrader", count: needsUpgrader },
+      // { role: "test_upgrader", count: 1 }, //needsUpgrader
 
       // test_repairer закомментирован — заменён на test_worker (задача REPAIR)
       // { role: "test_repairer", count: needsRepair ? 1 : 0 },
@@ -564,7 +566,7 @@ const roomManager = {
           mineralAvailable &&
           room.storage &&
           room.storage.store[RESOURCE_ENERGY] > 20000
-            ? 2
+            ? 1
             : 0,
       },
 
@@ -574,12 +576,12 @@ const roomManager = {
         count: hasLabConfig(room) ? 1 : 0,
       },
 
-      {
-        role: "test_nukerFiller",
-        // Только в комнате с Nuker и только пока он не заряжен
-        count: room.name === NUKER_ROOM && nukerNeedsFilling(room) ? 1 : 0,
-      },
-      { role: "test_deliveryWorker", count: 1 },
+      // {
+      //   role: "test_nukerFiller",
+      //   // Только в комнате с Nuker и только пока он не заряжен
+      //   count: room.name === NUKER_ROOM && nukerNeedsFilling(room) ? 1 : 0,
+      // },
+      // { role: "test_deliveryWorker", count: 1 },
 
       // 1 универсальный worker на комнату
       // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE

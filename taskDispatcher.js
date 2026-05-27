@@ -2,7 +2,13 @@
  * ===================================================
  * TASKDISPATCHER.JS — Task Coordination Layer
  * ===================================================
- * VERSION: 1.0
+ * VERSION: 1.1
+ *
+ * ИЗМЕНЕНИЯ v1.1:
+ * - Исправлен формат creep.memory.deliveryAssignment.
+ *   Теперь пишем ПОЛНЫЙ payload чтобы DeliveryWorker v2
+ *   мог читать resource/amount/target без дополнительных
+ *   обращений к Memory на каждом тике.
  *
  * НАЗНАЧЕНИЕ:
  * Координирует назначение delivery задач воркерам.
@@ -56,7 +62,7 @@ const UPDATE_INTERVAL = 5;
 /**
  * Версия формата данных в Memory.
  */
-const DISPATCHER_VERSION = 1;
+const DISPATCHER_VERSION = 2;
 
 /**
  * Через сколько тиков без обновления считаем assignment устаревшим.
@@ -67,7 +73,7 @@ const STALE_TIMEOUT = 100;
 /**
  * Роль крипов которые выполняют доставки.
  */
-const DELIVERY_ROLE = "deliveryWorker";
+const DELIVERY_ROLE = "test_deliveryWorker";
 
 /**
  * Статусы delivery (зеркало из LogisticsDirector).
@@ -103,13 +109,11 @@ const taskDispatcher = {
    * taskDispatcher.run()           // каждые 5 тиков
    */
   run: function () {
-    // Инициализация хранилища
     if (!Memory.empire) Memory.empire = {};
     if (!Memory.empire.dispatcher) {
       Memory.empire.dispatcher = { assignments: {} };
     }
 
-    // Запускаем каждые UPDATE_INTERVAL тиков
     if (Game.time % UPDATE_INTERVAL !== 0) return;
 
     this._dispatch();
@@ -149,6 +153,9 @@ const taskDispatcher = {
       c => c.memory.role === DELIVERY_ROLE && !c.memory.deliveryAssignment,
     );
 
+    // Запоминаем количество до назначения для лога
+    const idleCountBefore = idleWorkers.length;
+
     // ── ШАГ 4: Назначение ─────────────────────────────────────────────
     let assignedCount = 0;
     const assignments = Memory.empire.dispatcher.assignments;
@@ -165,15 +172,29 @@ const taskDispatcher = {
       delivery.assignedAt = Game.time;
       delivery.updatedAt = Game.time;
 
-      // Пишем задачу воркеру
-      // DeliveryWorker читает это поле и выполняет доставку
+      /**
+       * ── ПОЛНЫЙ ФОРМАТ НАЗНАЧЕНИЯ ──────────────────────────────────
+       * v1.1: пишем ВСЕ поля которые нужны DeliveryWorker v2.
+       *
+       * roomName     — для поиска delivery в Memory
+       * deliveryIndex — индекс в массиве deliveries[roomName]
+       * deliveryId   — createdAt как уникальный ключ (для stale recovery)
+       * resource     — какой ресурс везти
+       * amount       — сколько везти
+       * target       — 'factory' | 'lab'
+       * targetLabId  — ID конкретного лаба (null для factory)
+       */
       worker.memory.deliveryAssignment = {
-        roomName, // комната где лежит delivery
-        deliveryIndex: index, // индекс в массиве deliveries[roomName]
+        roomName,
+        deliveryIndex: index,
+        deliveryId: delivery.createdAt,
+        resource: delivery.resource,
+        amount: delivery.amount,
+        target: delivery.target,
+        targetLabId: delivery.targetLabId || null,
       };
 
       // Публикуем в dispatcher registry
-      // Ключ: уникальный по времени создания delivery
       const key = `delivery_${delivery.createdAt}`;
       assignments[key] = {
         creep: worker.name,
@@ -206,17 +227,16 @@ const taskDispatcher = {
       version: DISPATCHER_VERSION,
       generatedAt: Game.time,
       queuedCount: queue.length,
-      idleWorkers: idleWorkers.length + assignedCount, // до назначения
+      idleWorkers: idleCountBefore,
       assignedCount,
       recoveredCount,
       planDuration: Math.round(planDuration * 1000) / 1000,
     };
 
-    // Throttled logging — раз в 50 тиков
     if (Game.time % 50 === 0) {
       console.log(
         `[TaskDispatcher] 📋 queued=${queue.length}` +
-          ` idle=${idleWorkers.length + assignedCount}` +
+          ` idle=${idleCountBefore}` +
           ` assigned=${assignedCount}` +
           ` recovered=${recoveredCount}` +
           ` | CPU: ${planDuration.toFixed(3)}ms`,
@@ -227,7 +247,7 @@ const taskDispatcher = {
   /**
    * Восстанавливает stale assignments.
    *
-   * Случаи когда нужно восстановить:
+   * Случаи:
    * 1. Воркер умер (нет в Game.creeps)
    * 2. Прошло STALE_TIMEOUT тиков с момента assignedAt
    *
@@ -247,29 +267,23 @@ const taskDispatcher = {
     for (const key in assignments) {
       const record = assignments[key];
 
-      // Проверяем живость воркера
       const workerDead = !Game.creeps[record.creep];
-
-      // Проверяем таймаут
       const isStale = Game.time - record.assignedAt > STALE_TIMEOUT;
 
-      // Проверяем что delivery всё ещё assigned (не completed/cancelled)
       const roomDeliveries = deliveries[record.roomName];
       if (!roomDeliveries) {
-        // Комната исчезла — чистим запись
         delete assignments[key];
         continue;
       }
 
       const delivery = roomDeliveries[record.deliveryIndex];
 
-      // Если delivery завершена/отменена — просто чистим запись диспетчера
+      // Delivery завершена/отменена — чистим запись диспетчера
       if (
         !delivery ||
         delivery.status === DELIVERY_STATUS.COMPLETED ||
         delivery.status === DELIVERY_STATUS.CANCELLED
       ) {
-        // Очищаем память живого воркера если нужно
         if (!workerDead && Game.creeps[record.creep]) {
           delete Game.creeps[record.creep].memory.deliveryAssignment;
         }
@@ -277,7 +291,7 @@ const taskDispatcher = {
         continue;
       }
 
-      // Восстанавливаем если воркер умер или таймаут
+      // Восстанавливаем
       if (workerDead || isStale) {
         const reason = workerDead ? "воркер мёртв" : "timeout";
 
@@ -286,18 +300,15 @@ const taskDispatcher = {
             ` room=${record.roomName} (${reason}, был: ${record.creep})`,
         );
 
-        // Возвращаем delivery в очередь
         delivery.status = DELIVERY_STATUS.QUEUED;
         delete delivery.assignedTo;
         delete delivery.assignedAt;
         delivery.updatedAt = Game.time;
 
-        // Очищаем память живого воркера (если жив но stale)
         if (!workerDead && Game.creeps[record.creep]) {
           delete Game.creeps[record.creep].memory.deliveryAssignment;
         }
 
-        // Чистим запись диспетчера
         delete assignments[key];
         recoveredCount++;
       }
@@ -309,7 +320,7 @@ const taskDispatcher = {
   /**
    * Строит очередь задач: HIGH приоритет сначала.
    *
-   * @param {Object} deliveries — Memory.empire.logistics.deliveries
+   * @param {Object} deliveries
    * @returns {Array} [{ roomName, index, delivery }]
    */
   _buildQueue: function (deliveries) {
@@ -322,7 +333,6 @@ const taskDispatcher = {
       for (let i = 0; i < list.length; i++) {
         const delivery = list[i];
 
-        // Берём только queued — не assigned/delivering/completed
         if (delivery.status !== DELIVERY_STATUS.QUEUED) continue;
 
         const item = { roomName, index: i, delivery };
@@ -335,26 +345,27 @@ const taskDispatcher = {
       }
     }
 
-    // HIGH сначала, потом NORMAL
     return [...high, ...normal];
   },
 
   /**
    * Очищает завершённые записи из dispatcher registry.
-   * Нет смысла хранить записи о completed/cancelled delivery.
    *
-   * @param {Object} assignments — Memory.empire.dispatcher.assignments
-   * @param {Object} deliveries  — Memory.empire.logistics.deliveries
+   * @param {Object} assignments
+   * @param {Object} deliveries
    */
   _cleanupAssignments: function (assignments, deliveries) {
     for (const key in assignments) {
       const record = assignments[key];
       const roomDeliveries = deliveries[record.roomName];
+
       if (!roomDeliveries) {
         delete assignments[key];
         continue;
       }
+
       const delivery = roomDeliveries[record.deliveryIndex];
+
       if (
         !delivery ||
         delivery.status === DELIVERY_STATUS.COMPLETED ||
@@ -368,11 +379,9 @@ const taskDispatcher = {
   // ── ПУБЛИЧНОЕ API ────────────────────────────────────────────────────────
 
   /**
-   * Получить текущее назначение крипа.
-   * Используется DeliveryWorker для чтения своей задачи.
-   *
+   * Получить назначение крипа.
    * @param {string} creepName
-   * @returns {Object|null} { roomName, deliveryIndex } или null
+   * @returns {Object|null}
    */
   getAssignment: function (creepName) {
     const creep = Game.creeps[creepName];
@@ -382,7 +391,6 @@ const taskDispatcher = {
 
   /**
    * Проверить есть ли у крипа назначение.
-   *
    * @param {string} creepName
    * @returns {boolean}
    */
@@ -392,8 +400,7 @@ const taskDispatcher = {
 
   /**
    * Получить все текущие назначения.
-   *
-   * @returns {Object} Memory.empire.dispatcher.assignments
+   * @returns {Object}
    */
   getAssignments: function () {
     return (
@@ -406,7 +413,6 @@ const taskDispatcher = {
 
   /**
    * Получить метаданные последнего запуска.
-   *
    * @returns {Object}
    */
   getMeta: function () {
