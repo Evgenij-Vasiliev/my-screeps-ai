@@ -2,19 +2,15 @@
  * ===================================================
  * LOGISTICSDIRECTOR.JS — Логистический оркестратор империи
  * ===================================================
- * VERSION: 2.2
+ * VERSION: 2.4
  *
- * ИЗМЕНЕНИЯ v2.2:
- * - Исправлен порядок объявления targetLabId и priority
- *   (перенесены ДО блока проверки available)
- *
- * ИЗМЕНЕНИЯ v2.1:
- * - Исправлено чтение lab IDs из room.memory конфига
- *
- * ИЗМЕНЕНИЯ v2.0:
- * - Добавлен REAGENT → LAB delivery type
- * - Добавлен status: waiting_terminal
- * - Сохранены все механизмы v1.3
+ * ИЗМЕНЕНИЯ v2.4:
+ * - Вместо двух отдельных задач (energy→factory и battery→storage)
+ *   создаётся ОДНА задача типа factory_cycle на комнату.
+ *   Воркер выполняет полный цикл внутри одного задания:
+ *   storage→energy→factory→battery→storage
+ * - Задача factory_cycle создаётся если фабрика имеет задачу
+ *   и нет активного цикла.
  * ===================================================
  */
 
@@ -23,9 +19,9 @@ const labController = require("./labController");
 const empireResourceRegistry = require("./empireResourceRegistry");
 const economyManager = require("./economyManager");
 
-const UPDATE_INTERVAL = 20;
+const UPDATE_INTERVAL = 5;
 const UPDATE_OFFSET = 3;
-const LOGISTICS_VERSION = 6;
+const LOGISTICS_VERSION = 8;
 
 const DELIVERY_STATUS = {
   QUEUED: "queued",
@@ -45,11 +41,6 @@ const LAB_DELIVERY_AMOUNT = 1000;
 const CLEANUP_AFTER_TICKS = 50;
 const STALE_TIMEOUT = 100;
 
-const FACTORY_INPUT_MAP = {
-  [RESOURCE_BATTERY]: RESOURCE_ENERGY,
-  [RESOURCE_ENERGY]: RESOURCE_BATTERY,
-};
-
 const LAB_CONFIG_KEYS = ["labs", "labs2", "labs3", "labs4", "labs5"];
 
 const logisticsDirector = {
@@ -63,9 +54,7 @@ const logisticsDirector = {
     const configs = {};
     const mem = room.memory;
     for (const key of LAB_CONFIG_KEYS) {
-      if (mem[key] && mem[key].product) {
-        configs[key] = mem[key];
-      }
+      if (mem[key] && mem[key].product) configs[key] = mem[key];
     }
     return configs;
   },
@@ -107,14 +96,13 @@ const logisticsDirector = {
           continue;
 
         const workerDead = d.assignedTo && !Game.creeps[d.assignedTo];
-        const lastUpdate = d.updatedAt || d.createdAt;
-        const isStale = Game.time - lastUpdate > STALE_TIMEOUT;
+        const isStale =
+          Game.time - (d.updatedAt || d.createdAt) > STALE_TIMEOUT;
 
         if (workerDead || isStale) {
           const reason = workerDead ? "воркер мёртв" : "timeout";
           console.log(
-            `[LogisticsDirector] ♻️  ${roomName}: delivery восстановлена` +
-              ` (${reason}, был: ${d.assignedTo}, статус: ${d.status})`,
+            `[LogisticsDirector] ♻️  ${roomName}: delivery восстановлена (${reason})`,
           );
           d.status = DELIVERY_STATUS.QUEUED;
           d.assignedTo = null;
@@ -124,11 +112,10 @@ const logisticsDirector = {
       }
     }
 
-    // ── WAITING_TERMINAL → QUEUED когда ресурс появился ──────────────────
+    // ── WAITING_TERMINAL → QUEUED ─────────────────────────────────────────
     for (const roomName in deliveries) {
       for (const d of deliveries[roomName]) {
         if (d.status !== "waiting_terminal") continue;
-
         const available = empireResourceRegistry.getInRoom(
           d.resource,
           roomName,
@@ -137,36 +124,30 @@ const logisticsDirector = {
           d.status = DELIVERY_STATUS.QUEUED;
           d.updatedAt = Game.time;
           console.log(
-            `[LogisticsDirector] ✅ ${roomName}: ${d.resource}` +
-              ` прибыл — delivery переведена в queued`,
+            `[LogisticsDirector] ✅ ${roomName}: ${d.resource} прибыл → queued`,
           );
         }
       }
     }
 
-    // ── FACTORY DELIVERIES ────────────────────────────────────────────────
+    // ── FACTORY CYCLE DELIVERIES ──────────────────────────────────────────
+    // Одна задача factory_cycle на комнату вместо двух отдельных.
     const factoryRooms = Memory.empire.factory
       ? Memory.empire.factory.rooms
       : {};
 
     for (const roomName in factoryRooms) {
       const roomData = factoryRooms[roomName];
-
-      if (roomData.status !== "waiting_input") continue;
       if (!roomData.task) continue;
 
       waitingFactoryCount++;
 
-      const inputResource = FACTORY_INPUT_MAP[roomData.task.resource];
-      if (!inputResource) continue;
-      if (inputResource !== RESOURCE_ENERGY) continue;
-
       if (!deliveries[roomName]) deliveries[roomName] = [];
 
+      // Проверяем — нет ли уже активного цикла
       const alreadyActive = deliveries[roomName].some(
         d =>
-          d.resource === inputResource &&
-          d.target === "factory" &&
+          d.target === "factory_cycle" &&
           (d.status === DELIVERY_STATUS.QUEUED ||
             d.status === DELIVERY_STATUS.ASSIGNED ||
             d.status === DELIVERY_STATUS.DELIVERING),
@@ -182,8 +163,8 @@ const logisticsDirector = {
         : PRIORITY.NORMAL;
 
       deliveries[roomName].push({
-        resource: inputResource,
-        target: "factory",
+        resource: RESOURCE_ENERGY, // что несём НА фабрику
+        target: "factory_cycle", // специальный тип — полный цикл
         targetLabId: null,
         amount: DELIVERY_AMOUNT,
         priority,
@@ -195,8 +176,7 @@ const logisticsDirector = {
 
       createdCount++;
       console.log(
-        `[LogisticsDirector] 📦 ${roomName}: создана доставка` +
-          ` ${inputResource} x${DELIVERY_AMOUNT} → factory [${priority}]`,
+        `[LogisticsDirector] 🔄 ${roomName}: создан factory_cycle [${priority}]`,
       );
     }
 
@@ -223,34 +203,27 @@ const logisticsDirector = {
         const config = labConfigs[slot.slot];
 
         for (const resource of slot.missing) {
-          // ── Определяем targetLabId и priority ДО проверки available ──
           let targetLabId = null;
           if (config) {
-            if (config.reagent1 === resource) {
-              targetLabId = config.lab1;
-            } else if (config.reagent2 === resource) {
-              targetLabId = config.lab2;
-            }
+            if (config.reagent1 === resource) targetLabId = config.lab1;
+            else if (config.reagent2 === resource) targetLabId = config.lab2;
           }
 
           const priority = economyManager.isCritical(resource)
             ? PRIORITY.HIGH
             : PRIORITY.NORMAL;
 
-          // ── Проверяем наличие локально ────────────────────────────────
           const available = empireResourceRegistry.getInRoom(
             resource,
             roomName,
           );
 
           if (available < LAB_DELIVERY_AMOUNT) {
-            // Нет локально — проверяем в империи
             const empireTotal = empireResourceRegistry.getTotal
               ? empireResourceRegistry.getTotal(resource)
               : 0;
 
             if (empireTotal >= LAB_DELIVERY_AMOUNT) {
-              // Ресурс есть в империи — ждём terminalManager
               const alreadyWaiting = deliveries[roomName].some(
                 d =>
                   d.resource === resource &&
@@ -270,27 +243,17 @@ const logisticsDirector = {
                   updatedAt: Game.time,
                   assignedTo: null,
                 });
-
-                if (Game.time % 100 <= UPDATE_OFFSET) {
-                  console.log(
-                    `[LogisticsDirector] ⏳ ${roomName}: ${resource}` +
-                      ` ждёт terminalManager (в империи: ${empireTotal})`,
-                  );
-                }
               }
             } else {
-              // Ресурса нет нигде
               if (Game.time % 100 <= UPDATE_OFFSET) {
                 console.log(
-                  `[LogisticsDirector] ⚠️  ${roomName}: нет ${resource}` +
-                    ` нигде в империи`,
+                  `[LogisticsDirector] ⚠️  ${roomName}: нет ${resource} нигде`,
                 );
               }
             }
             continue;
           }
 
-          // ── Ресурс есть локально — создаём delivery ──────────────────
           const alreadyActive = deliveries[roomName].some(
             d =>
               d.resource === resource &&
@@ -320,9 +283,7 @@ const logisticsDirector = {
 
           createdCount++;
           console.log(
-            `[LogisticsDirector] 🧪 ${roomName}: создана доставка` +
-              ` ${resource} x${LAB_DELIVERY_AMOUNT} → lab` +
-              ` [${priority}] labId=${targetLabId}`,
+            `[LogisticsDirector] 🧪 ${roomName}: ${resource} → lab [${priority}]`,
           );
         }
       }
@@ -354,16 +315,12 @@ const logisticsDirector = {
 
     if (Game.time % 100 <= UPDATE_OFFSET) {
       console.log(
-        `[LogisticsDirector] 🚚 factory_waiting=${waitingFactoryCount}` +
-          ` lab_waiting=${waitingLabCount}` +
-          ` active=${activeCount} created=${createdCount}` +
-          ` recovered=${recoveredCount}` +
-          ` | CPU: ${planDuration.toFixed(3)}ms`,
+        `[LogisticsDirector] 🚚 factory=${waitingFactoryCount}` +
+          ` lab=${waitingLabCount} active=${activeCount}` +
+          ` created=${createdCount} | CPU: ${planDuration.toFixed(3)}ms`,
       );
     }
   },
-
-  // ── ПУБЛИЧНОЕ API ─────────────────────────────────────────────────────────
 
   getQueuedDelivery: function (roomName) {
     if (!Memory.empire?.logistics?.deliveries) return null;
