@@ -494,7 +494,7 @@ const roomManager = {
       room.controller && room.controller.ticksToDowngrade < 100000 ? 1 : 0;
 
     // Всегда держим 1 атакера в комнате для защиты
-    const attackerCount = 0;
+    const attackerCount = 1;
 
     // Суммарное количество не-энергетических ресурсов в терминале
     // Если > 5000 — нужен unloader чтобы разгрузить терминал в storage
@@ -520,7 +520,7 @@ const roomManager = {
     const localRolesConfig = [
       // 1 универсальный worker на комнату
       // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
-      { role: "test_worker", count: 2 },
+      { role: "test_worker", count: 1 },
       // test_harvester закомментирован — заменён на test_worker (задача SUPPLY)
       // { role: "test_harvester", count: 1 },
 
@@ -581,7 +581,7 @@ const roomManager = {
       //   // Только в комнате с Nuker и только пока он не заряжен
       //   count: room.name === NUKER_ROOM && nukerNeedsFilling(room) ? 1 : 0,
       // },
-      // { role: "test_deliveryWorker", count: 1 },
+      { role: "test_deliveryWorker", count: 1 },
 
       // 1 универсальный worker на комнату
       // Выполняет задачи: UNLOAD_LINK → TOWER → TERMINAL → SUPPLY → REPAIR → BUILD → UPGRADE
