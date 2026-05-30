@@ -1,749 +1,611 @@
 /**
  * ===================================================
- * CONSOLE.JS — Модуль управления через консоль игры
+ * CONSOLE.JS — Ручное управление и диагностика
  * ===================================================
- * Как использовать — всё пишется ОДНОЙ СТРОКОЙ:
+ * VERSION: 2.1
  *
- *   require("console").help()
- *   require("console").stats()
- *   require("console").sell("K", 100000, 5.0)
- *   require("console").sell("K", 100000, 5.0, true)
+ * ИЗМЕНЕНИЯ v2.1:
+ * - Добавлен history() — история событий
+ * - Добавлен roomHealth() — быстрый статус комнаты
+ * - Добавлен setFactoryProduct() — смена продукта фабрики
+ * - Все команды совместимы с новым Logger.event()
  *
- * Совет: нажимай ↑ в консоли чтобы повторить команду
+ * КОМАНДЫ ДИАГНОСТИКИ:
+ *   empire()                    — сводка по всей империи
+ *   room('E35S37')              — состояние комнаты
+ *   diag('E35S37')              — полная диагностика
+ *   creepDiag('name')           — диагностика крипа
+ *   factory('E35S37')           — состояние фабрики
+ *   links('E35S37')             — состояние линков
+ *   logistics()                 — все активные deliveries
+ *   history()                   — последние 20 событий
+ *   history('E35S37')           — события комнаты
+ *   history('E35S37', 10)       — последние N событий
+ *   roomHealth('E35S37')        — быстрый статус комнаты
+ *
+ * КОМАНДЫ УПРАВЛЕНИЯ:
+ *   deliver(room, res, target, labId, amount)
+ *   clearCreep('name')
+ *   resetFactory('E35S37')
+ *   resetRoom('E35S37')
+ *   killDelivery('E35S37', id)
+ *   setFactoryProduct('E35S37', 'battery')
+ *   diagOn() / diagOff()
+ *   autoRefill()
  * ===================================================
  */
 
-const cmd = {
-  /**
-   * help — список всех команд
-   */
-  help() {
-    console.log("========== КОМАНДЫ УПРАВЛЕНИЯ ==========");
-    console.log('require("console").help()');
-    console.log("  — эта справка");
-    console.log('require("console").stats()');
-    console.log("  — сводка по всем комнатам");
-    console.log('require("console").resources()');
-    console.log("  — баланс всех ресурсов по комнатам");
-    console.log('require("console").prices("L")');
-    console.log("  — цены на ресурс на рынке");
-    console.log('require("console").sell("L", 100000, 5.0)');
-    console.log("  — показать план продажи");
-    console.log('require("console").sell("L", 100000, 5.0, true)');
-    console.log("  — создать ордер на продажу");
-    console.log('require("console").cancelOrders("L")');
-    console.log("  — отменить все ордера на ресурс");
-    console.log('require("console").cancelOrders()');
-    console.log("  — отменить ВСЕ ордера");
-    console.log('require("console").orders()');
-    console.log("  — показать активные ордера");
-    console.log('require("console").moveCreep("имя", x, y, "комната")');
-    console.log("  — отправить крипа в точку (или другую комнату)");
+const Logger = require("./logger");
+const diagnostics = require("./diagnostics");
+
+// ══════════════════════════════════════════════════════
+// ДИАГНОСТИКА
+// ══════════════════════════════════════════════════════
+
+global.room = function (roomName) {
+  const r = Game.rooms[roomName];
+  if (!r) {
+    console.log(`❌ комната ${roomName} недоступна`);
+    return;
+  }
+
+  const storage = r.storage ? r.storage.store[RESOURCE_ENERGY] : "—";
+  const terminal = r.terminal ? r.terminal.store[RESOURCE_ENERGY] : "—";
+
+  const factory = r.find(FIND_MY_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_FACTORY,
+  })[0];
+
+  const factoryData =
+    Memory.empire &&
+    Memory.empire.factory &&
+    Memory.empire.factory.rooms &&
+    Memory.empire.factory.rooms[roomName];
+
+  const creeps = Object.values(Game.creeps).filter(
+    c => c.room.name === roomName,
+  );
+  const byRole = {};
+  for (const c of creeps) {
+    byRole[c.memory.role] = (byRole[c.memory.role] || 0) + 1;
+  }
+
+  console.log(`\n========== КОМНАТА: ${roomName} ==========`);
+  console.log(`  RCL:      ${r.controller ? r.controller.level : "—"}`);
+  console.log(`  Storage:  ${storage}`);
+  console.log(`  Terminal: ${terminal}`);
+
+  if (factory) {
+    const status = factoryData ? factoryData.status : "—";
+    const task =
+      factoryData && factoryData.task ? factoryData.task.resource : "—";
+    const product =
+      r.memory && r.memory.factoryProduct ? r.memory.factoryProduct : "battery";
+    console.log(`  Factory:  status=${status} task=${task} product=${product}`);
     console.log(
-      'require("console").setMinerPos("E35S37", [{x:18,y:4},{x:29,y:5}])',
+      `    store: energy=${factory.store[RESOURCE_ENERGY] || 0} ${product}=${
+        factory.store[product] || 0
+      }`,
     );
-    console.log("  — задать позиции майнеров в комнате");
-    console.log('require("console").getMinerPos("E35S37")');
-    console.log("  — показать позиции майнеров в комнате");
-    console.log(
-      'require("console").sendResource("E35S37", "E35S39", "K", 1000)',
-    );
-    console.log("  — отправить ресурс из терминала в терминал");
-    console.log('require("console").setTerminalTarget("E37S37", 20000)');
-    console.log("  — задать лимит энергии в терминале комнаты");
-    console.log('require("console").setWallThreshold("E37S37", 100000)');
-    console.log("  — задать порог HP стен для башен");
-    console.log('require("console").setSource("test_miner_12345", 1)');
-    console.log("  — сменить источник энергии для крипа");
-    console.log('require("console").killRole("test_hauler")');
-    console.log("  — убить всех крипов роли");
-    console.log('require("console").killCreep("test_miner_12345")');
-    console.log("  — убить одного крипа");
-    console.log('require("console").setAttackTarget("E35S39")');
-    console.log("  — направить всех атакеров в комнату");
-    console.log('require("console").clearAttackTarget()');
-    console.log("  — снять боевой приказ");
-    console.log('require("console").setReserveRooms(["E35S38","E36S37"])');
-    console.log("  — задать комнаты для резервистов");
-    console.log('require("console").memory("E37S37")');
-    console.log("  — показать память комнаты");
-    console.log('require("console").resetMemory("E37S37")');
-    console.log("  — сбросить кэш комнаты");
-    console.log('require("console").buyPrices("Z")');
-    console.log("  — цены продавцов для покупки ресурса");
-    console.log('require("console").buy("Z", 5000, "orderId", "E35S37")');
-    console.log("  — план покупки ресурса");
-    console.log('require("console").buy("Z", 5000, "orderId", "E35S37", true)');
-    console.log("  — купить ресурс");
-    console.log('require("console").autoRefill()');
-    console.log("  — купить Z и O если меньше 10000 во всех комнатах");
-    console.log('require("console").autoRefill(5000)');
-    console.log("  — задать свой порог");
-    console.log("=========================================");
-  },
+  } else {
+    console.log(`  Factory:  нет`);
+  }
 
-  /**
-   * stats — сводка по всем комнатам
-   */
-  stats() {
-    console.log("========== СВОДКА ПО КОМНАТАМ ==========");
-    for (const roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
-      if (!room.controller || !room.controller.my) continue;
-      const rcl = room.controller.level;
-      const needed = room.controller.progressTotal;
-      const pct =
-        needed > 0
-          ? ((room.controller.progress / needed) * 100).toFixed(1)
-          : "MAX";
-      const storage = room.storage
-        ? room.storage.store[RESOURCE_ENERGY].toLocaleString()
-        : "нет";
-      const terminal = room.terminal
-        ? room.terminal.store[RESOURCE_ENERGY].toLocaleString()
-        : "нет";
-      const creepCount = room.find(FIND_MY_CREEPS).length;
-      const spawning =
-        room
-          .find(FIND_MY_SPAWNS)
-          .filter(s => s.spawning)
-          .map(s => s.spawning.name)
-          .join(", ") || "—";
-      console.log(`--- ${roomName} ---`);
-      console.log(`  RCL: ${rcl} | Прогресс: ${pct}%`);
-      console.log(`  Storage: ${storage} | Terminal: ${terminal}`);
-      console.log(`  Крипов: ${creepCount} | Спавнит: ${spawning}`);
-      if (room.terminal) {
-        const minerals = Object.entries(room.terminal.store)
-          .filter(([r, amt]) => r !== RESOURCE_ENERGY && amt > 0)
-          .map(([r, amt]) => `${r}:${amt.toLocaleString()}`)
-          .join(", ");
-        if (minerals) console.log(`  Минералы: ${minerals}`);
-      }
-    }
-    const byRole = {};
-    for (const name in Game.creeps) {
-      const role = Game.creeps[name].memory.role || "unknown";
-      byRole[role] = (byRole[role] || 0) + 1;
-    }
-    console.log("--- Крипы по ролям ---");
-    for (const [role, count] of Object.entries(byRole).sort()) {
-      console.log(`  ${role.padEnd(25)} x${count}`);
-    }
-    console.log(`  ИТОГО: ${Object.keys(Game.creeps).length}`);
-    console.log("--- CPU ---");
-    console.log(`  Лимит: ${Game.cpu.limit} | Bucket: ${Game.cpu.bucket}`);
-    if (Memory.cpuStats)
-      console.log(
-        `  Среднее за 100 тиков: ${Memory.cpuStats.average.toFixed(2)}`,
-      );
-    console.log("=========================================");
-  },
-
-  /**
-   * resources — баланс всех ресурсов по всем комнатам
-   * Использование: require("console").resources()
-   */
-  resources() {
-    console.log("========== БАЛАНС РЕСУРСОВ ==========");
-    const totals = {};
-    for (const roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
-      if (!room.controller || !room.controller.my) continue;
-      console.log(`--- ${roomName} ---`);
-
-      // Storage
-      if (room.storage) {
-        const items = Object.entries(room.storage.store)
-          .filter(([, amt]) => amt > 0)
-          .map(([r, amt]) => `${r}:${amt.toLocaleString()}`)
-          .join(", ");
-        console.log(`  Storage:  ${items || "пусто"}`);
-        for (const [r, amt] of Object.entries(room.storage.store)) {
-          totals[r] = (totals[r] || 0) + amt;
-        }
-      }
-
-      // Terminal
-      if (room.terminal) {
-        const items = Object.entries(room.terminal.store)
-          .filter(([, amt]) => amt > 0)
-          .map(([r, amt]) => `${r}:${amt.toLocaleString()}`)
-          .join(", ");
-        console.log(`  Terminal: ${items || "пусто"}`);
-        for (const [r, amt] of Object.entries(room.terminal.store)) {
-          totals[r] = (totals[r] || 0) + amt;
-        }
-      }
-    }
-    console.log("--- ИТОГО по всем комнатам ---");
-    for (const [r, amt] of Object.entries(totals).sort()) {
-      console.log(`  ${r.padEnd(10)} ${amt.toLocaleString()}`);
-    }
-    console.log("=====================================");
-  },
-
-  /**
-   * moveCreep — отправить крипа в точку или другую комнату
-   * Использование:
-   *   require("console").moveCreep("test_miner_123", 25, 25, "E35S37")
-   *   require("console").moveCreep("test_miner_123", 25, 25) — текущая комната
-   */
-  moveCreep(creepName, x, y, roomName) {
-    const creep = Game.creeps[creepName];
-    if (!creep) {
-      console.log(`[moveCreep] Крип ${creepName} не найден`);
-      return;
-    }
-    const room = roomName || creep.room.name;
-    // Записываем принудительную цель в память — роль проверит это
-    creep.memory.forceTarget = { x, y, room };
-    console.log(`[moveCreep] ${creepName} → (${x},${y}) в ${room}`);
-    console.log(
-      `  Чтобы отменить: delete Game.creeps["${creepName}"].memory.forceTarget`,
-    );
-  },
-
-  /**
-   * setMinerPos — задать позиции майнеров в комнате
-   * Использование: require("console").setMinerPos("E35S37", [{x:18,y:4},{x:29,y:5}])
-   */
-  setMinerPos(roomName, positions) {
-    if (!Memory.rooms[roomName]) {
-      console.log(`[setMinerPos] Комната ${roomName} не найдена в памяти`);
-      return;
-    }
-    Memory.rooms[roomName].minerPositions = positions;
-    // Сбрасываем кэш позиций у живых майнеров этой комнаты
-    let reset = 0;
-    for (const name in Game.creeps) {
-      const c = Game.creeps[name];
-      if (c.memory.role === "test_miner" && c.room.name === roomName) {
-        delete c.memory.parkX;
-        delete c.memory.parkY;
-        delete c.memory.linkId;
-        reset++;
-      }
-    }
-    console.log(
-      `[setMinerPos] ${roomName}: позиции обновлены, сброшен кэш у ${reset} майнеров`,
-    );
-    console.log(`  Позиции: ${JSON.stringify(positions)}`);
-  },
-
-  /**
-   * getMinerPos — показать позиции майнеров в комнате
-   * Использование: require("console").getMinerPos("E35S37")
-   */
-  getMinerPos(roomName) {
-    const positions =
-      Memory.rooms[roomName] && Memory.rooms[roomName].minerPositions;
-    if (!positions) {
-      console.log(`[getMinerPos] Позиции не заданы для ${roomName}`);
-      return;
-    }
-    console.log(`[getMinerPos] ${roomName}: ${JSON.stringify(positions)}`);
-    // Показываем где сейчас стоят майнеры
-    Object.values(Game.creeps)
-      .filter(c => c.memory.role === "test_miner" && c.room.name === roomName)
-      .forEach(c =>
-        console.log(
-          `  ${c.name} → park:(${c.memory.parkX},${c.memory.parkY}) реально:(${c.pos.x},${c.pos.y})`,
-        ),
-      );
-  },
-
-  /**
-   * sendResource — отправить ресурс из терминала в терминал
-   * Использование: require("console").sendResource("E35S37", "E35S39", "K", 1000)
-   */
-  sendResource(fromRoom, toRoom, resource, amount) {
-    const room = Game.rooms[fromRoom];
-    if (!room || !room.terminal) {
-      console.log(`[sendResource] Нет терминала в ${fromRoom}`);
-      return;
-    }
-    const available = room.terminal.store[resource] || 0;
-    if (available < amount) {
-      console.log(
-        `[sendResource] Недостаточно ${resource} в ${fromRoom}: есть ${available}, нужно ${amount}`,
-      );
-      return;
-    }
-    if (room.terminal.cooldown > 0) {
-      console.log(
-        `[sendResource] Терминал ${fromRoom} на кулдауне: ${room.terminal.cooldown} тиков`,
-      );
-      return;
-    }
-    const txCost = Game.market.calcTransactionCost(amount, fromRoom, toRoom);
-    const energyAvailable = room.terminal.store[RESOURCE_ENERGY] || 0;
-    console.log(
-      `[sendResource] ${fromRoom} → ${toRoom}: ${amount} ${resource}`,
-    );
-    console.log(
-      `  Стоимость транзакции: ${txCost} энергии | В терминале: ${energyAvailable}`,
-    );
-    if (txCost > energyAvailable) {
-      console.log(`  ❌ Недостаточно энергии для транзакции`);
-      return;
-    }
-    const result = room.terminal.send(resource, amount, toRoom);
-    console.log(result === OK ? `  ✅ Отправлено!` : `  ❌ Ошибка: ${result}`);
-  },
-
-  /**
-   * prices — показать цены покупки на рынке
-   */
-  prices(resource) {
-    const orders = Game.market
-      .getAllOrders({ type: ORDER_SELL, resourceType: resource })
-      .filter(o => o.remainingAmount > 0);
-    if (!orders || orders.length === 0) {
-      console.log(`[prices] Нет ордеров на покупку ${resource}`);
-      return;
-    }
-    orders.sort((a, b) => b.price - a.price);
-    const top = orders.slice(0, 10);
-    console.log(`[prices] Топ-10 ордеров на ПОКУПКУ ${resource}:`);
-    console.log(`  Цена   | Количество      | Комната`);
-    top.forEach(o => {
-      console.log(
-        `  ${String(o.price.toFixed(3)).padEnd(7)}| ${String(
-          o.amount.toLocaleString(),
-        ).padEnd(16)}| ${o.roomName || "межсерверный"}`,
-      );
-    });
-    const best = top[0];
-    console.log(`[prices] Лучшая цена: ${best.price.toFixed(3)}`);
-    console.log(
-      `[prices] Команда: require("console").sell("${resource}", КОЛИЧЕСТВО, ${(
-        best.price * 0.95
-      ).toFixed(3)})`,
-    );
-  },
-
-  /**
-   * sell — безопасная продажа ресурса
-   */
-  sell(resource, amount, price, confirm = false, roomName = null) {
-    let room = null;
-    if (roomName) {
-      room = Game.rooms[roomName];
-    } else {
-      for (const rn in Game.rooms) {
-        const r = Game.rooms[rn];
-        if (r.terminal && r.terminal.store[resource] > 0) {
-          room = r;
-          break;
-        }
-      }
-    }
-    if (!room || !room.terminal) {
-      console.log(
-        `[sell] ОШИБКА: не найдена комната с терминалом и ресурсом ${resource}`,
-      );
-      return;
-    }
-    const available = room.terminal.store[resource] || 0;
-    const existingOrders = Object.values(Game.market.orders).filter(
-      o => o.resourceType === resource && o.type === ORDER_SELL && o.active,
-    );
-    if (existingOrders.length > 0) {
-      console.log(
-        `[sell] ВНИМАНИЕ: уже есть ${existingOrders.length} активных ордеров на ${resource}`,
-      );
-      existingOrders.forEach(o =>
-        console.log(
-          `  ID: ${o.id} | Цена: ${
-            o.price
-          } | Осталось: ${o.remainingAmount.toLocaleString()}`,
-        ),
-      );
-      console.log(
-        `  Сначала отмени: require("console").cancelOrders("${resource}")`,
-      );
-      return;
-    }
-    console.log(`[sell] ПЛАН ПРОДАЖИ:`);
-    console.log(`  Ресурс: ${resource} | Комната: ${room.name}`);
-    console.log(
-      `  В терминале: ${available.toLocaleString()} | Продаём: ${amount.toLocaleString()} по ${price}`,
-    );
-    console.log(
-      `  Выручка: ~${(amount * price).toLocaleString()} | Налог: ${(
-        amount * 0.05
-      ).toFixed(0)} кр.`,
-    );
-    console.log(`  Баланс: ${Game.market.credits.toFixed(2)} кредитов`);
-    if (!confirm) {
-      console.log(
-        `  Для создания: require("console").sell("${resource}", ${amount}, ${price}, true)`,
-      );
-      return;
-    }
-    const result = Game.market.createOrder({
-      type: ORDER_SELL,
-      resourceType: resource,
-      price,
-      totalAmount: amount,
-      roomName: room.name,
-    });
-    console.log(
-      result === OK ? `[sell] ✅ Ордер создан!` : `[sell] ❌ Ошибка: ${result}`,
-    );
-  },
-
-  /**
-   * buyPrices — показать цены продажи на рынке (чтобы купить ресурс)
-   * Использование: require("console").buyPrices("Z")
-   */
-  buyPrices(resource) {
-    const orders = Game.market.getAllOrders({
-      type: ORDER_SELL,
-      resourceType: resource,
-    });
-    if (!orders || orders.length === 0) {
-      console.log(`[buyPrices] Нет ордеров на продажу ${resource}`);
-      return;
-    }
-    orders.sort((a, b) => a.price - b.price);
-    const top = orders.slice(0, 10);
-    console.log(`[buyPrices] Топ-10 ордеров на ПРОДАЖУ ${resource}:`);
-    console.log(`  Цена   | Количество      | Комната`);
-    top.forEach(o => {
-      console.log(
-        `  ${String(o.price.toFixed(3)).padEnd(7)}| ${String(
-          o.remainingAmount.toLocaleString(),
-        ).padEnd(16)}| ${o.roomName || "межсерверный"}`,
-      );
-    });
-    const best = top[0];
-    console.log(`[buyPrices] Лучшая цена покупки: ${best.price.toFixed(3)}`);
-    console.log(
-      `[buyPrices] Команда: require("console").buy("${resource}", КОЛИЧЕСТВО, "${best.id}", "ВАША_КОМНАТА")`,
-    );
-  },
-
-  /**
-   * buy — купить ресурс у продавца
-   * Использование:
-   *   require("console").buy("Z", 5000, "ID_ордера", "E35S37")        — план
-   *   require("console").buy("Z", 5000, "ID_ордера", "E35S37", true)  — купить
-   */
-  buy(resource, amount, orderId, roomName, confirm = false) {
-    const room = Game.rooms[roomName];
-    if (!room || !room.terminal) {
-      console.log(`[buy] Нет терминала в ${roomName}`);
-      return;
-    }
-    if (room.terminal.cooldown > 0) {
-      console.log(
-        `[buy] Терминал ${roomName} на кулдауне: ${room.terminal.cooldown} тиков`,
-      );
-      return;
-    }
-
-    const order = Game.market.getOrderById(orderId);
-    if (!order) {
-      console.log(`[buy] Ордер ${orderId} не найден`);
-      return;
-    }
-
-    const dealAmount = Math.min(amount, order.remainingAmount);
-    const txCost = Game.market.calcTransactionCost(
-      dealAmount,
-      roomName,
-      order.roomName,
-    );
-    const energyAvailable = room.terminal.store[RESOURCE_ENERGY] || 0;
-
-    console.log(`[buy] ПЛАН ПОКУПКИ:`);
-    console.log(
-      `  Ресурс: ${resource} | Количество: ${dealAmount.toLocaleString()}`,
-    );
-    console.log(
-      `  Цена: ${order.price} | Итого: ~${(
-        dealAmount * order.price
-      ).toLocaleString()} кредитов`,
-    );
-    console.log(
-      `  Транзакция: ${txCost} энергии | В терминале: ${energyAvailable.toLocaleString()}`,
-    );
-    console.log(`  Баланс: ${Game.market.credits.toFixed(2)} кредитов`);
-
-    if (txCost > energyAvailable) {
-      console.log(`  ❌ Недостаточно энергии для транзакции`);
-      return;
-    }
-
-    if (!confirm) {
-      console.log(
-        `  Для покупки: require("console").buy("${resource}", ${amount}, "${orderId}", "${roomName}", true)`,
-      );
-      return;
-    }
-
-    const result = Game.market.deal(orderId, dealAmount, roomName);
-    console.log(
-      result === OK
-        ? `[buy] ✅ Куплено ${dealAmount} ${resource}!`
-        : `[buy] ❌ Ошибка: ${result}`,
-    );
-  },
-
-  /**
-   * autoRefill — автопокупка Z и O если меньше порога
-   * Использование: require("console").autoRefill()
-   * Запускайте вручную когда нужно пополнить запасы
-   */
-  autoRefill(threshold = 10000) {
-    const toBuy = [];
-    // const toBuy = ["O", "X"];
-
-    for (const roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
-      if (!room.controller || !room.controller.my) continue;
-      if (!room.terminal) continue;
-      if (room.terminal.cooldown > 0) continue;
-
-      for (const resource of toBuy) {
-        const current = room.terminal.store[resource] || 0;
-        if (current >= threshold) continue;
-
-        const needed = threshold - current;
-        console.log(
-          `[autoRefill] ${roomName}: ${resource} = ${current} — нужно купить ${needed}`,
-        );
-
-        // Ищем лучший ордер
-        const orders = Game.market
-          .getAllOrders({ type: ORDER_SELL, resourceType: resource })
-          .filter(o => o.remainingAmount > 0)
-          .sort((a, b) => a.price - b.price);
-
-        if (orders.length === 0) {
-          console.log(`[autoRefill] Нет ордеров на ${resource}`);
-          continue;
-        }
-
-        const order = orders[0];
-        const dealAmount = Math.min(needed, order.remainingAmount);
-        const txCost = Game.market.calcTransactionCost(
-          dealAmount,
-          roomName,
-          order.roomName,
-        );
-        const energyAvailable = room.terminal.store[RESOURCE_ENERGY] || 0;
-
-        if (txCost > energyAvailable) {
-          console.log(
-            `[autoRefill] ${roomName}: недостаточно энергии для покупки ${resource}`,
-          );
-          continue;
-        }
-
-        const result = Game.market.deal(order.id, dealAmount, roomName);
-        if (result === OK) {
-          console.log(
-            `[autoRefill] ✅ ${roomName}: куплено ${dealAmount} ${resource} по ${order.price}`,
-          );
-        } else {
-          console.log(
-            `[autoRefill] ❌ ${roomName}: ошибка покупки ${resource}: ${result}`,
-          );
-        }
-      }
-    }
-  },
-
-  /**
-   * cancelOrders — отменить ордера
-   */
-  cancelOrders(resource = null) {
-    const orders = Object.values(Game.market.orders).filter(o =>
-      resource ? o.resourceType === resource : true,
-    );
-    if (orders.length === 0) {
-      console.log(`[cancelOrders] Нет ордеров`);
-      return;
-    }
-    orders.forEach(o => {
-      const result = Game.market.cancelOrder(o.id);
-      console.log(
-        `[cancelOrders] ${
-          o.resourceType
-        } x${o.remainingAmount.toLocaleString()} — ${
-          result === OK ? "✅ отменён" : "❌ ошибка: " + result
-        }`,
-      );
-    });
-  },
-
-  /**
-   * orders — активные ордера
-   */
-  orders() {
-    const orders = Object.values(Game.market.orders);
-    if (orders.length === 0) {
-      console.log("[orders] Нет активных ордеров");
-      return;
-    }
-    console.log(
-      `[orders] Активных: ${
-        orders.length
-      } | Баланс: ${Game.market.credits.toFixed(2)} кредитов`,
-    );
-    orders.forEach(o => {
-      console.log(
-        `  ${o.type === ORDER_SELL ? "ПРОДАЖА" : "ПОКУПКА"} | ${
-          o.resourceType
-        } | ${
-          o.price
-        } кр. | осталось: ${o.remainingAmount.toLocaleString()} | ${
-          o.roomName
-        }`,
-      );
-    });
-  },
-
-  /**
-   * setTerminalTarget — лимит энергии в терминале
-   */
-  setTerminalTarget(roomName, amount) {
-    if (!Game.rooms[roomName]) {
-      console.log(`[setTerminalTarget] Комната ${roomName} не видна`);
-      return;
-    }
-    Game.rooms[roomName].memory.terminalEnergyTarget = amount;
-    console.log(
-      `[setTerminalTarget] ${roomName}: лимит = ${amount.toLocaleString()}`,
-    );
-  },
-
-  /**
-   * setWallThreshold — порог HP стен
-   */
-  setWallThreshold(roomName, hp) {
-    if (!Game.rooms[roomName]) {
-      console.log(`[setWallThreshold] Комната ${roomName} не видна`);
-      return;
-    }
-    Game.rooms[roomName].memory.wallThreshold = hp;
-    console.log(
-      `[setWallThreshold] ${roomName}: порог = ${hp.toLocaleString()} HP`,
-    );
-  },
-
-  /**
-   * setSource — сменить источник крипа
-   */
-  setSource(creepName, index) {
-    const creep = Game.creeps[creepName];
-    if (!creep) {
-      console.log(`[setSource] Крип ${creepName} не найден`);
-      return;
-    }
-    creep.memory.sourceIndex = index;
-    delete creep.memory.containerId;
-    console.log(`[setSource] ${creepName}: sourceIndex = ${index}`);
-  },
-
-  /**
-   * killRole — убить всех крипов роли
-   */
-  killRole(role) {
-    let count = 0;
-    for (const name in Game.creeps) {
-      if (Game.creeps[name].memory.role === role) {
-        Game.creeps[name].suicide();
-        count++;
-      }
-    }
-    console.log(`[killRole] "${role}": убито ${count} крипов`);
-  },
-
-  /**
-   * killCreep — убить одного крипа
-   */
-  killCreep(name) {
-    const creep = Game.creeps[name];
-    if (!creep) {
-      console.log(`[killCreep] ${name} не найден`);
-      return;
-    }
-    creep.suicide();
-    console.log(`[killCreep] ${name} убит`);
-  },
-
-  /**
-   * setAttackTarget — направить атакеров в комнату
-   */
-  setAttackTarget(roomName) {
-    if (!Memory.attackerConfig) Memory.attackerConfig = {};
-    Memory.attackerConfig.emergencyTarget = roomName;
-    console.log(`[setAttackTarget] Атакеры → ${roomName}`);
-  },
-
-  /**
-   * clearAttackTarget — снять боевой приказ
-   */
-  clearAttackTarget() {
-    if (Memory.attackerConfig) {
-      delete Memory.attackerConfig.emergencyTarget;
-      for (const name in Game.creeps) {
-        if (Game.creeps[name].memory.role === "test_attacker")
-          delete Game.creeps[name].memory.targetRoom;
-      }
-    }
-    console.log(`[clearAttackTarget] Приказ снят`);
-  },
-
-  /**
-   * setReserveRooms — задать комнаты для резервистов
-   */
-  setReserveRooms(rooms) {
-    if (!Memory.reserverConfig) Memory.reserverConfig = {};
-    Memory.reserverConfig.targetRooms = rooms;
-    for (const name in Game.creeps) {
-      if (Game.creeps[name].memory.role === "test_reserver")
-        delete Game.creeps[name].memory.targetRoom;
-    }
-    console.log(`[setReserveRooms] Комнаты: ${rooms.join(", ")}`);
-  },
-
-  /**
-   * memory — показать память комнаты
-   */
-  memory(roomName) {
-    const mem = Memory.rooms[roomName];
-    if (!mem) {
-      console.log(`[memory] Нет данных для ${roomName}`);
-      return;
-    }
-    console.log(`[memory] ${roomName}:`);
-    console.log(JSON.stringify(mem, null, 2));
-  },
-
-  /**
-   * resetMemory — сбросить кэш комнаты
-   */
-  resetMemory(roomName) {
-    if (!Memory.rooms[roomName]) {
-      console.log(`[resetMemory] Нет данных для ${roomName}`);
-      return;
-    }
-    const keep = {
-      terminalEnergyTarget: Memory.rooms[roomName].terminalEnergyTarget,
-      wallThreshold: Memory.rooms[roomName].wallThreshold,
-      wallThresholdMax: Memory.rooms[roomName].wallThresholdMax,
-      minStorageEnergy: Memory.rooms[roomName].minStorageEnergy,
-      links: Memory.rooms[roomName].links,
-      minerPositions: Memory.rooms[roomName].minerPositions,
-    };
-    Memory.rooms[roomName] = keep;
-    console.log(`[resetMemory] ${roomName}: кэш сброшен, настройки сохранены`);
-  },
+  console.log(`  Крипов:   ${creeps.length}`);
+  for (const [role, count] of Object.entries(byRole)) {
+    console.log(`    ${role}: ${count}`);
+  }
+  console.log(`==========================================\n`);
 };
 
-module.exports = cmd;
+global.diag = function (roomName) {
+  diagnostics.checkRoom(roomName);
+};
+
+global.creepDiag = function (creepName) {
+  diagnostics.checkCreep(creepName);
+};
+
+global.factory = function (roomName) {
+  const r = Game.rooms[roomName];
+  if (!r) {
+    console.log(`❌ комната ${roomName} недоступна`);
+    return;
+  }
+
+  const factory = r.find(FIND_MY_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_FACTORY,
+  })[0];
+
+  if (!factory) {
+    console.log(`❌ фабрика в ${roomName} не найдена`);
+    return;
+  }
+
+  const data =
+    Memory.empire &&
+    Memory.empire.factory &&
+    Memory.empire.factory.rooms &&
+    Memory.empire.factory.rooms[roomName];
+
+  const product =
+    r.memory && r.memory.factoryProduct ? r.memory.factoryProduct : "battery";
+
+  console.log(`\n========== ФАБРИКА: ${roomName} ==========`);
+  console.log(`  status:   ${data ? data.status : "—"}`);
+  console.log(
+    `  task:     ${data && data.task ? JSON.stringify(data.task) : "нет"}`,
+  );
+  console.log(`  product:  ${product}`);
+  console.log(`  cooldown: ${factory.cooldown}`);
+  console.log(`  store:`);
+  for (const [res, amt] of Object.entries(factory.store)) {
+    if (amt > 0) console.log(`    ${res}: ${amt}`);
+  }
+
+  const deliveries =
+    Memory.empire &&
+    Memory.empire.logistics &&
+    Memory.empire.logistics.deliveries &&
+    Memory.empire.logistics.deliveries[roomName];
+
+  if (deliveries && deliveries.length > 0) {
+    const active = deliveries.filter(
+      d => d.status !== "completed" && d.status !== "cancelled",
+    );
+    if (active.length > 0) {
+      console.log(`  Deliveries:`);
+      for (const d of active) {
+        console.log(
+          `    [${d.status}] ${d.resource} x${d.amount} → ${
+            d.target
+          } (worker: ${d.assignedTo || "—"})`,
+        );
+      }
+    }
+  }
+  console.log(`==========================================\n`);
+};
+
+global.links = function (roomName) {
+  const r = Game.rooms[roomName];
+  if (!r) {
+    console.log(`❌ комната ${roomName} недоступна`);
+    return;
+  }
+
+  const links = r.find(FIND_MY_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_LINK,
+  });
+
+  console.log(`\n========== ЛИНКИ: ${roomName} ==========`);
+  console.log(`  Всего: ${links.length}`);
+  for (const link of links) {
+    const cap = link.store.getCapacity(RESOURCE_ENERGY) || 1;
+    const pct = Math.round(((link.store[RESOURCE_ENERGY] || 0) / cap) * 100);
+    console.log(
+      `  id=...${link.id.slice(-6)} energy=${
+        link.store[RESOURCE_ENERGY] || 0
+      } (${pct}%) cooldown=${link.cooldown}`,
+    );
+  }
+  console.log(`========================================\n`);
+};
+
+global.logistics = function () {
+  const deliveries =
+    Memory.empire &&
+    Memory.empire.logistics &&
+    Memory.empire.logistics.deliveries;
+
+  if (!deliveries) {
+    console.log("❌ нет данных логистики");
+    return;
+  }
+
+  console.log(`\n========== ЛОГИСТИКА ==========`);
+  for (const [roomName, list] of Object.entries(deliveries)) {
+    const active = list.filter(
+      d => d.status !== "completed" && d.status !== "cancelled",
+    );
+    if (active.length === 0) continue;
+    console.log(`  ${roomName}:`);
+    for (const d of active) {
+      console.log(
+        `    [${d.status}] ${d.resource} x${d.amount} → ${d.target} | worker: ${
+          d.assignedTo || "—"
+        }`,
+      );
+    }
+  }
+  console.log(`================================\n`);
+};
+
+global.empire = function () {
+  console.log(`\n========== ИМПЕРИЯ ==========`);
+  console.log(`  Тик: ${Game.time}`);
+  console.log(`  CPU bucket: ${Game.cpu.bucket}`);
+
+  const economy = Memory.empire && Memory.empire.economy;
+  if (economy) {
+    const critical = Object.entries(economy)
+      .filter(([, v]) => v.state === "critical")
+      .map(([k]) => k);
+    const low = Object.entries(economy)
+      .filter(([, v]) => v.state === "low")
+      .map(([k]) => k);
+    if (critical.length > 0)
+      console.log(`  🚨 Critical: ${critical.join(", ")}`);
+    if (low.length > 0) console.log(`  ⚠️  Low:      ${low.join(", ")}`);
+  }
+
+  for (const roomName in Game.rooms) {
+    const r = Game.rooms[roomName];
+    if (!r.controller || !r.controller.my) continue;
+    const storage = r.storage ? r.storage.store[RESOURCE_ENERGY] : 0;
+    const terminal = r.terminal ? r.terminal.store.getUsedCapacity() : 0;
+    console.log(`  ${roomName}: storage=${storage} terminal=${terminal}`);
+  }
+
+  const dispMeta = Memory.empire && Memory.empire.dispatcherMeta;
+  if (dispMeta) {
+    console.log(
+      `  Dispatcher: queued=${dispMeta.queuedCount} idle=${dispMeta.idleWorkers} assigned=${dispMeta.assignedCount}`,
+    );
+  }
+  console.log(`==============================\n`);
+};
+
+// ── ИСТОРИЯ СОБЫТИЙ ────────────────────────────────────────────────────────
+
+/**
+ * Показать историю событий.
+ *
+ * @param {string} roomName — фильтр по комнате (опционально)
+ * @param {number} limit    — сколько последних (default 20)
+ *
+ * @example
+ * history()
+ * history('E35S37')
+ * history('E35S37', 10)
+ */
+global.history = function (roomName, limit) {
+  const events = Logger.getEvents(roomName || null, limit || 20);
+
+  const title = roomName
+    ? `ИСТОРИЯ: ${roomName} (последние ${events.length})`
+    : `ИСТОРИЯ ИМПЕРИИ (последние ${events.length})`;
+
+  console.log(`\n========== ${title} ==========`);
+
+  if (events.length === 0) {
+    console.log("  нет событий");
+  } else {
+    for (const e of events) {
+      const room = e.room ? `[${e.room}]` : "[global]";
+      const ctx = e.ctx
+        ? " | " +
+          Object.entries(e.ctx)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ")
+        : "";
+      console.log(`  t=${e.tick} ${room} [${e.type}] ${e.message}${ctx}`);
+    }
+  }
+  console.log(`================================================\n`);
+};
+
+// ── ЗДОРОВЬЕ КОМНАТЫ ───────────────────────────────────────────────────────
+
+/**
+ * Быстрый статус комнаты: OK / WARN / ERROR по каждому контуру.
+ *
+ * @param {string} roomName
+ *
+ * @example
+ * roomHealth('E35S37')
+ */
+global.roomHealth = function (roomName) {
+  const r = Game.rooms[roomName];
+  if (!r) {
+    console.log(`❌ комната ${roomName} недоступна`);
+    return;
+  }
+
+  const checks = {};
+
+  // ── Storage ──────────────────────────────────────────
+  if (!r.storage) {
+    checks.Storage = "ERROR"; // нет хранилища
+  } else {
+    const energy = r.storage.store[RESOURCE_ENERGY] || 0;
+    checks.Storage = energy > 10000 ? "OK" : energy > 1000 ? "WARN" : "ERROR";
+  }
+
+  // ── Terminal ─────────────────────────────────────────
+  if (!r.terminal) {
+    checks.Terminal = "ERROR";
+  } else {
+    const used = r.terminal.store.getUsedCapacity();
+    const cap = r.terminal.store.getCapacity();
+    checks.Terminal = used / cap < 0.9 ? "OK" : "WARN";
+  }
+
+  // ── Factory ──────────────────────────────────────────
+  const factoryData =
+    Memory.empire &&
+    Memory.empire.factory &&
+    Memory.empire.factory.rooms &&
+    Memory.empire.factory.rooms[roomName];
+
+  if (!factoryData) {
+    checks.Factory = "ERROR"; // нет данных
+  } else {
+    const status = factoryData.status;
+    const stuckTicks = Game.time - (factoryData.updatedAt || Game.time);
+    if (status === "error") {
+      checks.Factory = "ERROR";
+    } else if (status === "waiting_input" && stuckTicks > 100) {
+      checks.Factory = "WARN";
+    } else if (status === "idle" && !factoryData.task) {
+      checks.Factory = "WARN";
+    } else {
+      checks.Factory = "OK";
+    }
+  }
+
+  // ── Delivery ─────────────────────────────────────────
+  const deliveries =
+    Memory.empire &&
+    Memory.empire.logistics &&
+    Memory.empire.logistics.deliveries &&
+    Memory.empire.logistics.deliveries[roomName];
+
+  if (!deliveries) {
+    checks.Delivery = "WARN";
+  } else {
+    const stuck = deliveries.filter(d => {
+      if (d.status !== "assigned" && d.status !== "delivering") return false;
+      return Game.time - (d.updatedAt || d.createdAt) > 100;
+    });
+    const active = deliveries.filter(
+      d =>
+        d.status === "queued" ||
+        d.status === "assigned" ||
+        d.status === "delivering",
+    );
+    checks.Delivery =
+      stuck.length > 0 ? "WARN" : active.length > 0 ? "OK" : "WARN";
+  }
+
+  // ── Links ────────────────────────────────────────────
+  const links = r.find(FIND_MY_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_LINK,
+  });
+
+  if (links.length === 0) {
+    checks.Links = "WARN";
+  } else {
+    const fullLinks = links.filter(
+      l =>
+        l.store[RESOURCE_ENERGY] >= l.store.getCapacity(RESOURCE_ENERGY) * 0.8,
+    );
+    const emptyLinks = links.filter(l => (l.store[RESOURCE_ENERGY] || 0) === 0);
+    const stalled =
+      fullLinks.length > 0 &&
+      emptyLinks.length > 0 &&
+      fullLinks[0].cooldown === 0;
+    checks.Links = stalled ? "WARN" : "OK";
+  }
+
+  // ── Remote ───────────────────────────────────────────
+  const remoteMiners = Object.values(Game.creeps).filter(
+    c =>
+      c.memory.role === "test_remoteMiner" &&
+      (c.memory.target === roomName || c.room.name === roomName),
+  );
+  checks.Remote = remoteMiners.length > 0 ? "OK" : "WARN";
+
+  // ── ВЫВОД ────────────────────────────────────────────
+  const icon = { OK: "✅", WARN: "⚠️ ", ERROR: "❌" };
+
+  console.log(`\nROOM ${roomName}`);
+  console.log(`──────────────────`);
+  for (const [name, status] of Object.entries(checks)) {
+    console.log(`  ${icon[status]} ${name.padEnd(10)}: ${status}`);
+  }
+  console.log(`──────────────────\n`);
+};
+
+// ══════════════════════════════════════════════════════
+// РУЧНОЕ УПРАВЛЕНИЕ
+// ══════════════════════════════════════════════════════
+
+global.deliver = function (roomName, resource, target, targetLabId, amount) {
+  if (!Memory.empire || !Memory.empire.logistics) {
+    console.log("❌ logistics не инициализирована");
+    return;
+  }
+
+  if (!Memory.empire.logistics.deliveries[roomName]) {
+    Memory.empire.logistics.deliveries[roomName] = [];
+  }
+
+  Memory.empire.logistics.deliveries[roomName].push({
+    resource,
+    target,
+    targetLabId: targetLabId || null,
+    amount: amount || 1000,
+    priority: "high",
+    status: "queued",
+    createdAt: Game.time,
+    updatedAt: Game.time,
+    assignedTo: null,
+  });
+
+  Logger.event(
+    "delivery_created",
+    roomName,
+    `ручная доставка ${resource} x${amount} → ${target}`,
+  );
+  console.log(
+    `✅ создана доставка: ${resource} x${amount} → ${target} в ${roomName}`,
+  );
+};
+
+global.clearCreep = function (creepName) {
+  const creep = Game.creeps[creepName];
+  if (!creep) {
+    console.log(`❌ крип ${creepName} не найден`);
+    return;
+  }
+
+  delete creep.memory.deliveryAssignment;
+  delete creep.memory.deliveryState;
+  delete creep.memory.task;
+  delete creep.memory.taskTargetId;
+  delete creep.memory.working;
+  delete creep.memory._diag;
+
+  Logger.event("manual_reset", creep.room.name, `сброс памяти ${creepName}`);
+  console.log(`✅ память крипа ${creepName} сброшена`);
+};
+
+global.resetFactory = function (roomName) {
+  if (
+    !Memory.empire ||
+    !Memory.empire.factory ||
+    !Memory.empire.factory.rooms
+  ) {
+    console.log("❌ factory data не найдена");
+    return;
+  }
+
+  const data = Memory.empire.factory.rooms[roomName];
+  if (!data) {
+    console.log(`❌ фабрика ${roomName} не найдена`);
+    return;
+  }
+
+  data.status = "queued";
+  data.updatedAt = Game.time;
+  Logger.event("manual_reset", roomName, "factory сброшена в queued");
+  console.log(`✅ фабрика ${roomName} сброшена в queued`);
+};
+
+global.resetRoom = function (roomName) {
+  if (!Memory.empire || !Memory.empire.logistics) {
+    console.log("❌ logistics не инициализирована");
+    return;
+  }
+
+  Memory.empire.logistics.deliveries[roomName] = [];
+  Logger.event("manual_reset", roomName, "deliveries очищены");
+  console.log(`✅ deliveries для ${roomName} очищены`);
+};
+
+global.killDelivery = function (roomName, deliveryId) {
+  const list =
+    Memory.empire &&
+    Memory.empire.logistics &&
+    Memory.empire.logistics.deliveries &&
+    Memory.empire.logistics.deliveries[roomName];
+
+  if (!list) {
+    console.log(`❌ нет deliveries для ${roomName}`);
+    return;
+  }
+
+  const d = list.find(d => d.createdAt === deliveryId);
+  if (!d) {
+    console.log(`❌ delivery ${deliveryId} не найдена`);
+    return;
+  }
+
+  d.status = "cancelled";
+  d.updatedAt = Game.time;
+  Logger.event(
+    "delivery_cancelled",
+    roomName,
+    `delivery ${deliveryId} отменена вручную`,
+  );
+  console.log(`✅ delivery ${deliveryId} отменена`);
+};
+
+/**
+ * Сменить продукт фабрики в комнате.
+ * DeliveryWorker и FactoryDirector читают room.memory.factoryProduct.
+ *
+ * @param {string} roomName
+ * @param {string} product — константа ресурса (например RESOURCE_BATTERY)
+ *
+ * @example
+ * setFactoryProduct('E35S37', RESOURCE_BATTERY)
+ * setFactoryProduct('E35S37', 'battery')
+ */
+global.setFactoryProduct = function (roomName, product) {
+  const room = Game.rooms[roomName];
+  if (!room) {
+    console.log(`❌ комната ${roomName} недоступна`);
+    return;
+  }
+
+  room.memory.factoryProduct = product;
+  Logger.event(
+    "factory_config",
+    roomName,
+    `продукт фабрики изменён на ${product}`,
+  );
+  console.log(`✅ фабрика ${roomName}: продукт установлен → ${product}`);
+};
+
+// ══════════════════════════════════════════════════════
+// ЛОГГЕР
+// ══════════════════════════════════════════════════════
+
+global.diagOn = function () {
+  Logger.diagOn();
+};
+global.diagOff = function () {
+  Logger.diagOff();
+};
+
+// ══════════════════════════════════════════════════════
+// АВТОРЕФИЛЛ
+// ══════════════════════════════════════════════════════
+
+global.autoRefill = function () {
+  const MIN_AMOUNT = 10000;
+  const resources = [RESOURCE_ZYNTHIUM, RESOURCE_OXYGEN];
+
+  for (const roomName in Game.rooms) {
+    const room = Game.rooms[roomName];
+    if (!room.controller || !room.controller.my || !room.terminal) continue;
+
+    for (const resource of resources) {
+      const amount = room.terminal.store[resource] || 0;
+      if (amount < MIN_AMOUNT) {
+        const needed = MIN_AMOUNT - amount;
+        const orders = Game.market
+          .getAllOrders({
+            type: ORDER_SELL,
+            resourceType: resource,
+          })
+          .sort((a, b) => a.price - b.price);
+
+        if (orders.length > 0) {
+          const result = Game.market.deal(
+            orders[0].id,
+            Math.min(needed, orders[0].amount),
+            roomName,
+          );
+          if (result === OK) {
+            console.log(`✅ autoRefill: купили ${resource} для ${roomName}`);
+          }
+        }
+      }
+    }
+  }
+};
+
+module.exports = {};

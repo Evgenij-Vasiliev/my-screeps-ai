@@ -144,16 +144,14 @@ const logisticsDirector = {
 
       if (!deliveries[roomName]) deliveries[roomName] = [];
 
-      // Проверяем — нет ли уже активного цикла
-      const alreadyActive = deliveries[roomName].some(
+      // Держим максимум 2 queued factory_cycle на комнату:
+      // 1 для текущего воркера + 1 в запасе для нового.
+      const queuedCount = deliveries[roomName].filter(
         d =>
-          d.target === "factory_cycle" &&
-          (d.status === DELIVERY_STATUS.QUEUED ||
-            d.status === DELIVERY_STATUS.ASSIGNED ||
-            d.status === DELIVERY_STATUS.DELIVERING),
-      );
+          d.target === "factory_cycle" && d.status === DELIVERY_STATUS.QUEUED,
+      ).length;
 
-      if (alreadyActive) {
+      if (queuedCount >= 2) {
         activeCount++;
         continue;
       }
@@ -254,7 +252,7 @@ const logisticsDirector = {
             continue;
           }
 
-          const alreadyActive = deliveries[roomName].some(
+          const hasQueued = deliveries[roomName].some(
             d =>
               d.resource === resource &&
               d.target === "lab" &&
@@ -264,7 +262,7 @@ const logisticsDirector = {
                 d.status === DELIVERY_STATUS.DELIVERING),
           );
 
-          if (alreadyActive) {
+          if (hasQueued) {
             activeCount++;
             continue;
           }

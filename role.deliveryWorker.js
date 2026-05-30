@@ -163,7 +163,10 @@ const roleDeliveryWorker = {
 
   // ШАГ 3: Берём батарейки с фабрики
   _cyclePickup: function (creep) {
-    if ((creep.store[RESOURCE_BATTERY] || 0) > 0) {
+    const PRODUCT =
+      (creep.room.memory && creep.room.memory.factoryProduct) ||
+      RESOURCE_BATTERY;
+    if ((creep.store[PRODUCT] || 0) > 0) {
       creep.memory.deliveryState = STATE.CYCLE_UNLOAD;
       return;
     }
@@ -174,7 +177,7 @@ const roleDeliveryWorker = {
       return;
     }
 
-    const amount = factory.store[RESOURCE_BATTERY] || 0;
+    const amount = factory.store[PRODUCT] || 0;
     if (amount === 0) {
       // Батареек нет — идём грузить ещё энергию
       creep.memory.deliveryState = STATE.CYCLE_LOAD;
@@ -182,16 +185,13 @@ const roleDeliveryWorker = {
       return;
     }
 
-    const toTake = Math.min(
-      amount,
-      creep.store.getFreeCapacity(RESOURCE_BATTERY),
-    );
+    const toTake = Math.min(amount, creep.store.getFreeCapacity(PRODUCT));
     if (toTake <= 0) {
       creep.memory.deliveryState = STATE.CYCLE_UNLOAD;
       return;
     }
 
-    const result = creep.withdraw(factory, RESOURCE_BATTERY, toTake);
+    const result = creep.withdraw(factory, PRODUCT, toTake);
     if (result === ERR_NOT_IN_RANGE) {
       creep.moveTo(factory, {
         reusePath: 5,
@@ -207,7 +207,10 @@ const roleDeliveryWorker = {
 
   // ШАГ 4: Несём батарейки в storage → завершаем цикл
   _cycleUnload: function (creep) {
-    if ((creep.store[RESOURCE_BATTERY] || 0) === 0) {
+    const PRODUCT =
+      (creep.room.memory && creep.room.memory.factoryProduct) ||
+      RESOURCE_BATTERY;
+    if ((creep.store[PRODUCT] || 0) === 0) {
       // Цикл завершён — помечаем completed и берём новый
       this._completeAssignment(creep);
       return;
@@ -219,7 +222,7 @@ const roleDeliveryWorker = {
       return;
     }
 
-    const result = creep.transfer(storage, RESOURCE_BATTERY);
+    const result = creep.transfer(storage, PRODUCT);
     if (result === ERR_NOT_IN_RANGE) {
       creep.moveTo(storage, {
         reusePath: 5,
