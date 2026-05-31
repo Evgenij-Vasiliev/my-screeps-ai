@@ -2,17 +2,20 @@
  * ===================================================
  * ROLE.TERMINALUNLOADER.JS — Двусторонний логист терминала
  * ===================================================
- * VERSION: 5.0
+ * VERSION: 5.2
  *
- * ИЗМЕНЕНИЯ v5.0:
- * - ИСПРАВЛЕН конфликт: приоритет 3 (разгрузка терминала) теперь
- *   пропускает ресурсы которые marketManager хочет продать.
- *   Раньше: загружали KO в терминал → тут же выгружали обратно.
- *   Теперь: sell-ресурсы остаются в терминале до продажи.
- * - addNeed теперь использует toRoom="_sell_" для sell запросов.
+ * ИЗМЕНЕНИЯ v5.2:
+ * - ИСПРАВЛЕН баг устаревшей задачи: когда крип пустой и working=false
+ *   task и resource очищаются принудительно. Раньше крип зависал
+ *   с task=energy_to_storage но пустым store — условие не выполнялось
+ *   и крип стоял на месте.
+ * - STORAGE_ENERGY_MIN снижен до 5000 (было 10000).
+ *
+ * ИЗМЕНЕНИЯ v5.1:
+ * - working=true срабатывает если несём хоть что-то (getUsedCapacity > 0).
  *
  * ЛОГИКА (в порядке приоритета):
- * 1. ТЕРМИНАЛ → STORAGE (энергия переполнена > 50000 и storage < 10000)
+ * 1. ТЕРМИНАЛ → STORAGE (энергия переполнена > 50000 и storage < 5000)
  * 2. STORAGE → ТЕРМИНАЛ (очередь terminalNeeds, включая "_sell_")
  * 3. ТЕРМИНАЛ → STORAGE (только НЕ-sell ресурсы)
  * ===================================================
@@ -21,7 +24,7 @@
 const marketManager = require("./marketManager");
 
 const TERMINAL_ENERGY_OVERFLOW = 50000;
-const STORAGE_ENERGY_MIN = 10000;
+const STORAGE_ENERGY_MIN = 5000;
 
 module.exports = {
   run: function (creep) {
@@ -41,8 +44,16 @@ module.exports = {
       delete creep.memory.resource;
       delete creep.memory.task;
     }
-    if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
+
+    // v5.1: переключаем если несём хоть что-то
+    if (!creep.memory.working && creep.store.getUsedCapacity() > 0) {
       creep.memory.working = true;
+    }
+
+    // v5.2: если пустой и working=false — очищаем устаревшую задачу
+    if (!creep.memory.working && creep.store.getUsedCapacity() === 0) {
+      delete creep.memory.task;
+      delete creep.memory.resource;
     }
 
     if (!creep.memory.working) {
@@ -75,8 +86,6 @@ module.exports = {
       }
 
       // ── ПРИОРИТЕТ 2: STORAGE → ТЕРМИНАЛ (очередь terminalNeeds) ──────
-      // Обрабатывает все запросы включая toRoom="_sell_".
-      // "_sell_" = подготовка ресурса к продаже через marketExecutor.
       const needs = creep.room.memory.terminalNeeds;
       if (needs && needs.length > 0) {
         const need = needs[0];
@@ -131,7 +140,6 @@ module.exports = {
 
       // ── ПРИОРИТЕТ 3: ТЕРМИНАЛ → STORAGE (не-энергетические) ─────────
       // ВАЖНО: пропускаем ресурсы которые marketManager хочет продать.
-      // Иначе мы загрузим ресурс в терминал и тут же выгрузим обратно.
       const sellIntents = marketManager.getSellIntents();
       const sellResources = new Set(sellIntents.map(i => i.resource));
 
@@ -139,7 +147,7 @@ module.exports = {
         r =>
           r !== RESOURCE_ENERGY &&
           terminal.store[r] > 0 &&
-          !sellResources.has(r), // ← пропускаем sell-ресурсы
+          !sellResources.has(r),
       );
 
       if (!resource) return;

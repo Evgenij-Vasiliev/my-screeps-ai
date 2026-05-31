@@ -14,14 +14,12 @@
  *
  * ИСПРАВЛЕНО v2:
  * - Каждый донор делает максимум ОДИН запрос/отправку за запуск.
- *   Раньше один донор мог получить 8 запросов за тик — очередь
- *   terminalNeeds переполнялась, terminalUnloader не справлялся,
- *   CPU скакал до 14+.
- *   Теперь используем Set busyDonors — донор занят после первого запроса.
  *
- * Пороги:
- * - RESERVE_MIN       — минимум который комната держит у себя (не отдаёт)
- * - DEFICIT_THRESHOLD — ниже этого комната считается "бедной"
+ * ДОПОЛНЕНО v3:
+ * - Интеграция с Logger: события resource_imbalance, transfer_created,
+ *   transfer_completed
+ * - Публикация статистики в Memory.empire.balancer — видна в balance()
+ * - Добавлены KH, battery, energy в RESERVE_MIN / DEFICIT_THRESHOLD / SEND_AMOUNT
  *
  * Управление через консоль:
  *   Memory.balancerEnabled = false  — остановить балансировщик
@@ -30,26 +28,34 @@
  * ===================================================
  */
 
+const Logger = require("./logger");
+
 const BALANCE_INTERVAL = 100;
 const TERMINAL_ENERGY_MIN = 20000;
 
 const RESERVE_MIN = {
-  O: 15000,
-  H: 15000,
+  // Энергия и батарейки
+  energy: 50000,
+  battery: 10000,
+  // Сырьё
+  O: 3000,
+  H: 3000,
   Z: 15000,
   K: 15000,
   L: 15000,
   U: 15000,
   X: 15000,
+  // T1 compounds
   OH: 8000,
   ZK: 8000,
   ZO: 8000,
-  KH: 8000,
+  KH: 8000, // добавлен v3
   LO: 8000,
   UO: 8000,
   UH: 8000,
   LH: 8000,
   GH: 8000,
+  // T2 compounds
   ZHO2: 3000,
   KHO2: 3000,
   LHO2: 3000,
@@ -61,8 +67,10 @@ const RESERVE_MIN = {
 };
 
 const DEFICIT_THRESHOLD = {
-  O: 5000,
-  H: 5000,
+  energy: 20000,
+  battery: 3000,
+  O: 1000,
+  H: 1000,
   Z: 5000,
   K: 5000,
   L: 5000,
@@ -71,7 +79,7 @@ const DEFICIT_THRESHOLD = {
   OH: 2000,
   ZK: 2000,
   ZO: 2000,
-  KH: 2000,
+  KH: 2000, // добавлен v3
   LO: 2000,
   UO: 2000,
   UH: 2000,
@@ -88,8 +96,10 @@ const DEFICIT_THRESHOLD = {
 };
 
 const SEND_AMOUNT = {
-  O: 10000,
-  H: 10000,
+  energy: 30000,
+  battery: 5000,
+  O: 2000,
+  H: 2000,
   Z: 10000,
   K: 10000,
   L: 10000,
@@ -98,7 +108,7 @@ const SEND_AMOUNT = {
   OH: 5000,
   ZK: 5000,
   ZO: 5000,
-  KH: 5000,
+  KH: 5000, // добавлен v3
   LO: 5000,
   UO: 5000,
   UH: 5000,
@@ -159,11 +169,16 @@ const resourceBalancer = {
         if (res !== RESOURCE_ENERGY) allResources.add(res);
       }
     }
+    // energy добавляем отдельно — она не попадает в цикл выше
+    allResources.add(RESOURCE_ENERGY);
 
-    // ИСПРАВЛЕНИЕ v2: отслеживаем занятых доноров.
-    // Каждый донор делает максимум ОДИН запрос/отправку за запуск.
-    // Это предотвращает переполнение очереди terminalNeeds и скачки CPU.
+    // Отслеживаем занятых доноров — каждый делает максимум ОДИН запрос за запуск
     const busyDonors = new Set();
+
+    // [NEW v3] Статистика для публикации в Memory.empire.balancer
+    const imbalances = []; // найденные дисбалансы
+    let transferCount = 0; // реальных отправок за этот запуск
+    let queuedCount = 0; // запросов в terminalNeeds
 
     for (const resource of allResources) {
       const reserveMin = RESERVE_MIN[resource] || 5000;
@@ -194,7 +209,6 @@ const resourceBalancer = {
         continue;
       }
 
-      // Берём первую бедную комнату и первого свободного донора
       const poorRoom = poorRooms[0];
       const donor = richRooms.find(r => r.name !== poorRoom.name);
       if (!donor) continue;
@@ -204,6 +218,22 @@ const resourceBalancer = {
         this.getTotal(donor, resource) - reserveMin,
       );
       if (actualSend <= 0) continue;
+
+      // [NEW v3] Фиксируем дисбаланс
+      imbalances.push({
+        resource,
+        from: donor.name,
+        to: poorRoom.name,
+        amount: actualSend,
+      });
+
+      // [NEW v3] Событие дисбаланса (раз в BALANCE_INTERVAL — не спамим)
+      Logger.event(
+        "resource_imbalance",
+        donor.name,
+        `${resource}: ${donor.name}→${poorRoom.name} (~${actualSend})`,
+        { resource, from: donor.name, to: poorRoom.name, amount: actualSend },
+      );
 
       const inTerminal = donor.terminal.store[resource] || 0;
 
@@ -215,9 +245,21 @@ const resourceBalancer = {
             `[Balancer] 📦 ${donor.name}: перенести ${actualSend} ${resource}` +
               ` → ${poorRoom.name}`,
           );
+          // [NEW v3] Событие постановки в очередь
+          Logger.event(
+            "transfer_created",
+            donor.name,
+            `queued: ${actualSend} ${resource} → ${poorRoom.name}`,
+            {
+              resource,
+              to: poorRoom.name,
+              amount: actualSend,
+              via: "terminalNeeds",
+            },
+          );
         }
-        // Донор занят — больше не даём ему запросов в этом запуске
         busyDonors.add(donor.name);
+        queuedCount++;
         continue;
       }
 
@@ -234,6 +276,13 @@ const resourceBalancer = {
           `[Balancer] ⚡ ${donor.name}: мало энергии для ${resource}` +
             ` (нужно: ${txCost}, есть: ${donorEnergy})`,
         );
+        // [NEW v3] Событие — нет энергии для отправки
+        Logger.event(
+          "terminal_blocked",
+          donor.name,
+          `нет энергии для transfer ${resource}: нужно ${txCost}, есть ${donorEnergy}`,
+          { resource, txCost, energy: donorEnergy },
+        );
         continue;
       }
 
@@ -243,16 +292,57 @@ const resourceBalancer = {
         console.log(
           `[Balancer] ✅ ${donor.name} → ${poorRoom.name}: ${actualSend} ${resource}`,
         );
+        // [NEW v3] Событие успешной отправки
+        Logger.event(
+          "transfer_completed",
+          donor.name,
+          `sent ${actualSend} ${resource} → ${poorRoom.name}`,
+          { resource, to: poorRoom.name, amount: actualSend },
+        );
+
         if (donor.memory.terminalNeeds) {
           donor.memory.terminalNeeds = donor.memory.terminalNeeds.filter(
             n => !(n.resource === resource && n.toRoom === poorRoom.name),
           );
         }
-        // Донор занят — терминал на кулдауне
         busyDonors.add(donor.name);
+        transferCount++;
       } else {
         console.log(`[Balancer] ❌ Ошибка отправки ${resource}: ${result}`);
+        // [NEW v3] Событие ошибки
+        Logger.event(
+          "terminal_send_failed",
+          donor.name,
+          `ошибка отправки ${resource} → ${poorRoom.name}: ${result}`,
+          { resource, to: poorRoom.name, result },
+        );
       }
+    }
+
+    // [NEW v3] Публикуем статистику в Memory.empire.balancer
+    // Команда balance() в console.js читает эти данные
+    if (!Memory.empire) Memory.empire = {};
+    Memory.empire.balancer = {
+      generatedAt: Game.time,
+      transferCount,
+      queuedCount,
+      imbalanceCount: imbalances.length,
+      // Последние 10 дисбалансов для отображения в balance()
+      transfers: imbalances.slice(0, 10).map(i => ({
+        resource: i.resource,
+        from: i.from,
+        to: i.to,
+        amount: i.amount,
+        status: "planned",
+      })),
+    };
+
+    // Итоговый лог раз в BALANCE_INTERVAL
+    if (imbalances.length > 0 || debug) {
+      console.log(
+        `[Balancer] 📊 sent=${transferCount} queued=${queuedCount}` +
+          ` imbalances=${imbalances.length}`,
+      );
     }
   },
 };
