@@ -52,9 +52,9 @@ const labManager = {
     // Запускаем реакцию
     const result = reactor.runReaction(lab1, lab2);
     if (result !== OK && result !== ERR_TIRED) {
-      console.log(
-        `[LabManager ${room.name}] [${label}] Ошибка реакции ${config.product}: ${result}`,
-      );
+      // console.log(
+      //   `[LabManager ${room.name}] [${label}] Ошибка реакции ${config.product}: ${result}`,
+      // );
     }
   },
 

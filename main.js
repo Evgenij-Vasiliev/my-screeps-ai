@@ -67,7 +67,7 @@ module.exports.loop = function () {
    * Покупает Z и O если меньше 10000 в любой комнате
    */
   if (Game.time % 1000 === 0) {
-    cmd.autoRefill();
+    autoRefill();
   }
 
   /**
