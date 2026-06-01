@@ -2,17 +2,23 @@
  * ===================================================
  * TERMINALMANAGER.JS — Terminal Infrastructure Layer
  * ===================================================
- * VERSION: 4.1
+ * VERSION: 4.2
+ *
+ * ИСПРАВЛЕНИЕ v4.2:
+ * - ГЛАВНЫЙ БАГ: терминалы забивались до 300к энергией.
+ *   Причина: runEnergyBalance() создавал addNeed() без проверки
+ *   насколько полон терминал получателя. Задачи накапливались
+ *   быстрее чем выполнялись → terminal=300000.
+ *
+ *   РЕШЕНИЕ: добавлена константа TERMINAL_ENERGY_MAX=100000
+ *   и проверка терминала получателя перед addNeed().
+ *   Если terminal >= TERMINAL_ENERGY_MAX — пропускаем комнату.
  *
  * ИЗМЕНЕНИЯ v4.1:
  * - Добавлен runSellPrep() — подготовка ресурсов к продаже.
- *   Если marketManager имеет sell intent для ресурса,
- *   а в терминале его мало — запрашиваем перенос из storage
- *   через addNeed() (terminalUnloader выполнит перенос).
  *
  * ИЗМЕНЕНИЯ v4.0:
  * - Удалён runMineralSell() — ownership передан MarketExecutor
- * - Оставлена только terminal infrastructure
  * ===================================================
  */
 
@@ -22,6 +28,8 @@ const marketManager = require("./marketManager");
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
 const TERMINAL_ENERGY_MIN = 20000;
+// v4.2: максимум энергии в терминале — не накапливаем сверх этого
+const TERMINAL_ENERGY_MAX = 100000;
 const ENERGY_POOR_THRESHOLD = 20000;
 const ENERGY_RICH_THRESHOLD = 100000;
 const ENERGY_SEND_AMOUNT = 20000;
@@ -79,17 +87,6 @@ const terminalManager = {
 
   // ── SELL PREP ─────────────────────────────────────────────────────────────
 
-  /**
-   * Подготовка ресурсов к продаже: storage → terminal.
-   *
-   * Алгоритм:
-   * 1. Читаем sell intents из marketManager
-   * 2. Для каждого intent ищем комнату с ресурсом в storage
-   * 3. Если в терминале этой комнаты < SELL_TERMINAL_TARGET
-   *    → addNeed() чтобы terminalUnloader перенёс из storage в terminal
-   *
-   * Вызывается только из первой комнаты (глобальный балансировщик).
-   */
   runSellPrep: function () {
     if (Game.time % 100 !== 0) return;
 
@@ -103,18 +100,13 @@ const terminalManager = {
     for (const intent of sellIntents) {
       const resource = intent.resource;
 
-      // Ищем комнату где ресурс есть в storage но мало в терминале
       for (const room of ourRooms) {
         const inStorage = room.storage.store[resource] || 0;
         const inTerminal = room.terminal.store[resource] || 0;
 
-        // В терминале уже достаточно — пропускаем
         if (inTerminal >= SELL_TERMINAL_TARGET) continue;
-
-        // В storage нет — пропускаем
         if (inStorage < 100) continue;
 
-        // Сколько нужно добавить в терминал
         const needed = Math.min(
           SELL_TERMINAL_TARGET - inTerminal,
           inStorage,
@@ -123,7 +115,6 @@ const terminalManager = {
 
         if (needed < 100) continue;
 
-        // Запрашиваем перенос: storage → terminal (toRoom = null = локально)
         const isNew = this.addNeed(room, resource, needed, null);
 
         if (isNew) {
@@ -133,7 +124,6 @@ const terminalManager = {
           );
         }
 
-        // Одна комната на один ресурс — берём первую подходящую
         break;
       }
     }
@@ -160,6 +150,15 @@ const terminalManager = {
     if (poorRooms.length === 0 || richRooms.length === 0) return;
 
     for (const poorRoom of poorRooms) {
+      // v4.2: не отправляем если терминал получателя уже заполнен
+      const terminalEnergy = poorRoom.terminal.store[RESOURCE_ENERGY] || 0;
+      if (terminalEnergy >= TERMINAL_ENERGY_MAX) {
+        console.log(
+          `[EnergyBalance] ⏭️  ${poorRoom.name}: терминал уже ${terminalEnergy} — пропускаем`,
+        );
+        continue;
+      }
+
       const donor = richRooms.find(
         r =>
           r.name !== poorRoom.name &&
@@ -363,7 +362,7 @@ const terminalManager = {
     // ── ШАГ 1: ГЛОБАЛЬНЫЕ БАЛАНСИРОВЩИКИ — только из первой комнаты ────────
     if (roomNames[0] === room.name) {
       this.runEnergyBalance();
-      this.runSellPrep(); // v4.1: подготовка ресурсов к продаже
+      this.runSellPrep();
       resourceBalancer.run();
     }
 

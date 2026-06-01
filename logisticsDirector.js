@@ -146,12 +146,15 @@ const logisticsDirector = {
 
       // Держим максимум 2 queued factory_cycle на комнату:
       // 1 для текущего воркера + 1 в запасе для нового.
-      const queuedCount = deliveries[roomName].filter(
+      const factoryActiveCount = deliveries[roomName].filter(
         d =>
-          d.target === "factory_cycle" && d.status === DELIVERY_STATUS.QUEUED,
+          d.target === "factory_cycle" &&
+          (d.status === DELIVERY_STATUS.QUEUED ||
+            d.status === DELIVERY_STATUS.ASSIGNED ||
+            d.status === DELIVERY_STATUS.DELIVERING),
       ).length;
 
-      if (queuedCount >= 2) {
+      if (factoryActiveCount >= 2) {
         activeCount++;
         continue;
       }

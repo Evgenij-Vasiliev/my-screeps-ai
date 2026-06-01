@@ -2,17 +2,25 @@
  * ===================================================
  * ROLE.TERMINALUNLOADER.JS — Двусторонний логист терминала
  * ===================================================
- * VERSION: 5.2
+ * VERSION: 5.3
+ *
+ * ИСПРАВЛЕНИЕ v5.3:
+ * - ГЛАВНЫЙ БАГ: крип завис 1400 тиков с working=true, store=0/500.
+ *   Причина: после transfer(OK) working=false выставлялся,
+ *   но на следующем тике крип входил в ветку working=true
+ *   (из-за порядка проверок) и уходил в moveTo с пустым store.
+ *
+ *   РЕШЕНИЕ: в самом начале ветки working=true добавлена
+ *   ПЕРВАЯ проверка: если store пустой — принудительно сбрасываем
+ *   working, task, resource и выходим. Это перехватывает зависание
+ *   независимо от того, какая задача была активна.
+ *
+ * - Добавлено throttled логирование застрявших состояний.
  *
  * ИЗМЕНЕНИЯ v5.2:
  * - ИСПРАВЛЕН баг устаревшей задачи: когда крип пустой и working=false
- *   task и resource очищаются принудительно. Раньше крип зависал
- *   с task=energy_to_storage но пустым store — условие не выполнялось
- *   и крип стоял на месте.
+ *   task и resource очищаются принудительно.
  * - STORAGE_ENERGY_MIN снижен до 5000 (было 10000).
- *
- * ИЗМЕНЕНИЯ v5.1:
- * - working=true срабатывает если несём хоть что-то (getUsedCapacity > 0).
  *
  * ЛОГИКА (в порядке приоритета):
  * 1. ТЕРМИНАЛ → STORAGE (энергия переполнена > 50000 и storage < 5000)
@@ -39,13 +47,18 @@ module.exports = {
     }
 
     // ── ПЕРЕКЛЮЧЕНИЕ РЕЖИМА ───────────────────────────────────────────────
+
+    // v5.3: ПЕРВАЯ проверка — если несём но store пустой, сбрасываем всё.
+    // Это главное исправление бага зависания 1400 тиков.
+    // Срабатывает ДО любой другой логики.
     if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
       creep.memory.working = false;
       delete creep.memory.resource;
       delete creep.memory.task;
+      delete creep.memory.transferred;
     }
 
-    // v5.1: переключаем если несём хоть что-то
+    // v5.1: если несём хоть что-то — переключаем в working
     if (!creep.memory.working && creep.store.getUsedCapacity() > 0) {
       creep.memory.working = true;
     }
@@ -54,8 +67,10 @@ module.exports = {
     if (!creep.memory.working && creep.store.getUsedCapacity() === 0) {
       delete creep.memory.task;
       delete creep.memory.resource;
+      delete creep.memory.transferred;
     }
 
+    // ── РЕЖИМ ЗАГРУЗКИ (берём ресурс) ────────────────────────────────────
     if (!creep.memory.working) {
       // ── ПРИОРИТЕТ 1: ЭНЕРГИЯ ИЗ ТЕРМИНАЛА → STORAGE ──────────────────
       const terminalEnergy = terminal.store[RESOURCE_ENERGY] || 0;
@@ -95,6 +110,7 @@ module.exports = {
 
         const remaining = need.amount - creep.memory.transferred;
 
+        // Задача выполнена — переходим к следующей
         if (remaining <= 0) {
           console.log(
             `[TerminalUnloader ${creep.room.name}] ✅ ` +
@@ -108,6 +124,7 @@ module.exports = {
           return;
         }
 
+        // Ресурса нет в storage — пропускаем задачу
         if (inStorage === 0) {
           console.log(
             `[TerminalUnloader ${creep.room.name}] ` +
@@ -139,7 +156,7 @@ module.exports = {
       }
 
       // ── ПРИОРИТЕТ 3: ТЕРМИНАЛ → STORAGE (не-энергетические) ─────────
-      // ВАЖНО: пропускаем ресурсы которые marketManager хочет продать.
+      // Пропускаем ресурсы которые marketManager хочет продать
       const sellIntents = marketManager.getSellIntents();
       const sellResources = new Set(sellIntents.map(i => i.resource));
 
@@ -169,7 +186,17 @@ module.exports = {
       }
       if (result === OK) creep.memory.working = true;
     } else {
-      // ── ДОСТАВКА ──────────────────────────────────────────────────────
+      // ── РЕЖИМ ДОСТАВКИ (несём ресурс к цели) ─────────────────────────
+
+      // v5.3: ЗАЩИТА — если вошли в ветку доставки с пустым store,
+      // немедленно сбрасываем. Дублирующая проверка для надёжности.
+      if (creep.store.getUsedCapacity() === 0) {
+        creep.memory.working = false;
+        delete creep.memory.resource;
+        delete creep.memory.task;
+        delete creep.memory.transferred;
+        return;
+      }
 
       // Энергия из терминала → Storage
       if (creep.memory.task === "energy_to_storage") {
@@ -194,6 +221,7 @@ module.exports = {
           });
         }
         if (result === OK) {
+          // Считаем сколько фактически перенесли
           const delivered =
             creep.store[creep.memory.resource] || creep.store.getUsedCapacity();
           creep.memory.transferred =
@@ -217,7 +245,21 @@ module.exports = {
           delete creep.memory.resource;
           delete creep.memory.task;
         }
+        return;
       }
+
+      // v5.3: неизвестная задача в режиме доставки — сброс
+      // Защита от future edge cases
+      if (Game.time % 20 === 0) {
+        console.log(
+          `[TerminalUnloader] ⚠️ ${creep.name}: неизвестная задача` +
+            ` task=${creep.memory.task} — сброс`,
+        );
+      }
+      creep.memory.working = false;
+      delete creep.memory.task;
+      delete creep.memory.resource;
+      delete creep.memory.transferred;
     }
   },
 };

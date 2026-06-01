@@ -2,18 +2,18 @@
  * ===================================================
  * TASKMANAGER.JS — Менеджер задач воркера
  * ===================================================
- * VERSION: 3.1
+ * VERSION: 3.2
  *
- * ИЗМЕНЕНИЯ v3.1:
- * - Каждый воркер берёт уникальную цель
- * - Занятые цели других воркеров исключаются
- * - Все воркеры работают параллельно на разных объектах
+ * ИЗМЕНЕНИЯ v3.2:
+ * - Если нет задач — воркер апгрейдит контроллер
+ *   вместо того чтобы стоять и кричать "жду"
  *
  * Приоритеты:
  * 1. SUPPLY  — заправить spawn/extensions
  * 2. REPAIR  — починить (каждый свою уникальную цель)
  * 3. BUILD   — построить (каждый свою уникальную стройку)
  * 4. UPGRADE — только если ticksToDowngrade < 100000
+ * 5. UPGRADE — fallback если нет других задач
  * ===================================================
  */
 
@@ -79,7 +79,8 @@ const taskManager = {
       }
     }
 
-    // ── UPGRADE ───────────────────────────────────────────────────────────
+    // ── UPGRADE (приоритетный) ────────────────────────────────────────────
+    // Если контроллер близко к даунгрейду — добавляем в приоритетную очередь
     const controller = room.controller;
     if (controller && controller.ticksToDowngrade < 100000) {
       tasks.push({ type: TASKS.UPGRADE, targetId: controller.id });
@@ -94,7 +95,16 @@ const taskManager = {
     const tasks = this.getTasks(room, creep);
 
     if (tasks.length === 0) {
-      creep.say("💤 жду");
+      // Нет задач — апгрейдим контроллер вместо "жду"
+      // Это fallback: воркер никогда не стоит без дела
+      const controller = room.controller;
+      if (controller) {
+        creep.memory.task = TASKS.UPGRADE;
+        creep.memory.taskTargetId = controller.id;
+        creep.say("⬆️ фолбэк");
+      } else {
+        creep.say("💤 жду");
+      }
       return;
     }
 

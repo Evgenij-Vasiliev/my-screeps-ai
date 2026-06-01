@@ -2,15 +2,12 @@
  * ===================================================
  * CONSOLE.JS — Ручное управление и диагностика
  * ===================================================
- * VERSION: 3.0
+ * VERSION: 3.1
  *
- * ИЗМЕНЕНИЯ v3.0:
- * - Добавлен labs(roomName)     — статус лаб и реакций
- * - Добавлен terminal(roomName) — статус терминала и его содержимое
- * - Добавлен market()           — активные buy/sell интенты
- * - Добавлен balance()          — межкомнатный баланс ресурсов
- * - Добавлен sendResource(from, to, res, amount) — ручная отправка
- * - Расширен roomHealth():      добавлены Labs, Market, Balance
+ * ИЗМЕНЕНИЯ v3.1:
+ * - Добавлен terminalWorkers(roomName) — детальный статус
+ *   каждого terminalUnloader в комнате: resource, task,
+ *   working, from/to, pos, stuck ticks.
  *
  * КОМАНДЫ ДИАГНОСТИКИ:
  *   empire()                    — сводка по всей империи
@@ -20,10 +17,11 @@
  *   factory('E35S37')           — состояние фабрики
  *   links('E35S37')             — состояние линков
  *   logistics()                 — все активные deliveries
- *   labs('E35S37')              — состояние лаб и реакций  [NEW v3.0]
- *   terminal('E35S37')          — содержимое терминала     [NEW v3.0]
- *   market()                    — buy/sell интенты         [NEW v3.0]
- *   balance()                   — баланс ресурсов          [NEW v3.0]
+ *   labs('E35S37')              — состояние лаб и реакций
+ *   terminal('E35S37')          — содержимое терминала
+ *   market()                    — buy/sell интенты
+ *   balance()                   — баланс ресурсов
+ *   terminalWorkers('E35S37')   — статус terminalUnloader'ов [NEW v3.1]
  *   history()                   — последние 20 событий
  *   history('E35S37')           — события комнаты
  *   history('E35S37', 10)       — последние N событий
@@ -31,7 +29,7 @@
  *
  * КОМАНДЫ УПРАВЛЕНИЯ:
  *   deliver(room, res, target, labId, amount)
- *   sendResource(from, to, resource, amount)  [NEW v3.0]
+ *   sendResource(from, to, resource, amount)
  *   clearCreep('name')
  *   resetFactory('E35S37')
  *   resetRoom('E35S37')
@@ -46,7 +44,7 @@ const Logger = require("./logger");
 const diagnostics = require("./diagnostics");
 
 // ══════════════════════════════════════════════════════
-// ДИАГНОСТИКА — БАЗОВЫЕ КОМАНДЫ (без изменений)
+// ДИАГНОСТИКА — БАЗОВЫЕ КОМАНДЫ
 // ══════════════════════════════════════════════════════
 
 global.room = function (roomName) {
@@ -271,13 +269,9 @@ global.empire = function () {
 
 /**
  * Показать статус лаб в комнате.
- * Читает конфиги из room.memory.labs/labs2/labs3...
- * Показывает содержимое каждой лабы и статус реакции.
  *
  * @param {string} roomName
- *
- * @example
- * labs('E35S37')
+ * @example labs('E35S37')
  */
 global.labs = function (roomName) {
   const r = Game.rooms[roomName];
@@ -286,7 +280,6 @@ global.labs = function (roomName) {
     return;
   }
 
-  // Ключи конфигов лаб — как в labManager
   const LAB_KEYS = ["labs", "labs2", "labs3", "labs4", "labs5"];
   const mem = r.memory;
 
@@ -308,7 +301,6 @@ global.labs = function (roomName) {
       `\n  [${key}] Реакция: ${config.reagent1} + ${config.reagent2} → ${config.product}`,
     );
 
-    // Статус lab1 (входная — реагент 1)
     if (!lab1) {
       console.log(`    L1 (input ${config.reagent1}): ❌ не найдена`);
     } else {
@@ -317,7 +309,6 @@ global.labs = function (roomName) {
       console.log(`    L1 input ${config.reagent1}: ${icon} ${amount}`);
     }
 
-    // Статус lab2 (входная — реагент 2)
     if (!lab2) {
       console.log(`    L2 (input ${config.reagent2}): ❌ не найдена`);
     } else {
@@ -326,7 +317,6 @@ global.labs = function (roomName) {
       console.log(`    L2 input ${config.reagent2}: ${icon} ${amount}`);
     }
 
-    // Статус reactor (выходная — продукт)
     if (!reactor) {
       console.log(`    L3 (output ${config.product}): ❌ не найдена`);
     } else {
@@ -338,7 +328,6 @@ global.labs = function (roomName) {
       );
     }
 
-    // Данные из labController если есть
     const lcData =
       Memory.empire &&
       Memory.empire.labController &&
@@ -368,11 +357,10 @@ global.labs = function (roomName) {
   if (!hasAny) {
     console.log(`  Конфиги лаб не найдены.`);
     console.log(
-      `  Настройте через: Memory.rooms['${roomName}'].labs = { lab1: 'ID', lab2: 'ID', reactor: 'ID', reagent1: 'H', reagent2: 'O', product: 'OH' }`,
+      `  Настройте через: Memory.rooms['${roomName}'].labs = { ... }`,
     );
   }
 
-  // Показываем labWorker'ов в этой комнате
   const workers = Object.values(Game.creeps).filter(
     c => c.memory.role === "labWorker" && c.room.name === roomName,
   );
@@ -394,12 +382,9 @@ global.labs = function (roomName) {
 
 /**
  * Показать содержимое терминала в комнате.
- * Показывает все ресурсы с количеством > 0, cooldown, заполненность.
  *
  * @param {string} roomName
- *
- * @example
- * terminal('E35S37')
+ * @example terminal('E35S37')
  */
 global.terminal = function (roomName) {
   const r = Game.rooms[roomName];
@@ -424,7 +409,6 @@ global.terminal = function (roomName) {
   console.log(`  Cooldown: ${term.cooldown}`);
   console.log(`\n  Ресурсы:`);
 
-  // Сортируем по количеству — больше сверху
   const resources = Object.entries(term.store)
     .filter(([, amt]) => amt > 0)
     .sort(([, a], [, b]) => b - a);
@@ -437,7 +421,6 @@ global.terminal = function (roomName) {
     }
   }
 
-  // Показываем pending send-задачи из памяти если есть
   const pending = r.memory && r.memory.terminalSend;
   if (pending && pending.length > 0) {
     console.log(`\n  Pending отправки:`);
@@ -457,17 +440,14 @@ global.terminal = function (roomName) {
 
 /**
  * Показать текущие buy/sell интенты MarketManager.
- * Также показывает активные ордера на рынке.
  *
- * @example
- * market()
+ * @example market()
  */
 global.market = function () {
   console.log(`\n========== МАРКЕТ ==========`);
   console.log(`  Credits: ${Math.round(Game.market.credits)}`);
   console.log(`  Тик: ${Game.time}`);
 
-  // ── Интенты из MarketManager ──────────────────────────────────────────
   const marketData = Memory.empire && Memory.empire.market;
 
   if (!marketData) {
@@ -500,7 +480,6 @@ global.market = function () {
     }
   }
 
-  // ── Реальные активные ордера на рынке ────────────────────────────────
   const myOrders = Game.market.orders;
   const orderList = Object.values(myOrders || {});
 
@@ -527,7 +506,6 @@ global.market = function () {
     }
   }
 
-  // ── Последние сделки ──────────────────────────────────────────────────
   const history = Memory.empire && Memory.empire.marketHistory;
   if (history && history.length > 0) {
     console.log(`\n  Последние сделки (${Math.min(history.length, 5)}):`);
@@ -542,7 +520,6 @@ global.market = function () {
     }
   }
 
-  // ── Мета маркет-директора ─────────────────────────────────────────────
   const meta = Memory.empire && Memory.empire.marketDirectivesMeta;
   if (meta) {
     console.log(
@@ -557,23 +534,18 @@ global.market = function () {
 
 /**
  * Показать межкомнатный баланс ключевых ресурсов.
- * Показывает сколько каждого ресурса в каждой комнате.
- * Выявляет дисбаланс (одна комната голодает, другая — в избытке).
  *
- * @example
- * balance()
+ * @example balance()
  */
 global.balance = function () {
-  // Ресурсы для мониторинга баланса
   const BALANCE_RESOURCES = [
     RESOURCE_ENERGY,
     RESOURCE_HYDROGEN,
     RESOURCE_OXYGEN,
-    RESOURCE_HYDROXIDE, // OH
+    RESOURCE_HYDROXIDE,
     RESOURCE_BATTERY,
   ];
 
-  // Пороги: ниже MIN — дефицит, выше MAX — избыток
   const THRESHOLDS = {
     [RESOURCE_ENERGY]: { min: 50000, max: 300000 },
     [RESOURCE_HYDROGEN]: { min: 2000, max: 20000 },
@@ -582,7 +554,6 @@ global.balance = function () {
     [RESOURCE_BATTERY]: { min: 5000, max: 50000 },
   };
 
-  // Собираем данные по всем своим комнатам
   const myRooms = Object.values(Game.rooms).filter(
     r => r.controller && r.controller.my,
   );
@@ -594,7 +565,6 @@ global.balance = function () {
     const roomData = [];
 
     for (const r of myRooms) {
-      // Берём из storage + terminal
       const inStorage = r.storage ? r.storage.store[resource] || 0 : 0;
       const inTerminal = r.terminal ? r.terminal.store[resource] || 0 : 0;
       const total = inStorage + inTerminal;
@@ -613,7 +583,6 @@ global.balance = function () {
       );
     }
 
-    // Выявляем дисбаланс: есть комната с избытком и комната с дефицитом
     const haveExcess = roomData.filter(rd => rd.total > thresh.max);
     const haveDeficit = roomData.filter(rd => rd.total < thresh.min);
 
@@ -635,7 +604,6 @@ global.balance = function () {
     }
   }
 
-  // Показываем данные из resourceBalancer если уже запущен
   const balancerData = Memory.empire && Memory.empire.balancer;
   if (
     balancerData &&
@@ -653,7 +621,123 @@ global.balance = function () {
   console.log(`======================================\n`);
 };
 
-// ── ИСТОРИЯ СОБЫТИЙ (без изменений) ───────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// НОВАЯ КОМАНДА v3.1 — TERMINAL WORKERS
+// ══════════════════════════════════════════════════════
+
+/**
+ * Показать детальный статус каждого terminalUnloader в комнате.
+ *
+ * Выводит для каждого крипа:
+ *   - resource   — какой ресурс несёт
+ *   - working    — в режиме доставки или нет
+ *   - task       — текущая задача (energy_to_storage / load_terminal / unload_terminal)
+ *   - from/to    — откуда берёт и куда несёт
+ *   - pos        — текущая позиция
+ *   - stuck      — сколько тиков не двигается (из _diag)
+ *
+ * @param {string} roomName
+ *
+ * @example
+ * terminalWorkers('E35S37')
+ */
+global.terminalWorkers = function (roomName) {
+  const r = Game.rooms[roomName];
+  if (!r) {
+    console.log(`❌ комната ${roomName} недоступна`);
+    return;
+  }
+
+  // Ищем всех terminalUnloader'ов в комнате
+  // Роль может называться 'test_terminalUnloader' или 'terminalUnloader'
+  const workers = Object.values(Game.creeps).filter(
+    c =>
+      c.room.name === roomName &&
+      (c.memory.role === "terminalUnloader" ||
+        c.memory.role === "test_terminalUnloader"),
+  );
+
+  console.log(`\n========== Terminal workers ${roomName} ==========`);
+
+  if (workers.length === 0) {
+    console.log(`  ❌ нет terminalUnloader'ов в комнате`);
+    console.log(`==========================================\n`);
+    return;
+  }
+
+  for (let i = 0; i < workers.length; i++) {
+    const w = workers[i];
+    const mem = w.memory;
+
+    // Определяем from/to по задаче
+    let from = "—";
+    let to = "—";
+
+    if (mem.task === "energy_to_storage") {
+      from = "terminal";
+      to = "storage";
+    } else if (mem.task === "load_terminal") {
+      from = "storage";
+      to = "terminal";
+    } else if (mem.task === "unload_terminal") {
+      from = "terminal";
+      to = "storage";
+    }
+
+    // Считаем stuck ticks из _diag (та же логика что в diagnostics.js)
+    let stuckTicks = 0;
+    if (mem._diag) {
+      const d = mem._diag;
+      const moved = d.x !== w.pos.x || d.y !== w.pos.y;
+      const carryChanged = w.store.getUsedCapacity() !== d.carrying;
+      if (!moved && !carryChanged) {
+        stuckTicks = Game.time - (d.sinceAt || Game.time);
+      }
+    }
+
+    // Определяем иконку состояния
+    const stuckIcon = stuckTicks > 50 ? "🔴" : stuckTicks > 20 ? "🟡" : "🟢";
+
+    console.log(`\n  TU-${i + 1} [${w.name}]`);
+
+    // Если крип ничего не делает
+    if (!mem.task && !mem.working && w.store.getUsedCapacity() === 0) {
+      console.log(`  idle`);
+    } else {
+      console.log(`  resource : ${mem.resource || "—"}`);
+      console.log(`  working  : ${mem.working ? "true" : "false"}`);
+      console.log(`  task     : ${mem.task || "—"}`);
+      console.log(`  from     : ${from}`);
+      console.log(`  to       : ${to}`);
+      console.log(`  pos      : ${w.pos.x},${w.pos.y}`);
+      console.log(
+        `  store    : ${w.store.getUsedCapacity()}/${w.store.getCapacity()}`,
+      );
+      console.log(`  stuck    : ${stuckIcon} ${stuckTicks} тиков`);
+
+      // Показываем transferred если есть (для load_terminal)
+      if (mem.transferred !== undefined) {
+        console.log(`  transferred: ${mem.transferred}`);
+      }
+    }
+  }
+
+  // Итог по комнате
+  const stuck = workers.filter(w => {
+    if (!w.memory._diag) return false;
+    const d = w.memory._diag;
+    const moved = d.x !== w.pos.x || d.y !== w.pos.y;
+    const carryChanged = w.store.getUsedCapacity() !== d.carrying;
+    return !moved && !carryChanged && Game.time - (d.sinceAt || Game.time) > 20;
+  });
+
+  console.log(
+    `\n  Итого: ${workers.length} воркеров, зависших: ${stuck.length}`,
+  );
+  console.log(`==========================================\n`);
+};
+
+// ── ИСТОРИЯ СОБЫТИЙ ───────────────────────────────────────────────────────
 
 /**
  * @param {string} roomName — фильтр по комнате (опционально)
@@ -690,16 +774,13 @@ global.history = function (roomName, limit) {
   console.log(`================================================\n`);
 };
 
-// ── ЗДОРОВЬЕ КОМНАТЫ (расширено v3.0) ────────────────────────────────────
+// ── ЗДОРОВЬЕ КОМНАТЫ ─────────────────────────────────────────────────────
 
 /**
  * Быстрый статус комнаты: OK / WARN / ERROR по каждому контуру.
- * v3.0: добавлены Labs, Market, Balance.
  *
  * @param {string} roomName
- *
- * @example
- * roomHealth('E35S37')
+ * @example roomHealth('E35S37')
  */
 global.roomHealth = function (roomName) {
   const r = Game.rooms[roomName];
@@ -802,23 +883,20 @@ global.roomHealth = function (roomName) {
   );
   checks.Remote = remoteMiners.length > 0 ? "OK" : "WARN";
 
-  // ── Labs [NEW v3.0] ──────────────────────────────────
-  // Проверяем через labController
+  // ── Labs ─────────────────────────────────────────────
   const lcData =
     Memory.empire &&
     Memory.empire.labController &&
     Memory.empire.labController.rooms &&
     Memory.empire.labController.rooms[roomName];
 
-  // Проверяем есть ли конфиги лаб в памяти комнаты
   const LAB_KEYS = ["labs", "labs2", "labs3", "labs4", "labs5"];
   const hasLabConfig = LAB_KEYS.some(k => r.memory[k] && r.memory[k].product);
 
   if (!hasLabConfig) {
-    // Нет конфига — не считаем ошибкой, просто нет лаб
-    checks.Labs = "WARN"; // нет конфига лаб
+    checks.Labs = "WARN";
   } else if (!lcData) {
-    checks.Labs = "WARN"; // данные ещё не посчитаны
+    checks.Labs = "WARN";
   } else {
     const status = lcData.status;
     if (status === "error") {
@@ -830,23 +908,20 @@ global.roomHealth = function (roomName) {
     }
   }
 
-  // ── Market [NEW v3.0] ────────────────────────────────
-  // Проверяем что marketManager работает и нет критических buy без исполнения
+  // ── Market ───────────────────────────────────────────
   const marketMeta = Memory.empire && Memory.empire.marketMeta;
   if (!marketMeta) {
     checks.Market = "WARN";
   } else {
     const stale = Game.time - (marketMeta.generatedAt || 0) > 200;
     if (stale) {
-      checks.Market = "WARN"; // данные устарели
+      checks.Market = "WARN";
     } else {
-      // Если есть критические buy — это WARN но не ERROR
       checks.Market = marketMeta.criticalBuyCount > 0 ? "WARN" : "OK";
     }
   }
 
-  // ── Balance [NEW v3.0] ───────────────────────────────
-  // Проверяем energy в storage — основной показатель баланса
+  // ── Balance ──────────────────────────────────────────
   const energyOk = r.storage && (r.storage.store[RESOURCE_ENERGY] || 0) > 20000;
   const terminalOk =
     r.terminal &&
@@ -901,16 +976,14 @@ global.deliver = function (roomName, resource, target, targetLabId, amount) {
 };
 
 /**
- * Ручная отправка ресурса через terminal из одной комнаты в другую.
- * Терминал должен быть доступен и не на cooldown.
+ * Ручная отправка ресурса через terminal.
  *
- * @param {string} fromRoom   — откуда отправить
- * @param {string} toRoom     — куда отправить
- * @param {string} resource   — ресурс (например 'KH', RESOURCE_KEANIUM_HYDRIDE)
- * @param {number} amount     — количество
+ * @param {string} fromRoom
+ * @param {string} toRoom
+ * @param {string} resource
+ * @param {number} amount
  *
- * @example
- * sendResource('E35S37', 'E37S37', 'KH', 3000)
+ * @example sendResource('E35S37', 'E37S37', 'KH', 3000)
  */
 global.sendResource = function (fromRoom, toRoom, resource, amount) {
   const r = Game.rooms[fromRoom];
@@ -1065,7 +1138,7 @@ global.diagOff = function () {
 };
 
 // ══════════════════════════════════════════════════════
-// АВТОРЕФИЛЛ (без изменений)
+// АВТОРЕФИЛЛ
 // ══════════════════════════════════════════════════════
 
 global.autoRefill = function () {
