@@ -5,6 +5,12 @@
  * ОПТИМИЗАЦИЯ v3: один крип на комнату вместо одного на тройку.
  * Экономия ~10 крипов и ~2.5 CPU.
  *
+ * ОПТИМИЗАЦИЯ v4 (ТЗ №5): Round-Robin Scheduling
+ * Добавлен вращающийся указатель старта обхода троек.
+ * Хранится в room.memory.labWorkerIndex.
+ * Каждый тик worker начинает с другой тройки → все тройки
+ * обслуживаются равномерно, ни одна не голодает.
+ *
  * Задачи:
  * 1. Выгружает чужие ресурсы из лаб (если поменяли конфиг)
  * 2. Загружает реагенты из Terminal или Storage в Лаб1 и Лаб2
@@ -19,6 +25,9 @@
  * - targetId {string} — ID структуры назначения
  * - sourceId {string} — ID хранилища откуда брать
  * - labKey   {string} — какая тройка обслуживается
+ *
+ * Память комнаты (новое в v4):
+ * - labWorkerIndex {number} — указатель текущей стартовой тройки (0, 1, 2...)
  * ===================================================
  */
 
@@ -42,7 +51,10 @@ module.exports = {
     return null;
   },
 
-  // Возвращает все конфиги троек в комнате
+  /**
+   * Возвращает все конфиги троек в комнате в ПОРЯДКЕ ПО УМОЛЧАНИЮ.
+   * Новый метод getRotatedConfigs применяет round-robin смещение.
+   */
   getConfigs: function (room) {
     const mem = room.memory;
     const configs = [];
@@ -52,6 +64,37 @@ module.exports = {
     if (mem.labs4) configs.push({ key: "labs4", config: mem.labs4 });
     if (mem.labs5) configs.push({ key: "labs5", config: mem.labs5 });
     return configs;
+  },
+
+  /**
+   * [НОВОЕ v4] Возвращает конфиги в ротируемом порядке.
+   *
+   * Пример для 3 троек:
+   *   index=0 → [labs, labs2, labs3]
+   *   index=1 → [labs2, labs3, labs]
+   *   index=2 → [labs3, labs, labs2]
+   *
+   * Также сдвигает указатель room.memory.labWorkerIndex вперёд.
+   *
+   * @param {Room} room
+   * @returns {Array} — конфиги в ротируемом порядке
+   */
+  getRotatedConfigs: function (room) {
+    const configs = this.getConfigs(room);
+    if (configs.length === 0) return [];
+
+    // Читаем текущий индекс старта. Если не было — начинаем с 0.
+    let idx = room.memory.labWorkerIndex || 0;
+
+    // Защита от выхода за пределы массива (если убрали тройку)
+    if (idx >= configs.length) idx = 0;
+
+    // Сдвигаем указатель для СЛЕДУЮЩЕГО тика
+    room.memory.labWorkerIndex = (idx + 1) % configs.length;
+
+    // Строим ротируемый порядок:
+    // берём от idx до конца, потом от начала до idx
+    return configs.slice(idx).concat(configs.slice(0, idx));
   },
 
   run: function (creep) {
@@ -68,7 +111,8 @@ module.exports = {
 
     // Ищем задачу если нет текущей
     if (!creep.memory.task) {
-      const configs = this.getConfigs(creep.room);
+      // [ИЗМЕНЕНО v4] Используем ротируемый порядок вместо прямого
+      const configs = this.getRotatedConfigs(creep.room);
 
       if (configs.length === 0) {
         creep.say("❌ нет конфига");
@@ -170,6 +214,7 @@ module.exports = {
     }
 
     // ── ВЫПОЛНЕНИЕ ЗАДАЧИ ─────────────────────────────────────────────────
+    // (логика не изменена)
 
     // Очистка лабы от чужого ресурса
     if (creep.memory.task === "clear_lab") {
