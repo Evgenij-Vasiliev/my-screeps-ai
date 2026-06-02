@@ -2,56 +2,38 @@
  * ===================================================
  * DIAGNOSTICS.JS — Система диагностики и авторecovery
  * ===================================================
- * VERSION: 2.0
+ * VERSION: 2.1
+ *
+ * ИЗМЕНЕНИЯ v2.1:
+ * - Подключён diagnostics.labs.js
+ * - _checkLabs() и _checkRoomLabs() делегированы в diagnosticsLabs
+ * - Добавлен diagnostics.printLabRoom(roomName) как публичный метод
  *
  * ИЗМЕНЕНИЯ v2.0:
- * - Добавлена проверка лаб (_checkLabs):
- *   * lab_blocked      — реагент не поступает давно
- *   * lab_missing_input — реагентов нет в комнате вообще
- *   * lab_output_full  — реактор переполнен, некуда выгружать
- *   * lab_worker_stuck — labWorker завис (определяется через _getStuckInfo)
- *
- * - Добавлена проверка терминала (_checkTerminals):
- *   * terminal_blocked — терминал на cooldown слишком долго
- *   * terminal_full    — терминал заполнен > 90%
- *   * terminal_send_failed — фиксируем в логе (через Logger.warn)
- *   * resource_stuck   — ресурс в терминале не двигается N тиков
- *
- * - Добавлена проверка маркета (_checkMarket):
- *   * market_no_energy    — у терминала нет энергии на сделку
- *   * market_price_warning — цена сделки аномально низкая/высокая
- *   * market_order_failed  — фиксируется при ошибке deal() (через Logger.event)
+ * - Добавлена проверка лаб (_checkLabs)
+ * - Добавлена проверка терминала (_checkTerminals)
+ * - Добавлена проверка маркета (_checkMarket)
  *
  * СОХРАНЕНЫ (без изменений):
- * - _checkCreeps     — зависшие крипы, невалидные ID, deliveryWorker deadlock
- * - _checkFactories  — factory waiting_input, store full, auto recovery
- * - _checkLinks      — link network stalled, auto recovery
+ * - _checkCreeps
+ * - _checkFactories
+ * - _checkLinks
  * - _checkRemoteMiners
  * ===================================================
  */
 
 const Logger = require("./logger");
+const diagnosticsLabs = require("./diagnostics.labs");
 
 // ── КОНСТАНТЫ ──────────────────────────────────────────────────────────────
 
-const RUN_INTERVAL = 50; // проверка каждые 50 тиков
-const STUCK_TICKS = 20; // крип зависший если не двигался N тиков
-const FACTORY_STUCK_TICKS = 100; // фабрика stuck если в waiting_input N тиков
-
-// Лабы: сколько тиков без реагентов считается "blocked"
+const RUN_INTERVAL = 50;
+const STUCK_TICKS = 20;
+const FACTORY_STUCK_TICKS = 100;
 const LAB_BLOCKED_TICKS = 200;
-
-// Терминал: сколько тиков на cooldown считается проблемой
-// (в норме cooldown = 1 тик, это скорее защита от глюков)
 const TERMINAL_COOLDOWN_WARN = 5;
-
-// Терминал: порог заполненности для предупреждения
 const TERMINAL_FULL_PCT = 0.9;
-
-// Маркет: минимум энергии в терминале для сделки
 const TERMINAL_ENERGY_MIN = 20000;
-
-// Ключи конфигов лаб
 const LAB_KEYS = ["labs", "labs2", "labs3", "labs4", "labs5"];
 
 const DELIVERY_STATUS = {
@@ -74,9 +56,9 @@ const diagnostics = {
     this._checkFactories();
     this._checkLinks();
     this._checkRemoteMiners();
-    this._checkLabs(); // NEW v2.0
-    this._checkTerminals(); // NEW v2.0
-    this._checkMarket(); // NEW v2.0
+    this._checkLabs(); // делегируется в diagnostics.labs
+    this._checkTerminals();
+    this._checkMarket();
 
     const duration = Game.cpu.getUsed() - startCpu;
     Logger.diag("Diagnostics", "проверка завершена", {
@@ -96,8 +78,8 @@ const diagnostics = {
     this._checkRoomCreeps(room);
     this._checkRoomFactory(room);
     this._checkRoomLinks(room);
-    this._checkRoomLabs(room); // NEW v2.0
-    this._checkRoomTerminal(room); // NEW v2.0
+    this._checkRoomLabs(room);
+    this._checkRoomTerminal(room);
     console.log(`==============================================\n`);
   },
 
@@ -140,6 +122,12 @@ const diagnostics = {
 
     this._checkCreepIds(creep, true);
     console.log(`=====================================================\n`);
+  },
+
+  // Публичный метод — полный вывод диагностики лаб комнаты
+  // Используется из console.js (labsDiag)
+  printLabRoom: function (roomName) {
+    diagnosticsLabs.printRoom(roomName);
   },
 
   // ══════════════════════════════════════════════════════
@@ -193,7 +181,6 @@ const diagnostics = {
       },
     );
 
-    // AUTO RECOVERY: сбрасываем память зависшего deliveryWorker
     if (
       creep.memory.role === "test_deliveryWorker" &&
       info.ticks >= STUCK_TICKS * 2
@@ -213,18 +200,11 @@ const diagnostics = {
     }
   },
 
-  /**
-   * Определяет завис ли крип.
-   * Отслеживает позицию И изменение store (несёт ресурс — значит работает).
-   * v2.0: отслеживаем getUsedCapacity() вместо только energy
-   * — иначе labWorker с минералами всегда казался "зависшим".
-   */
   _getStuckInfo: function (creep) {
     if (!creep.memory._diag) {
       creep.memory._diag = {
         x: creep.pos.x,
         y: creep.pos.y,
-        // v2.0: используем getUsedCapacity() — учитываем любой ресурс
         carrying: creep.store.getUsedCapacity(),
         sinceAt: Game.time,
       };
@@ -233,7 +213,6 @@ const diagnostics = {
 
     const d = creep.memory._diag;
     const moved = d.x !== creep.pos.x || d.y !== creep.pos.y;
-    // Изменилось что-то в store (загрузился или разгрузился)
     const carryChanged = creep.store.getUsedCapacity() !== d.carrying;
 
     if (moved || carryChanged) {
@@ -281,10 +260,6 @@ const diagnostics = {
             `невалидный ${field} у ${creep.name}`,
             { field, id: id.slice(-6) },
           );
-        }
-
-        // AUTO RECOVERY: удаляем невалидный ID из памяти
-        if (!verbose) {
           delete creep.memory[field];
           Logger.event(
             "auto_recovery",
@@ -307,11 +282,9 @@ const diagnostics = {
       Memory.empire.logistics &&
       Memory.empire.logistics.deliveries &&
       Memory.empire.logistics.deliveries[a.roomName];
-
     if (!list) return;
 
     const delivery = list.find(d => d.createdAt === a.deliveryId);
-
     if (!delivery) {
       Logger.warn("Diagnostics", "deadlock: delivery not found", {
         creep: creep.name,
@@ -324,8 +297,6 @@ const diagnostics = {
         `delivery не найдена у ${creep.name}`,
         { deliveryId: a.deliveryId },
       );
-
-      // AUTO RECOVERY: сбрасываем невалидное assignment
       delete creep.memory.deliveryAssignment;
       creep.memory.deliveryState = "idle";
       Logger.event(
@@ -336,7 +307,6 @@ const diagnostics = {
       return;
     }
 
-    // Крип несёт ресурс но цель переполнена
     const state = creep.memory.deliveryState;
     if (
       (state === "cycle_deliver" || state === "deliver") &&
@@ -384,7 +354,6 @@ const diagnostics = {
   _checkFactories: function () {
     const factoryRooms =
       Memory.empire && Memory.empire.factory ? Memory.empire.factory.rooms : {};
-
     for (const roomName in factoryRooms) {
       const room = Game.rooms[roomName];
       if (!room) continue;
@@ -396,7 +365,6 @@ const diagnostics = {
     const factory = room.find(FIND_MY_STRUCTURES, {
       filter: s => s.structureType === STRUCTURE_FACTORY,
     })[0];
-
     if (!factory) return;
 
     const factoryData =
@@ -404,7 +372,6 @@ const diagnostics = {
       Memory.empire.factory &&
       Memory.empire.factory.rooms &&
       Memory.empire.factory.rooms[room.name];
-
     if (!factoryData) return;
 
     const status = factoryData.status;
@@ -421,8 +388,6 @@ const diagnostics = {
         `waiting_input ${stuckTicks} тиков`,
         { energy: factory.store[RESOURCE_ENERGY] || 0 },
       );
-
-      // AUTO RECOVERY
       factoryData.status = "queued";
       factoryData.updatedAt = Game.time;
       Logger.event(
@@ -470,7 +435,6 @@ const diagnostics = {
     const links = room.find(FIND_MY_STRUCTURES, {
       filter: s => s.structureType === STRUCTURE_LINK,
     });
-
     if (links.length < 2) return;
 
     const fullLinks = links.filter(
@@ -493,8 +457,6 @@ const diagnostics = {
         fullLinks: fullLinks.length,
         emptyLinks: emptyLinks.length,
       });
-
-      // AUTO RECOVERY
       if (fullLinks[0].cooldown === 0) {
         fullLinks[0].transferEnergy(emptyLinks[0]);
         Logger.event("auto_recovery", room.name, "link transfer инициирован");
@@ -521,7 +483,6 @@ const diagnostics = {
     const miners = Object.values(Game.creeps).filter(
       c => c.memory.role === "test_remoteMiner",
     );
-
     for (const miner of miners) {
       if (miner.memory.target && miner.room.name !== miner.memory.target) {
         const stuck = this._getStuckInfo(miner);
@@ -541,7 +502,6 @@ const diagnostics = {
         }
         continue;
       }
-
       if (miner.memory.sourceId && !Game.getObjectById(miner.memory.sourceId)) {
         Logger.warn("Diagnostics", "remote miner invalid sourceId", {
           name: miner.name,
@@ -557,172 +517,25 @@ const diagnostics = {
   },
 
   // ══════════════════════════════════════════════════════
-  // ПРОВЕРКИ ЛАБ [NEW v2.0]
+  // ПРОВЕРКИ ЛАБ — делегируется в diagnostics.labs.js
   // ══════════════════════════════════════════════════════
 
-  /**
-   * Перебирает все свои комнаты с конфигами лаб.
-   * Проверяет каждую тройку на наличие реагентов, переполнение реактора,
-   * зависших labWorker'ов.
-   */
   _checkLabs: function () {
-    for (const roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
-      if (!room.controller || !room.controller.my) continue;
-
-      // Есть ли вообще конфиги лаб?
-      const hasConfig = LAB_KEYS.some(
-        k => room.memory[k] && room.memory[k].product,
-      );
-      if (!hasConfig) continue;
-
-      this._checkRoomLabs(room);
-    }
+    diagnosticsLabs.run();
   },
 
-  /**
-   * Проверяет лабы конкретной комнаты.
-   * Вызывается как автоматически так и из checkRoom().
-   *
-   * @param {Room} room
-   */
   _checkRoomLabs: function (room) {
-    const roomName = room.name;
-    const mem = room.memory;
-
-    for (const key of LAB_KEYS) {
-      const config = mem[key];
-      if (!config || !config.product) continue;
-
-      const lab1 = Game.getObjectById(config.lab1);
-      const lab2 = Game.getObjectById(config.lab2);
-      const reactor = Game.getObjectById(config.reactor);
-
-      // Лабы не найдены — ошибка конфига
-      if (!lab1 || !lab2 || !reactor) {
-        Logger.warn("Diagnostics", "lab config error: structure not found", {
-          room: roomName,
-          slot: key,
-        });
-        Logger.event(
-          "lab_blocked",
-          roomName,
-          `[${key}] структура не найдена (проверьте ID в конфиге)`,
-          { slot: key, product: config.product },
-        );
-        continue;
-      }
-
-      // ── Проверка: нет реагентов (lab_missing_input) ───────────────────
-      // Смотрим в самих лабах — если пусто, это проблема
-      const r1InLab = lab1.store[config.reagent1] || 0;
-      const r2InLab = lab2.store[config.reagent2] || 0;
-
-      if (r1InLab === 0) {
-        Logger.event(
-          "lab_missing_input",
-          roomName,
-          `[${key}] нет реагента ${config.reagent1} в L1`,
-          { slot: key, reagent: config.reagent1, inLab: 0 },
-        );
-      }
-
-      if (r2InLab === 0) {
-        Logger.event(
-          "lab_missing_input",
-          roomName,
-          `[${key}] нет реагента ${config.reagent2} в L2`,
-          { slot: key, reagent: config.reagent2, inLab: 0 },
-        );
-      }
-
-      // ── Проверка: реакция заблокирована давно (lab_blocked) ───────────
-      // Используем labController — если статус waiting_input слишком долго
-      const lcData =
-        Memory.empire &&
-        Memory.empire.labController &&
-        Memory.empire.labController.rooms &&
-        Memory.empire.labController.rooms[roomName];
-
-      if (lcData && lcData.slots) {
-        const slot = lcData.slots.find(s => s.slot === key);
-        if (slot && slot.status === "waiting_input") {
-          // Проверяем как давно обновлялись данные
-          const stuckSince = lcData.updatedAt || Game.time;
-          const stuckTicks = Game.time - stuckSince;
-
-          if (stuckTicks > LAB_BLOCKED_TICKS) {
-            Logger.warn("Diagnostics", "lab blocked: waiting_input too long", {
-              room: roomName,
-              slot: key,
-              product: config.product,
-              ticks: stuckTicks,
-              missing: (slot.missing || []).join(","),
-            });
-            Logger.event(
-              "lab_blocked",
-              roomName,
-              `[${key}] ${config.product} blocked ${stuckTicks} тиков`,
-              { slot: key, missing: (slot.missing || []).join(",") },
-            );
-          }
-        }
-      }
-
-      // ── Проверка: реактор переполнен (lab_output_full) ────────────────
-      // Реактор заполнен продуктом > 2500 — labWorker не выгружает
-      const productInReactor = reactor.store[config.product] || 0;
-      const reactorCap = reactor.store.getCapacity(config.product) || 3000;
-
-      if (productInReactor > reactorCap * 0.85) {
-        Logger.warn("Diagnostics", "lab output full", {
-          room: roomName,
-          slot: key,
-          product: config.product,
-          amount: productInReactor,
-          cap: reactorCap,
-        });
-        Logger.event(
-          "lab_output_full",
-          roomName,
-          `[${key}] реактор почти полный: ${productInReactor}/${reactorCap} ${config.product}`,
-          { slot: key, product: config.product, amount: productInReactor },
-        );
-      }
-    }
-
-    // ── Проверка: labWorker завис (lab_worker_stuck) ───────────────────
-    // Ищем крипов с ролью labWorker в этой комнате
-    const labWorkers = Object.values(Game.creeps).filter(
-      c => c.memory.role === "labWorker" && c.room.name === roomName,
-    );
-
-    for (const worker of labWorkers) {
-      const stuck = this._getStuckInfo(worker);
-      if (stuck && stuck.ticks >= STUCK_TICKS) {
-        Logger.warn("Diagnostics", "lab worker stuck", {
-          name: worker.name,
-          room: roomName,
-          task: worker.memory.task || "—",
-          ticks: stuck.ticks,
-        });
-        Logger.event(
-          "lab_worker_stuck",
-          roomName,
-          `${worker.name} завис ${stuck.ticks} тиков`,
-          { task: worker.memory.task, ticks: stuck.ticks },
-        );
-      }
-    }
+    // Краткая сводка при вызове checkRoom()
+    const { status, reasons } = diagnosticsLabs.getRoomStatus(room.name);
+    const icon = { OK: "✅", WARN: "⚠️ ", ERROR: "❌" };
+    console.log(`  Labs: ${icon[status]} ${status}`);
+    for (const r of reasons) console.log(`    ${r}`);
   },
 
   // ══════════════════════════════════════════════════════
-  // ПРОВЕРКИ ТЕРМИНАЛА [NEW v2.0]
+  // ПРОВЕРКИ ТЕРМИНАЛА (без изменений v2.0)
   // ══════════════════════════════════════════════════════
 
-  /**
-   * Перебирает все свои комнаты с терминалами.
-   */
   _checkTerminals: function () {
     for (const roomName in Game.rooms) {
       const room = Game.rooms[roomName];
@@ -732,12 +545,6 @@ const diagnostics = {
     }
   },
 
-  /**
-   * Проверяет терминал конкретной комнаты.
-   * Вызывается как автоматически так и из checkRoom().
-   *
-   * @param {Room} room
-   */
   _checkRoomTerminal: function (room) {
     const roomName = room.name;
     const term = room.terminal;
@@ -747,7 +554,6 @@ const diagnostics = {
     const cap = term.store.getCapacity();
     const pct = used / cap;
 
-    // ── Переполнен (terminal_full) ────────────────────────────────────────
     if (pct > TERMINAL_FULL_PCT) {
       Logger.warn("Diagnostics", "terminal nearly full", {
         room: roomName,
@@ -763,9 +569,6 @@ const diagnostics = {
       );
     }
 
-    // ── Cooldown слишком долго (terminal_blocked) ──────────────────────
-    // В норме cooldown сбрасывается за 1 тик.
-    // Мы проверяем только если cooldown > порога — это значит что-то идёт не так.
     if (term.cooldown > TERMINAL_COOLDOWN_WARN) {
       Logger.warn("Diagnostics", "terminal high cooldown", {
         room: roomName,
@@ -779,7 +582,6 @@ const diagnostics = {
       );
     }
 
-    // ── Energy reserve (для сделок) ────────────────────────────────────
     const energy = term.store[RESOURCE_ENERGY] || 0;
     if (energy < TERMINAL_ENERGY_MIN) {
       Logger.warn("Diagnostics", "terminal low energy for trades", {
@@ -795,10 +597,8 @@ const diagnostics = {
       );
     }
 
-    // ── Подозрительно большой ресурс (resource_stuck) ─────────────────
-    // Если один ресурс занимает > 50% терминала — возможно он не двигается
     for (const [res, amt] of Object.entries(term.store)) {
-      if (res === RESOURCE_ENERGY) continue; // energy — норма
+      if (res === RESOURCE_ENERGY) continue;
       if (amt > cap * 0.5) {
         Logger.warn("Diagnostics", "resource possibly stuck in terminal", {
           room: roomName,
@@ -825,18 +625,13 @@ const diagnostics = {
   },
 
   // ══════════════════════════════════════════════════════
-  // ПРОВЕРКИ МАРКЕТА [NEW v2.0]
+  // ПРОВЕРКИ МАРКЕТА (без изменений v2.0)
   // ══════════════════════════════════════════════════════
 
-  /**
-   * Проверяет состояние маркета.
-   * Запускается раз в RUN_INTERVAL тиков вместе с остальными проверками.
-   */
   _checkMarket: function () {
     const meta = Memory.empire && Memory.empire.marketMeta;
-    if (!meta) return; // MarketManager ещё не запускался
+    if (!meta) return;
 
-    // ── Данные устарели (market не обновлялся давно) ──────────────────
     const stale = Game.time - (meta.generatedAt || 0) > 300;
     if (stale) {
       Logger.warn("Diagnostics", "market data stale", {
@@ -845,15 +640,12 @@ const diagnostics = {
       });
     }
 
-    // ── Проверяем терминалы всех комнат на энергию для сделок ────────
     for (const roomName in Game.rooms) {
       const room = Game.rooms[roomName];
       if (!room.controller || !room.controller.my) continue;
       if (!room.terminal) continue;
 
       const energy = room.terminal.store[RESOURCE_ENERGY] || 0;
-
-      // Есть sell-интенты но нет энергии для транзакции
       const hasSellIntents =
         Memory.empire &&
         Memory.empire.market &&
@@ -875,11 +667,9 @@ const diagnostics = {
       }
     }
 
-    // ── Проверяем что не продаём критические ресурсы ──────────────────
     const economy = Memory.empire && Memory.empire.economy;
     const sellIntents =
       Memory.empire && Memory.empire.market && Memory.empire.market.sell;
-
     if (economy && sellIntents) {
       for (const intent of sellIntents) {
         const state = economy[intent.resource];

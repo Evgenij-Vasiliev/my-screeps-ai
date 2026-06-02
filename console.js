@@ -2,12 +2,12 @@
  * ===================================================
  * CONSOLE.JS — Ручное управление и диагностика
  * ===================================================
- * VERSION: 3.1
+ * VERSION: 3.2
  *
- * ИЗМЕНЕНИЯ v3.1:
- * - Добавлен terminalWorkers(roomName) — детальный статус
- *   каждого terminalUnloader в комнате: resource, task,
- *   working, from/to, pos, stuck ticks.
+ * ИЗМЕНЕНИЯ v3.2:
+ * - Добавлена команда labsDiag(roomName) — полный аудит лаб через diagnostics.labs.js
+ * - roomHealth() обновлён: контур Labs использует diagnosticsLabs.getRoomStatus()
+ * - Убрана дублирующая логика лаб — всё через diagnostics.labs.js
  *
  * КОМАНДЫ ДИАГНОСТИКИ:
  *   empire()                    — сводка по всей империи
@@ -17,11 +17,12 @@
  *   factory('E35S37')           — состояние фабрики
  *   links('E35S37')             — состояние линков
  *   logistics()                 — все активные deliveries
- *   labs('E35S37')              — состояние лаб и реакций
+ *   labs('E35S37')              — краткий статус лаб
+ *   labsDiag('E35S37')          — полный аудит лаб [NEW v3.2]
  *   terminal('E35S37')          — содержимое терминала
  *   market()                    — buy/sell интенты
  *   balance()                   — баланс ресурсов
- *   terminalWorkers('E35S37')   — статус terminalUnloader'ов [NEW v3.1]
+ *   terminalWorkers('E35S37')   — статус terminalUnloader'ов
  *   history()                   — последние 20 событий
  *   history('E35S37')           — события комнаты
  *   history('E35S37', 10)       — последние N событий
@@ -42,6 +43,7 @@
 
 const Logger = require("./logger");
 const diagnostics = require("./diagnostics");
+const diagnosticsLabs = require("./diagnostics.labs");
 
 // ══════════════════════════════════════════════════════
 // ДИАГНОСТИКА — БАЗОВЫЕ КОМАНДЫ
@@ -262,17 +264,9 @@ global.empire = function () {
 };
 
 // ══════════════════════════════════════════════════════
-// НОВЫЕ КОМАНДЫ v3.0
+// LABS — КРАТКИЙ СТАТУС
 // ══════════════════════════════════════════════════════
 
-// ── LABS ──────────────────────────────────────────────────────────────────
-
-/**
- * Показать статус лаб в комнате.
- *
- * @param {string} roomName
- * @example labs('E35S37')
- */
 global.labs = function (roomName) {
   const r = Game.rooms[roomName];
   if (!r) {
@@ -290,7 +284,6 @@ global.labs = function (roomName) {
   for (const key of LAB_KEYS) {
     const config = mem[key];
     if (!config || !config.product) continue;
-
     hasAny = true;
 
     const lab1 = Game.getObjectById(config.lab1);
@@ -298,33 +291,34 @@ global.labs = function (roomName) {
     const reactor = Game.getObjectById(config.reactor);
 
     console.log(
-      `\n  [${key}] Реакция: ${config.reagent1} + ${config.reagent2} → ${config.product}`,
+      `\n  [${key}] ${config.reagent1} + ${config.reagent2} → ${config.product}`,
     );
 
     if (!lab1) {
-      console.log(`    L1 (input ${config.reagent1}): ❌ не найдена`);
+      console.log(`    L1 (${config.reagent1}): ❌ не найдена`);
     } else {
       const amount = lab1.store[config.reagent1] || 0;
       const icon = amount > 500 ? "✅" : amount > 0 ? "⚠️ " : "❌";
-      console.log(`    L1 input ${config.reagent1}: ${icon} ${amount}`);
+      console.log(`    L1 ${config.reagent1}: ${icon} ${amount}`);
     }
 
     if (!lab2) {
-      console.log(`    L2 (input ${config.reagent2}): ❌ не найдена`);
+      console.log(`    L2 (${config.reagent2}): ❌ не найдена`);
     } else {
       const amount = lab2.store[config.reagent2] || 0;
       const icon = amount > 500 ? "✅" : amount > 0 ? "⚠️ " : "❌";
-      console.log(`    L2 input ${config.reagent2}: ${icon} ${amount}`);
+      console.log(`    L2 ${config.reagent2}: ${icon} ${amount}`);
     }
 
     if (!reactor) {
-      console.log(`    L3 (output ${config.product}): ❌ не найдена`);
+      console.log(`    L3 (${config.product}): ❌ не найдена`);
     } else {
       const productAmt = reactor.store[config.product] || 0;
-      const cooldown = reactor.cooldown || 0;
       const icon = productAmt > 0 ? "✅" : "⏳";
       console.log(
-        `    L3 output ${config.product}: ${icon} ${productAmt} | cooldown: ${cooldown}`,
+        `    L3 ${config.product}: ${icon} ${productAmt} | cooldown: ${
+          reactor.cooldown || 0
+        }`,
       );
     }
 
@@ -356,13 +350,13 @@ global.labs = function (roomName) {
 
   if (!hasAny) {
     console.log(`  Конфиги лаб не найдены.`);
-    console.log(
-      `  Настройте через: Memory.rooms['${roomName}'].labs = { ... }`,
-    );
   }
 
   const workers = Object.values(Game.creeps).filter(
-    c => c.memory.role === "labWorker" && c.room.name === roomName,
+    c =>
+      c.memory.role &&
+      c.memory.role.toLowerCase().includes("labworker") &&
+      c.room.name === roomName,
   );
   if (workers.length > 0) {
     console.log(`\n  LabWorkers: ${workers.length}`);
@@ -378,14 +372,33 @@ global.labs = function (roomName) {
   console.log(`========================================\n`);
 };
 
-// ── TERMINAL ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// LABS DIAG — ПОЛНЫЙ АУДИТ [NEW v3.2]
+// ══════════════════════════════════════════════════════
 
 /**
- * Показать содержимое терминала в комнате.
+ * Полный аудит цепочки лабораторий в комнате.
+ * Использует diagnostics.labs.js — логика не дублируется.
+ *
+ * Показывает:
+ *   - конфиг тройки
+ *   - состояние лабораторий
+ *   - наличие реагентов
+ *   - состояние labWorker
+ *   - активную задачу
+ *   - анализ цепочки A→H
  *
  * @param {string} roomName
- * @example terminal('E35S37')
+ * @example labsDiag('E35S39')
  */
+global.labsDiag = function (roomName) {
+  diagnosticsLabs.printRoom(roomName);
+};
+
+// ══════════════════════════════════════════════════════
+// TERMINAL
+// ══════════════════════════════════════════════════════
+
 global.terminal = function (roomName) {
   const r = Game.rooms[roomName];
   if (!r) {
@@ -436,13 +449,10 @@ global.terminal = function (roomName) {
   console.log(`==========================================\n`);
 };
 
-// ── MARKET ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// MARKET
+// ══════════════════════════════════════════════════════
 
-/**
- * Показать текущие buy/sell интенты MarketManager.
- *
- * @example market()
- */
 global.market = function () {
   console.log(`\n========== МАРКЕТ ==========`);
   console.log(`  Credits: ${Math.round(Game.market.credits)}`);
@@ -487,7 +497,6 @@ global.market = function () {
   if (orderList.length > 0) {
     const buys = orderList.filter(o => o.type === ORDER_BUY);
     const sells = orderList.filter(o => o.type === ORDER_SELL);
-
     if (buys.length > 0) {
       console.log(`  BUY:`);
       for (const o of buys) {
@@ -530,13 +539,10 @@ global.market = function () {
   console.log(`============================\n`);
 };
 
-// ── BALANCE ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// BALANCE
+// ══════════════════════════════════════════════════════
 
-/**
- * Показать межкомнатный баланс ключевых ресурсов.
- *
- * @example balance()
- */
 global.balance = function () {
   const BALANCE_RESOURCES = [
     RESOURCE_ENERGY,
@@ -622,25 +628,9 @@ global.balance = function () {
 };
 
 // ══════════════════════════════════════════════════════
-// НОВАЯ КОМАНДА v3.1 — TERMINAL WORKERS
+// TERMINAL WORKERS
 // ══════════════════════════════════════════════════════
 
-/**
- * Показать детальный статус каждого terminalUnloader в комнате.
- *
- * Выводит для каждого крипа:
- *   - resource   — какой ресурс несёт
- *   - working    — в режиме доставки или нет
- *   - task       — текущая задача (energy_to_storage / load_terminal / unload_terminal)
- *   - from/to    — откуда берёт и куда несёт
- *   - pos        — текущая позиция
- *   - stuck      — сколько тиков не двигается (из _diag)
- *
- * @param {string} roomName
- *
- * @example
- * terminalWorkers('E35S37')
- */
 global.terminalWorkers = function (roomName) {
   const r = Game.rooms[roomName];
   if (!r) {
@@ -648,8 +638,6 @@ global.terminalWorkers = function (roomName) {
     return;
   }
 
-  // Ищем всех terminalUnloader'ов в комнате
-  // Роль может называться 'test_terminalUnloader' или 'terminalUnloader'
   const workers = Object.values(Game.creeps).filter(
     c =>
       c.room.name === roomName &&
@@ -669,10 +657,8 @@ global.terminalWorkers = function (roomName) {
     const w = workers[i];
     const mem = w.memory;
 
-    // Определяем from/to по задаче
     let from = "—";
     let to = "—";
-
     if (mem.task === "energy_to_storage") {
       from = "terminal";
       to = "storage";
@@ -684,23 +670,18 @@ global.terminalWorkers = function (roomName) {
       to = "storage";
     }
 
-    // Считаем stuck ticks из _diag (та же логика что в diagnostics.js)
     let stuckTicks = 0;
     if (mem._diag) {
       const d = mem._diag;
       const moved = d.x !== w.pos.x || d.y !== w.pos.y;
       const carryChanged = w.store.getUsedCapacity() !== d.carrying;
-      if (!moved && !carryChanged) {
+      if (!moved && !carryChanged)
         stuckTicks = Game.time - (d.sinceAt || Game.time);
-      }
     }
 
-    // Определяем иконку состояния
     const stuckIcon = stuckTicks > 50 ? "🔴" : stuckTicks > 20 ? "🟡" : "🟢";
 
     console.log(`\n  TU-${i + 1} [${w.name}]`);
-
-    // Если крип ничего не делает
     if (!mem.task && !mem.working && w.store.getUsedCapacity() === 0) {
       console.log(`  idle`);
     } else {
@@ -714,15 +695,11 @@ global.terminalWorkers = function (roomName) {
         `  store    : ${w.store.getUsedCapacity()}/${w.store.getCapacity()}`,
       );
       console.log(`  stuck    : ${stuckIcon} ${stuckTicks} тиков`);
-
-      // Показываем transferred если есть (для load_terminal)
-      if (mem.transferred !== undefined) {
+      if (mem.transferred !== undefined)
         console.log(`  transferred: ${mem.transferred}`);
-      }
     }
   }
 
-  // Итог по комнате
   const stuck = workers.filter(w => {
     if (!w.memory._diag) return false;
     const d = w.memory._diag;
@@ -737,26 +714,17 @@ global.terminalWorkers = function (roomName) {
   console.log(`==========================================\n`);
 };
 
-// ── ИСТОРИЯ СОБЫТИЙ ───────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// ИСТОРИЯ СОБЫТИЙ
+// ══════════════════════════════════════════════════════
 
-/**
- * @param {string} roomName — фильтр по комнате (опционально)
- * @param {number} limit    — сколько последних (default 20)
- *
- * @example
- * history()
- * history('E35S37')
- * history('E35S37', 10)
- */
 global.history = function (roomName, limit) {
   const events = Logger.getEvents(roomName || null, limit || 20);
-
   const title = roomName
     ? `ИСТОРИЯ: ${roomName} (последние ${events.length})`
     : `ИСТОРИЯ ИМПЕРИИ (последние ${events.length})`;
 
   console.log(`\n========== ${title} ==========`);
-
   if (events.length === 0) {
     console.log("  нет событий");
   } else {
@@ -774,14 +742,10 @@ global.history = function (roomName, limit) {
   console.log(`================================================\n`);
 };
 
-// ── ЗДОРОВЬЕ КОМНАТЫ ─────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// ROOM HEALTH — обновлён v3.2: Labs через diagnosticsLabs
+// ══════════════════════════════════════════════════════
 
-/**
- * Быстрый статус комнаты: OK / WARN / ERROR по каждому контуру.
- *
- * @param {string} roomName
- * @example roomHealth('E35S37')
- */
 global.roomHealth = function (roomName) {
   const r = Game.rooms[roomName];
   if (!r) {
@@ -790,6 +754,7 @@ global.roomHealth = function (roomName) {
   }
 
   const checks = {};
+  const details = {};
 
   // ── Storage ──────────────────────────────────────────
   if (!r.storage) {
@@ -814,21 +779,16 @@ global.roomHealth = function (roomName) {
     Memory.empire.factory &&
     Memory.empire.factory.rooms &&
     Memory.empire.factory.rooms[roomName];
-
   if (!factoryData) {
     checks.Factory = "ERROR";
   } else {
     const status = factoryData.status;
     const stuckTicks = Game.time - (factoryData.updatedAt || Game.time);
-    if (status === "error") {
-      checks.Factory = "ERROR";
-    } else if (status === "waiting_input" && stuckTicks > 100) {
+    if (status === "error") checks.Factory = "ERROR";
+    else if (status === "waiting_input" && stuckTicks > 100)
       checks.Factory = "WARN";
-    } else if (status === "idle" && !factoryData.task) {
-      checks.Factory = "WARN";
-    } else {
-      checks.Factory = "OK";
-    }
+    else if (status === "idle" && !factoryData.task) checks.Factory = "WARN";
+    else checks.Factory = "OK";
   }
 
   // ── Delivery ─────────────────────────────────────────
@@ -837,7 +797,6 @@ global.roomHealth = function (roomName) {
     Memory.empire.logistics &&
     Memory.empire.logistics.deliveries &&
     Memory.empire.logistics.deliveries[roomName];
-
   if (!deliveries) {
     checks.Delivery = "WARN";
   } else {
@@ -859,7 +818,6 @@ global.roomHealth = function (roomName) {
   const links = r.find(FIND_MY_STRUCTURES, {
     filter: s => s.structureType === STRUCTURE_LINK,
   });
-
   if (links.length === 0) {
     checks.Links = "WARN";
   } else {
@@ -883,30 +841,11 @@ global.roomHealth = function (roomName) {
   );
   checks.Remote = remoteMiners.length > 0 ? "OK" : "WARN";
 
-  // ── Labs ─────────────────────────────────────────────
-  const lcData =
-    Memory.empire &&
-    Memory.empire.labController &&
-    Memory.empire.labController.rooms &&
-    Memory.empire.labController.rooms[roomName];
-
-  const LAB_KEYS = ["labs", "labs2", "labs3", "labs4", "labs5"];
-  const hasLabConfig = LAB_KEYS.some(k => r.memory[k] && r.memory[k].product);
-
-  if (!hasLabConfig) {
-    checks.Labs = "WARN";
-  } else if (!lcData) {
-    checks.Labs = "WARN";
-  } else {
-    const status = lcData.status;
-    if (status === "error") {
-      checks.Labs = "ERROR";
-    } else if (status === "waiting_input") {
-      checks.Labs = "WARN";
-    } else {
-      checks.Labs = "OK";
-    }
-  }
+  // ── Labs [ОБНОВЛЕНО v3.2] ────────────────────────────
+  // Используем diagnosticsLabs.getRoomStatus() — логика не дублируется
+  const labsResult = diagnosticsLabs.getRoomStatus(roomName);
+  checks.Labs = labsResult.status;
+  details.Labs = labsResult.reasons;
 
   // ── Market ───────────────────────────────────────────
   const marketMeta = Memory.empire && Memory.empire.marketMeta;
@@ -914,11 +853,11 @@ global.roomHealth = function (roomName) {
     checks.Market = "WARN";
   } else {
     const stale = Game.time - (marketMeta.generatedAt || 0) > 200;
-    if (stale) {
-      checks.Market = "WARN";
-    } else {
-      checks.Market = marketMeta.criticalBuyCount > 0 ? "WARN" : "OK";
-    }
+    checks.Market = stale
+      ? "WARN"
+      : marketMeta.criticalBuyCount > 0
+      ? "WARN"
+      : "OK";
   }
 
   // ── Balance ──────────────────────────────────────────
@@ -935,12 +874,18 @@ global.roomHealth = function (roomName) {
   console.log(`──────────────────`);
   for (const [name, status] of Object.entries(checks)) {
     console.log(`  ${icon[status]} ${name.padEnd(10)}: ${status}`);
+    // Детали для Labs
+    if (details[name] && details[name].length > 0) {
+      for (const reason of details[name]) {
+        console.log(`    · ${reason}`);
+      }
+    }
   }
   console.log(`──────────────────\n`);
 };
 
 // ══════════════════════════════════════════════════════
-// РУЧНОЕ УПРАВЛЕНИЕ
+// РУЧНОЕ УПРАВЛЕНИЕ (без изменений)
 // ══════════════════════════════════════════════════════
 
 global.deliver = function (roomName, resource, target, targetLabId, amount) {
@@ -948,11 +893,9 @@ global.deliver = function (roomName, resource, target, targetLabId, amount) {
     console.log("❌ logistics не инициализирована");
     return;
   }
-
   if (!Memory.empire.logistics.deliveries[roomName]) {
     Memory.empire.logistics.deliveries[roomName] = [];
   }
-
   Memory.empire.logistics.deliveries[roomName].push({
     resource,
     target,
@@ -964,7 +907,6 @@ global.deliver = function (roomName, resource, target, targetLabId, amount) {
     updatedAt: Game.time,
     assignedTo: null,
   });
-
   Logger.event(
     "delivery_created",
     roomName,
@@ -975,16 +917,6 @@ global.deliver = function (roomName, resource, target, targetLabId, amount) {
   );
 };
 
-/**
- * Ручная отправка ресурса через terminal.
- *
- * @param {string} fromRoom
- * @param {string} toRoom
- * @param {string} resource
- * @param {number} amount
- *
- * @example sendResource('E35S37', 'E37S37', 'KH', 3000)
- */
 global.sendResource = function (fromRoom, toRoom, resource, amount) {
   const r = Game.rooms[fromRoom];
   if (!r) {
@@ -997,7 +929,6 @@ global.sendResource = function (fromRoom, toRoom, resource, amount) {
     console.log(`❌ терминал в ${fromRoom} не найден`);
     return;
   }
-
   if (term.cooldown > 0) {
     console.log(`❌ терминал на cooldown: ${term.cooldown} тиков`);
     return;
@@ -1037,14 +968,12 @@ global.clearCreep = function (creepName) {
     console.log(`❌ крип ${creepName} не найден`);
     return;
   }
-
   delete creep.memory.deliveryAssignment;
   delete creep.memory.deliveryState;
   delete creep.memory.task;
   delete creep.memory.taskTargetId;
   delete creep.memory.working;
   delete creep.memory._diag;
-
   Logger.event("manual_reset", creep.room.name, `сброс памяти ${creepName}`);
   console.log(`✅ память крипа ${creepName} сброшена`);
 };
@@ -1058,13 +987,11 @@ global.resetFactory = function (roomName) {
     console.log("❌ factory data не найдена");
     return;
   }
-
   const data = Memory.empire.factory.rooms[roomName];
   if (!data) {
     console.log(`❌ фабрика ${roomName} не найдена`);
     return;
   }
-
   data.status = "queued";
   data.updatedAt = Game.time;
   Logger.event("manual_reset", roomName, "factory сброшена в queued");
@@ -1076,7 +1003,6 @@ global.resetRoom = function (roomName) {
     console.log("❌ logistics не инициализирована");
     return;
   }
-
   Memory.empire.logistics.deliveries[roomName] = [];
   Logger.event("manual_reset", roomName, "deliveries очищены");
   console.log(`✅ deliveries для ${roomName} очищены`);
@@ -1088,18 +1014,15 @@ global.killDelivery = function (roomName, deliveryId) {
     Memory.empire.logistics &&
     Memory.empire.logistics.deliveries &&
     Memory.empire.logistics.deliveries[roomName];
-
   if (!list) {
     console.log(`❌ нет deliveries для ${roomName}`);
     return;
   }
-
   const d = list.find(d => d.createdAt === deliveryId);
   if (!d) {
     console.log(`❌ delivery ${deliveryId} не найдена`);
     return;
   }
-
   d.status = "cancelled";
   d.updatedAt = Game.time;
   Logger.event(
@@ -1116,7 +1039,6 @@ global.setFactoryProduct = function (roomName, product) {
     console.log(`❌ комната ${roomName} недоступна`);
     return;
   }
-
   room.memory.factoryProduct = product;
   Logger.event(
     "factory_config",
@@ -1126,10 +1048,6 @@ global.setFactoryProduct = function (roomName, product) {
   console.log(`✅ фабрика ${roomName}: продукт установлен → ${product}`);
 };
 
-// ══════════════════════════════════════════════════════
-// ЛОГГЕР
-// ══════════════════════════════════════════════════════
-
 global.diagOn = function () {
   Logger.diagOn();
 };
@@ -1138,8 +1056,197 @@ global.diagOff = function () {
 };
 
 // ══════════════════════════════════════════════════════
-// АВТОРЕФИЛЛ
+// LAB SUPPLY — Аудит межкомнатной доставки реагентов [NEW v3.2]
 // ══════════════════════════════════════════════════════
+
+/**
+ * Аудит цепочки межкомнатной доставки лабораторных реагентов.
+ * Определяет на каком этапе (A–F) разрывается доставка.
+ *
+ * Коды разрыва:
+ *   A = Planner не создал need
+ *   B = ResourceBalancer не нашёл донора
+ *   C = ResourceBalancer не создал transfer
+ *   D = TerminalManager не обработал transfer (stuck: waiting_terminal)
+ *   E = Ресурс не прибыл в целевую комнату
+ *   F = Ресурс прибыл, но не используется LabWorker
+ *
+ * @example labSupply()
+ */
+global.labSupply = function () {
+  const RESOURCES = ["H", "O", "KH", "OH", "UO", "KHO2", "UH2O"];
+
+  const myRooms = Object.values(Game.rooms).filter(
+    r => r.controller && r.controller.my,
+  );
+
+  const planner = Memory.labPlanner;
+  const balancer = Memory.empire && Memory.empire.balancer;
+  const logistics =
+    Memory.empire &&
+    Memory.empire.logistics &&
+    Memory.empire.logistics.deliveries;
+
+  // Итоговая таблица результатов
+  const results = {};
+
+  console.log("\n" + "=".repeat(54));
+  console.log("LAB SUPPLY AUDIT   тик: " + Game.time);
+  console.log("=".repeat(54));
+
+  for (const res of RESOURCES) {
+    // ── Считаем сток по всей империи ───────────────────
+    let empireTotal = 0;
+    const roomAmounts = {};
+
+    for (const r of myRooms) {
+      const inStorage = (r.storage && r.storage.store[res]) || 0;
+      const inTerminal = (r.terminal && r.terminal.store[res]) || 0;
+      const total = inStorage + inTerminal;
+      roomAmounts[r.name] = total;
+      empireTotal += total;
+    }
+
+    // ── Planner ────────────────────────────────────────
+    const plannerNeed = planner && planner.needs && planner.needs.includes(res);
+
+    // ── Balancer ───────────────────────────────────────
+    // Ищем transfer для этого ресурса
+    const transfers = (balancer && balancer.transfers) || [];
+    const resTransfer = transfers.find(t => t.resource === res);
+    const balancerDonor = resTransfer ? resTransfer.from : null;
+    const balancerReceiver = resTransfer ? resTransfer.to : null;
+
+    // ── Logistics (waiting_terminal) ───────────────────
+    // Ищем delivery со статусом waiting_terminal для этого ресурса
+    let terminalQueued = false;
+    let terminalStuck = false;
+    let stuckRoom = null;
+    let stuckAge = 0;
+
+    if (logistics) {
+      for (const [roomName, list] of Object.entries(logistics)) {
+        for (const d of list) {
+          if (d.resource !== res) continue;
+          if (d.status === "waiting_terminal") {
+            terminalQueued = true;
+            const age = Game.time - (d.createdAt || Game.time);
+            if (age > stuckAge) {
+              stuckAge = age;
+              stuckRoom = roomName;
+              terminalStuck = age > 100; // застрял если > 100 тиков
+            }
+          }
+        }
+      }
+    }
+
+    // ── Определяем код разрыва ─────────────────────────
+    let breakCode = null;
+    let breakReason = "";
+
+    if (!plannerNeed && empireTotal > 3000) {
+      // Planner не считает нужным — stock достаточен
+      breakCode = "A";
+      breakReason = "Planner не создал need (stock достаточен)";
+    } else if (terminalStuck) {
+      // Delivery зависла в waiting_terminal — TerminalManager не обработал
+      breakCode = "D";
+      breakReason = `waiting_terminal ${stuckAge} тиков в ${stuckRoom}`;
+    } else if (terminalQueued) {
+      // Delivery есть, но ещё не долго
+      breakCode = "D";
+      breakReason = `waiting_terminal в ${stuckRoom} (${stuckAge} тиков)`;
+    } else if (!balancerDonor && empireTotal === 0) {
+      // Ресурса нет нигде — балансер не может найти донора
+      breakCode = "B";
+      breakReason = "нет донора (ресурс отсутствует в империи)";
+    } else if (!resTransfer && empireTotal > 0) {
+      // Ресурс есть, но transfer не создан
+      breakCode = "C";
+      breakReason = "Balancer не создал transfer";
+    } else if (resTransfer && balancerReceiver) {
+      const receiverAmt = roomAmounts[balancerReceiver] || 0;
+      if (receiverAmt === 0) {
+        breakCode = "E";
+        breakReason = `transfer есть, но ресурс не прибыл в ${balancerReceiver}`;
+      } else {
+        breakCode = "F";
+        breakReason = `ресурс прибыл в ${balancerReceiver}, worker не использует`;
+      }
+    } else {
+      breakCode = "?";
+      breakReason = "недостаточно данных";
+    }
+
+    // ── Вывод блока ────────────────────────────────────
+    console.log("\n" + "=".repeat(50));
+    console.log("RESOURCE: " + res);
+    console.log("=".repeat(50));
+    console.log("\nEmpire Total: " + empireTotal);
+    console.log("");
+    for (const r of myRooms) {
+      const amt = roomAmounts[r.name] || 0;
+      const flag = amt === 0 ? "❌" : amt < 500 ? "⚠️ " : "✅";
+      console.log(`  ${flag} ${r.name}: ${amt}`);
+    }
+
+    console.log("\nPlanner:");
+    console.log(`  need = ${plannerNeed ? "true" : "false"}`);
+
+    console.log("\nBalancer:");
+    console.log(`  donor    = ${balancerDonor || "null"}`);
+    console.log(`  receiver = ${balancerReceiver || "null"}`);
+
+    console.log("\nTransfer:");
+    console.log(`  exists = ${resTransfer ? "true" : "false"}`);
+    if (resTransfer) {
+      console.log(
+        `  ${resTransfer.from} → ${resTransfer.to}  status=${
+          resTransfer.status || "—"
+        }  amount=${resTransfer.amount || "—"}`,
+      );
+    }
+
+    console.log("\nTerminal:");
+    console.log(`  queued = ${terminalQueued ? "true" : "false"}`);
+    if (terminalQueued) {
+      console.log(
+        `  stuck  = ${
+          terminalStuck ? "⚠️  ДА" : "нет"
+        }  age=${stuckAge} тиков  room=${stuckRoom}`,
+      );
+    }
+
+    console.log("\nResult:");
+    console.log(`  ${breakCode}  — ${breakReason}`);
+
+    results[res] = breakCode;
+  }
+
+  // ── ИТОГОВАЯ ТАБЛИЦА ───────────────────────────────
+  console.log("\n" + "=".repeat(54));
+  console.log("ИТОГ");
+  console.log("=".repeat(54));
+  for (const [res, code] of Object.entries(results)) {
+    const icon =
+      code === "A"
+        ? "⬜"
+        : code === "D"
+        ? "🔴"
+        : code === "B"
+        ? "🟠"
+        : code === "C"
+        ? "🟡"
+        : code === "E"
+        ? "🟡"
+        : code === "F"
+        ? "🟢"
+        : "❓";
+    console.log(`  ${icon} ${res.padEnd(8)} → ${code}`);
+  }
+  console.log("=".repeat(54) + "\n");
+};
 
 global.autoRefill = function () {
   const MIN_AMOUNT = 10000;
@@ -1166,9 +1273,8 @@ global.autoRefill = function () {
             Math.min(needed, orders[0].amount),
             roomName,
           );
-          if (result === OK) {
+          if (result === OK)
             console.log(`✅ autoRefill: купили ${resource} для ${roomName}`);
-          }
         }
       }
     }

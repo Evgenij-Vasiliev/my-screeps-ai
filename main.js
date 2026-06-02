@@ -13,6 +13,8 @@ const marketManager = require("./marketManager");
 const marketExecutor = require("./marketExecutor");
 const marketDirector = require("./marketDirector");
 const diagnostics = require("./diagnostics");
+const labsPlanner = require("./labs.planner");
+const labsAutoConfig = require("./labs.autoconfig");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -51,6 +53,10 @@ module.exports.loop = function () {
 
   // Лаб Контроллер
   labController.run();
+
+  labsPlanner.run();
+
+  labsAutoConfig.run();
   //
   // marketManager
 
