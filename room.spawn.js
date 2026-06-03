@@ -181,7 +181,7 @@ const roomSpawn = {
 
     // Локальные роли — крипы работают в этой комнате
     const localRolesConfig = [
-      { role: "test_worker", count: 1 },
+      { role: "test_worker", count: 2 },
       { role: "test_miner", count: 2 },
       { role: "test_towerSupplier", count: 1 },
       {

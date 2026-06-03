@@ -2,15 +2,19 @@
  * ===================================================
  * LOGISTICSDIRECTOR.JS — Логистический оркестратор империи
  * ===================================================
- * VERSION: 2.4
+ * VERSION: 2.5
  *
- * ИЗМЕНЕНИЯ v2.4:
- * - Вместо двух отдельных задач (energy→factory и battery→storage)
- *   создаётся ОДНА задача типа factory_cycle на комнату.
- *   Воркер выполняет полный цикл внутри одного задания:
- *   storage→energy→factory→battery→storage
- * - Задача factory_cycle создаётся если фабрика имеет задачу
- *   и нет активного цикла.
+ * ИЗМЕНЕНИЯ v2.5:
+ * - ИСПРАВЛЕН разрыв цепочки waiting_terminal.
+ *   Проблема: logisticsDirector создавал delivery со статусом
+ *   waiting_terminal, но НЕ вызывал terminalManager.addNeed().
+ *   terminalUnloader никогда не получал задачу на перенос ресурса.
+ *   terminal.send() никогда не вызывался. Ресурс не приходил.
+ *
+ *   РЕШЕНИЕ: в блоке WAITING_TERMINAL добавлен вызов
+ *   terminalManager.runLabSupply(donorRoom) для каждой
+ *   зависшей доставки. Это заставляет terminalManager
+ *   создать addNeed() и запустить цепочку отправки.
  * ===================================================
  */
 
@@ -18,10 +22,12 @@ const factoryDirector = require("./factoryDirector");
 const labController = require("./labController");
 const empireResourceRegistry = require("./empireResourceRegistry");
 const economyManager = require("./economyManager");
+// v2.5: добавляем импорт terminalManager для замыкания цепочки
+const terminalManager = require("./terminalManager");
 
 const UPDATE_INTERVAL = 5;
 const UPDATE_OFFSET = 3;
-const LOGISTICS_VERSION = 8;
+const LOGISTICS_VERSION = 9; // v2.5
 
 const DELIVERY_STATUS = {
   QUEUED: "queued",
@@ -113,25 +119,52 @@ const logisticsDirector = {
     }
 
     // ── WAITING_TERMINAL → QUEUED ─────────────────────────────────────────
+    // v2.5: ИСПРАВЛЕНИЕ — добавлен вызов terminalManager для каждой
+    // зависшей доставки. Раньше здесь только проверяли прибытие ресурса,
+    // но никто не инициировал terminal.send(). Теперь при каждом цикле
+    // планировщика мы явно просим terminalManager обработать доставку.
     for (const roomName in deliveries) {
       for (const d of deliveries[roomName]) {
         if (d.status !== "waiting_terminal") continue;
+
+        // Проверяем: ресурс уже прибыл в целевую комнату?
         const available = empireResourceRegistry.getInRoom(
           d.resource,
           roomName,
         );
+
         if (available >= LAB_DELIVERY_AMOUNT) {
+          // Ресурс прибыл — переводим в очередь на выдачу воркеру
           d.status = DELIVERY_STATUS.QUEUED;
           d.updatedAt = Game.time;
           console.log(
             `[LogisticsDirector] ✅ ${roomName}: ${d.resource} прибыл → queued`,
           );
+          continue;
+        }
+
+        // v2.5: Ресурс ещё не прибыл — инициируем отправку через терминал.
+        // Ищем комнату-донора и создаём задачу для terminalUnloader.
+        // terminalManager.runLabSupply() умеет сам найти донора
+        // и вызвать addNeed() → terminalUnloader перенесёт ресурс
+        // из storage в terminal → terminal.send() отправит в целевую комнату.
+        const targetRoom = Game.rooms[roomName];
+        if (targetRoom) {
+          // Вызываем runLabSupply для целевой комнаты —
+          // он проверит нехватку реагентов и создаст задачу отправки
+          terminalManager.runLabSupply(targetRoom);
+
+          if (Game.time % 50 === 0) {
+            console.log(
+              `[LogisticsDirector] 📡 ${roomName}: ` +
+                `инициирован terminal supply для ${d.resource}`,
+            );
+          }
         }
       }
     }
 
     // ── FACTORY CYCLE DELIVERIES ──────────────────────────────────────────
-    // Одна задача factory_cycle на комнату вместо двух отдельных.
     const factoryRooms = Memory.empire.factory
       ? Memory.empire.factory.rooms
       : {};
@@ -144,8 +177,6 @@ const logisticsDirector = {
 
       if (!deliveries[roomName]) deliveries[roomName] = [];
 
-      // Держим максимум 2 queued factory_cycle на комнату:
-      // 1 для текущего воркера + 1 в запасе для нового.
       const factoryActiveCount = deliveries[roomName].filter(
         d =>
           d.target === "factory_cycle" &&
@@ -164,8 +195,8 @@ const logisticsDirector = {
         : PRIORITY.NORMAL;
 
       deliveries[roomName].push({
-        resource: RESOURCE_ENERGY, // что несём НА фабрику
-        target: "factory_cycle", // специальный тип — полный цикл
+        resource: RESOURCE_ENERGY,
+        target: "factory_cycle",
         targetLabId: null,
         amount: DELIVERY_AMOUNT,
         priority,
@@ -244,6 +275,19 @@ const logisticsDirector = {
                   updatedAt: Game.time,
                   assignedTo: null,
                 });
+
+                // v2.5: сразу инициируем terminal supply —
+                // не ждём следующего цикла планировщика
+                const targetRoom = Game.rooms[roomName];
+                if (targetRoom) {
+                  terminalManager.runLabSupply(targetRoom);
+                }
+
+                console.log(
+                  `[LogisticsDirector] 📡 ${roomName}: ` +
+                    `waiting_terminal создан для ${resource} ` +
+                    `→ terminal supply инициирован`,
+                );
               }
             } else {
               if (Game.time % 100 <= UPDATE_OFFSET) {
