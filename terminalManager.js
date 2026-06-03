@@ -2,7 +2,16 @@
  * ===================================================
  * TERMINALMANAGER.JS — Terminal Infrastructure Layer
  * ===================================================
- * VERSION: 4.2
+ * VERSION: 4.4
+ *
+ * ИЗМЕНЕНИЯ v4.4 (ТЗ №14):
+ * - CHECK_INTERVAL снижен с 50 до 10.
+ *   Эффект: задержка реакции на нехватку реагентов
+ *   сокращается с 50 до 10 тиков на комнату.
+ * - Убран return после terminal.send() в runLabSupply().
+ *   Эффект: все нехватки комнаты обрабатываются
+ *   за один вызов. addNeed() создаётся для всех
+ *   ресурсов, terminalUnloader работает параллельно.
  *
  * ИСПРАВЛЕНИЕ v4.2:
  * - ГЛАВНЫЙ БАГ: терминалы забивались до 300к энергией.
@@ -33,10 +42,14 @@ const TERMINAL_ENERGY_MAX = 100000;
 const ENERGY_POOR_THRESHOLD = 20000;
 const ENERGY_RICH_THRESHOLD = 100000;
 const ENERGY_SEND_AMOUNT = 20000;
-const CHECK_INTERVAL = 50;
+// v4.4: снижено с 50 до 10 — ускоряет реакцию на нехватку реагентов
+// задержка сокращается с 50 до 10 тиков на комнату
+const CHECK_INTERVAL = 10;
 const LAB_REAGENT_MIN = 3000;
 const LAB_REAGENT_SEND = 5000;
-const LAB_REAGENT_DONOR_MIN = 6000;
+// v4.3: снижено с 6000 до 2000 — старое значение блокировало доставку
+// при суммарном запасе ресурса в империи < 6000 (например UO = 4500)
+const LAB_REAGENT_DONOR_MIN = 2000;
 
 /**
  * Сколько держим в терминале для продажи.
@@ -342,10 +355,12 @@ const terminalManager = {
           `[LabSupply] ✅ ${donorRoom.name} → ${room.name}: ${donorAmount} ${resource}`,
         );
       } else {
+        // v4.4: убран return — продолжаем обработку остальных ресурсов.
+        // ERR_TIRED от cooldown не останавливает цикл:
+        // addNeed() будет создан для следующего ресурса,
+        // terminalUnloader начнёт перенос из storage параллельно.
         console.log(`[LabSupply] ❌ Ошибка отправки ${resource}: ${result}`);
       }
-
-      return;
     }
   },
 
