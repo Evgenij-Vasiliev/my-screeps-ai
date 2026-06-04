@@ -6,7 +6,7 @@ const empireResourceRegistry = require("./empireResourceRegistry");
 const economyManager = require("./economyManager");
 const factoryDirector = require("./factoryDirector");
 const logisticsDirector = require("./logisticsDirector");
-const taskDispatcher = require("./taskDispatcher"); // ← НОВЫЙ МОДУЛЬ
+const taskDispatcher = require("./taskDispatcher");
 const labDirector = require("./labDirector");
 const labController = require("./labController");
 const marketManager = require("./marketManager");
@@ -57,9 +57,8 @@ module.exports.loop = function () {
   labsPlanner.run();
 
   labsAutoConfig.run();
-  //
-  // marketManager
 
+  // marketManager
   marketManager.run();
 
   marketExecutor.run();
@@ -68,16 +67,14 @@ module.exports.loop = function () {
 
   diagnostics.run();
 
-  /**
-   * 2. АВТОПОПОЛНЕНИЕ РЕАГЕНТОВ — раз в 1000 тиков
-   * Покупает Z и O если меньше 10000 в любой комнате
-   */
-  if (Game.time % 1000 === 0) {
-    autoRefill();
-  }
+  // ПРИМЕЧАНИЕ: autoRefill() удалена из автоматического цикла (ТЗ №16).
+  // Функция по-прежнему доступна для РУЧНОГО вызова из консоли Screeps:
+  //   > autoRefill()
+  // Причина удаления: функция проверяла только терминал (не empire total),
+  // что приводило к бесконтрольным покупкам Z при пустом терминале.
 
   /**
-   * 3. ЛОГИКА КОМНАТ
+   * 2. ЛОГИКА КОМНАТ
    */
   cpuMonitor.trackRole("roomManager", () => {
     for (const roomName in Game.rooms) {
@@ -89,7 +86,7 @@ module.exports.loop = function () {
   });
 
   /**
-   * 4. ЛОГИКА КРИПОВ
+   * 3. ЛОГИКА КРИПОВ
    */
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];

@@ -2,26 +2,31 @@
  * ===================================================
  * TERMINALMANAGER.JS — Terminal Infrastructure Layer
  * ===================================================
- * VERSION: 4.4
+ * VERSION: 4.5
+ *
+ * ИЗМЕНЕНИЯ v4.5 (ТЗ №19):
+ * - ИСПРАВЛЕН архитектурный дефект в runLabSupply():
+ *   ранее terminal.cooldown > 0 блокировал не только отправку,
+ *   но и весь анализ потребностей + создание addNeed().
+ *
+ *   РЕШЕНИЕ: cooldown проверяется теперь только в момент
+ *   фактической отправки (terminal.send). Анализ needs,
+ *   поиск доноров и создание addNeed() выполняются всегда.
+ *
+ *   Эффект: при cooldown терминала terminalNeeds продолжает
+ *   пополняться → terminalUnloader начинает перенос из storage
+ *   → terminal.send() выполнится как только cooldown спадёт.
  *
  * ИЗМЕНЕНИЯ v4.4 (ТЗ №14):
  * - CHECK_INTERVAL снижен с 50 до 10.
- *   Эффект: задержка реакции на нехватку реагентов
- *   сокращается с 50 до 10 тиков на комнату.
  * - Убран return после terminal.send() в runLabSupply().
- *   Эффект: все нехватки комнаты обрабатываются
- *   за один вызов. addNeed() создаётся для всех
- *   ресурсов, terminalUnloader работает параллельно.
  *
  * ИСПРАВЛЕНИЕ v4.2:
  * - ГЛАВНЫЙ БАГ: терминалы забивались до 300к энергией.
  *   Причина: runEnergyBalance() создавал addNeed() без проверки
- *   насколько полон терминал получателя. Задачи накапливались
- *   быстрее чем выполнялись → terminal=300000.
- *
+ *   насколько полон терминал получателя.
  *   РЕШЕНИЕ: добавлена константа TERMINAL_ENERGY_MAX=100000
  *   и проверка терминала получателя перед addNeed().
- *   Если terminal >= TERMINAL_ENERGY_MAX — пропускаем комнату.
  *
  * ИЗМЕНЕНИЯ v4.1:
  * - Добавлен runSellPrep() — подготовка ресурсов к продаже.
@@ -43,22 +48,22 @@ const ENERGY_POOR_THRESHOLD = 20000;
 const ENERGY_RICH_THRESHOLD = 100000;
 const ENERGY_SEND_AMOUNT = 20000;
 // v4.4: снижено с 50 до 10 — ускоряет реакцию на нехватку реагентов
-// задержка сокращается с 50 до 10 тиков на комнату
 const CHECK_INTERVAL = 10;
 const LAB_REAGENT_MIN = 3000;
 const LAB_REAGENT_SEND = 5000;
-// v4.3: снижено с 6000 до 2000 — старое значение блокировало доставку
-// при суммарном запасе ресурса в империи < 6000 (например UO = 4500)
-const LAB_REAGENT_DONOR_MIN = 2000;
+// v4.5 (ТЗ №21): поднято с 2000 до 3500.
+// Причина: при 2000 донор после отправки имел 2000 < LAB_REAGENT_MIN(3000)
+// и сам становился получателем → пинг-понг между комнатами.
+// 3500 > 3000 гарантирует что донор после отправки не попадает в дефицит.
+const LAB_REAGENT_DONOR_MIN = 3500;
 
 /**
  * Сколько держим в терминале для продажи.
- * Если меньше — запрашиваем перенос из storage.
  */
 const SELL_TERMINAL_TARGET = 10000;
 
 /**
- * Максимум в терминале для продажи — не накапливаем слишком много.
+ * Максимум в терминале для продажи.
  */
 const SELL_TERMINAL_MAX = 20000;
 
@@ -247,13 +252,32 @@ const terminalManager = {
 
   // ── LAB SUPPLY ────────────────────────────────────────────────────────────
 
+  /**
+   * v4.5: ИСПРАВЛЕНИЕ COOLDOWN
+   *
+   * Разделены две ответственности:
+   * 1. Анализ потребностей + создание addNeed() — выполняется ВСЕГДА
+   * 2. terminal.send() — выполняется ТОЛЬКО если нет cooldown
+   *
+   * Ранее: if (terminal.cooldown > 0) return
+   * → весь анализ прерывался, addNeed() не создавался,
+   *   terminalUnloader не получал задач, цепочка замирала.
+   *
+   * Теперь: cooldown проверяется только перед terminal.send().
+   * При cooldown: addNeed() создаётся → terminalUnloader
+   * переносит ресурс из storage в terminal → send() выполнится
+   * как только cooldown спадёт.
+   */
   runLabSupply: function (room) {
     if ((Game.time + (roomOffsets[room.name] || 0)) % CHECK_INTERVAL !== 0)
       return;
 
     const terminal = room.terminal;
     if (!terminal) return;
-    if (terminal.cooldown > 0) return;
+
+    // v4.5: УБРАНА ПРОВЕРКА terminal.cooldown ЗДЕСЬ.
+    // Cooldown проверяется только перед terminal.send() (см. ниже).
+    // Анализ потребностей выполняется независимо от cooldown.
 
     const availableEnergy = terminal.store[RESOURCE_ENERGY] || 0;
     if (availableEnergy < TERMINAL_ENERGY_MIN) return;
@@ -261,6 +285,8 @@ const terminalManager = {
     const labConfigs = this.getLabConfigs(room);
     if (labConfigs.length === 0) return;
 
+    // ── ШАГ 1: АНАЛИЗ ПОТРЕБНОСТЕЙ ────────────────────────────────────────
+    // Выполняется ВСЕГДА — независимо от cooldown терминала.
     const needs = [];
     for (const { config } of labConfigs) {
       for (const resource of [config.reagent1, config.reagent2]) {
@@ -276,11 +302,15 @@ const terminalManager = {
 
     if (needs.length === 0) return;
 
+    // ── ШАГ 2: ОБРАБОТКА КАЖДОЙ ПОТРЕБНОСТИ ───────────────────────────────
+    // Поиск донора и создание addNeed() — тоже ВСЕГДА.
+    // terminal.send() — только при отсутствии cooldown.
     for (const { resource, total } of needs) {
-      console.log(
-        `[LabSupply ${room.name}] Мало ${resource}: ${total} — ищем донора`,
-      );
+      // console.log(
+      //   `[LabSupply ${room.name}] Мало ${resource}: ${total} — ищем донора`,
+      // );
 
+      // ── ПОИСК ДОНОРА ───────────────────────────────────────────────────
       let donorRoom = null;
       let donorAmount = 0;
 
@@ -302,33 +332,44 @@ const terminalManager = {
       }
 
       if (!donorRoom) {
-        console.log(
-          `[LabSupply ${room.name}] Нет донора для ${resource} — нужно купить`,
-        );
+        // console.log(
+        //   `[LabSupply ${room.name}] Нет донора для ${resource} — нужно купить`,
+        // );
         continue;
       }
 
+      // ── ПРОВЕРКА: НУЖЕН ПЕРЕНОС storage → terminal У ДОНОРА? ──────────
       const donorInTerminal = donorRoom.terminal.store[resource] || 0;
 
       if (donorInTerminal < donorAmount) {
+        // Ресурс есть у донора, но в storage, не в terminal.
+        // Создаём addNeed() — terminalUnloader перенесёт.
+        // Это выполняется ВСЕГДА, даже при cooldown терминала цели.
         const isNew = this.addNeed(donorRoom, resource, donorAmount, room.name);
         if (isNew) {
-          console.log(
-            `[LabSupply] 📦 ${donorRoom.name}: запрос ${donorAmount} ${resource} → ${room.name}`,
-          );
+          // console.log(
+          //   `[LabSupply] 📦 ${donorRoom.name}: запрос ${donorAmount} ${resource} → ${room.name}`,
+          // );
         } else {
-          console.log(
-            `[LabSupply] ⏳ ${donorRoom.name}: ждём переноса ${resource} (есть: ${donorInTerminal})`,
-          );
+          // console.log(
+          //   `[LabSupply] ⏳ ${donorRoom.name}: ждём переноса ${resource} (есть: ${donorInTerminal})`,
+          // );
         }
         continue;
       }
 
+      // ── ПРОВЕРКА COOLDOWN ДОНОРА ───────────────────────────────────────
+      // v4.5: cooldown проверяется ТОЛЬКО здесь — перед фактической отправкой.
+      // Если донор на cooldown — пропускаем только send(),
+      // но addNeed() выше уже создан → цепочка не замирает.
       if (donorRoom.terminal.cooldown > 0) {
-        console.log(`[LabSupply] ⏳ ${donorRoom.name}: терминал на кулдауне`);
+        // console.log(
+        //   `[LabSupply] ⏳ ${donorRoom.name}: терминал на кулдауне (${donorRoom.terminal.cooldown})`,
+        // );
         continue;
       }
 
+      // ── ПРОВЕРКА ЭНЕРГИИ ДЛЯ ОТПРАВКИ ────────────────────────────────
       const txCost = Game.market.calcTransactionCost(
         donorAmount,
         donorRoom.name,
@@ -337,29 +378,28 @@ const terminalManager = {
       const donorEnergy = donorRoom.terminal.store[RESOURCE_ENERGY] || 0;
 
       if (txCost > donorEnergy - TERMINAL_ENERGY_MIN) {
-        console.log(
-          `[LabSupply] ⚡ ${donorRoom.name}: мало энергии (нужно: ${txCost}, есть: ${donorEnergy})`,
-        );
+        // console.log(
+        //   `[LabSupply] ⚡ ${donorRoom.name}: мало энергии (нужно: ${txCost}, есть: ${donorEnergy})`,
+        // );
         continue;
       }
 
+      // ── ОТПРАВКА ──────────────────────────────────────────────────────
       const result = donorRoom.terminal.send(resource, donorAmount, room.name);
       if (result === OK) {
+        // Очищаем выполненную потребность из terminalNeeds донора
         if (donorRoom.memory.terminalNeeds) {
           donorRoom.memory.terminalNeeds =
             donorRoom.memory.terminalNeeds.filter(
               n => !(n.resource === resource && n.toRoom === room.name),
             );
         }
-        console.log(
-          `[LabSupply] ✅ ${donorRoom.name} → ${room.name}: ${donorAmount} ${resource}`,
-        );
+        // console.log(
+        //   `[LabSupply] ✅ ${donorRoom.name} → ${room.name}: ${donorAmount} ${resource}`,
+        // );
       } else {
-        // v4.4: убран return — продолжаем обработку остальных ресурсов.
-        // ERR_TIRED от cooldown не останавливает цикл:
-        // addNeed() будет создан для следующего ресурса,
-        // terminalUnloader начнёт перенос из storage параллельно.
-        console.log(`[LabSupply] ❌ Ошибка отправки ${resource}: ${result}`);
+        // v4.4: не прерываем цикл — продолжаем следующий ресурс
+        // console.log(`[LabSupply] ❌ Ошибка отправки ${resource}: ${result}`);
       }
     }
   },
