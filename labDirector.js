@@ -185,11 +185,11 @@ const labDirector = {
       for (const [roomName, data] of Object.entries(roomAnalysis)) {
         for (const r of data.reactions) {
           if (r.isCritical && r.isStarved) {
-            console.log(
-              `[LabDirector] 🚨 ${roomName} [${r.slot}]:` +
-                ` ${r.product} CRITICAL + голодает` +
-                ` (${r.reagent1}:${r.r1Amount} ${r.reagent2}:${r.r2Amount})`,
-            );
+            // console.log(
+            //   `[LabDirector] 🚨 ${roomName} [${r.slot}]:` +
+            //     ` ${r.product} CRITICAL + голодает` +
+            //     ` (${r.reagent1}:${r.r1Amount} ${r.reagent2}:${r.r2Amount})`,
+            // );
           }
         }
       }
