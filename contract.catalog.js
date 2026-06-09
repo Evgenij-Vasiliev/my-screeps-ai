@@ -107,6 +107,14 @@ const CATALOG_CONTRACT = {
       "Контракт Policy Layer. Определяет нормативную структуру политики империи: name, owner, state, description.",
     owner: "EmpireDirector",
   },
+
+  consistency: {
+    name: "consistency",
+    type: "AUDIT_CONTRACT",
+    description:
+      "Аудит согласованности контрактов. Проверяет соответствие responsibility, policy, director и ownership друг другу.",
+    owner: "DiagnosticsDirector",
+  },
 };
 
 module.exports = CATALOG_CONTRACT;
