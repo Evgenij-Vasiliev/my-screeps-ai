@@ -15,13 +15,14 @@
  *   - НЕ зависит от игровых объектов (Game, Creep, Room и т.д.)
  *   - Работает ТОЛЬКО с CONTRACT_REGISTRY
  *
- * ПРОВЕРЯЕМЫЕ УСЛОВИЯ (ТЗ №16):
+ * ПРОВЕРЯЕМЫЕ УСЛОВИЯ (ТЗ №16, обновлено в ТЗ №19):
  *   1. Каждый раздел ownership содержит поле owner
  *   2. Каждый раздел ownership содержит поле path
  *   3. Значение owner не пустое
  *   4. Значение path не пустое
  *   5. Не существует двух записей ownership с одинаковым path
- *   6. Каждый owner встречается в responsibility как ownerDirector хотя бы один раз
+ *   6. Каждый owner присутствует в responsibility (ownerDirector)
+ *      ИЛИ в architecture как именованная сущность
  *
  * СТРУКТУРА ОТЧЁТА:
  *   { state, warnings, problems, recommendations }
@@ -150,52 +151,65 @@ function checkUniquePaths(ownership, problems, recommendations) {
 }
 
 // =============================================================================
-// ПРОВЕРКА 6: КАЖДЫЙ owner ЗАРЕГИСТРИРОВАН В responsibility
+// ПРОВЕРКА 6: КАЖДЫЙ owner ПОКРЫТ В responsibility ИЛИ architecture
 // =============================================================================
 
 /**
- * Проверяет, что каждый owner из ownership встречается в responsibility
- * как ownerDirector хотя бы один раз.
- * Условие 6.
+ * Проверяет, что каждый owner из ownership присутствует хотя бы в одном
+ * из двух источников:
+ *   - responsibility: как значение поля ownerDirector в любой записи
+ *   - architecture:   как именованная сущность (ключ верхнего уровня)
  *
- * Назначение: гарантирует, что владелец данных имеет зону ответственности.
- * Если owner есть в ownership, но не упомянут ни в одной записи responsibility —
- * это WARNING: возможно, подсистема ещё не описана в карте ответственности.
+ * Условие 6 (обновлено в ТЗ №19).
  *
- * Тип WARNING (не ERROR), т.к. responsibility может заполняться поэтапно
- * в ходе реконструкции империи.
+ * Логика:
+ *   1. Ищем owner среди ownerDirector в responsibility.
+ *   2. Если не найден — ищем owner как ключ в architecture.
+ *   3. Если отсутствует в обоих местах — формируем WARNING.
  *
- * @param {object}   ownership
- * @param {object}   responsibility
- * @param {string[]} warnings
- * @param {string[]} recommendations
+ * Тип WARNING (не ERROR): responsibility и architecture могут заполняться
+ * поэтапно в ходе реконструкции империи.
+ *
+ * @param {object}        ownership
+ * @param {object}        responsibility
+ * @param {object|null}   architecture   — может отсутствовать (необязательный раздел)
+ * @param {string[]}      warnings
+ * @param {string[]}      recommendations
  */
 function checkOwnersCoverage(
   ownership,
   responsibility,
+  architecture,
   warnings,
   recommendations,
 ) {
   // Собираем множество всех ownerDirector из responsibility
-  const coveredDirectors = new Set();
+  const coveredByResponsibility = new Set();
   for (const entry of Object.values(responsibility)) {
     if (isNonEmptyString(entry.ownerDirector)) {
-      coveredDirectors.add(entry.ownerDirector);
+      coveredByResponsibility.add(entry.ownerDirector);
     }
   }
 
   // Проверяем каждый owner из ownership
   for (const [key, entry] of Object.entries(ownership)) {
-    if (!isNonEmptyString(entry.owner)) continue; // уже отмечен выше
+    if (!isNonEmptyString(entry.owner)) continue; // уже отмечен в checkRequiredFields
 
-    if (!coveredDirectors.has(entry.owner)) {
-      warnings.push(
-        `[ownership.${key}] Владелец "${entry.owner}" не найден ни в одной записи responsibility как ownerDirector.`,
-      );
-      recommendations.push(
-        `Добавьте запись для "${entry.owner}" в contract.responsibility.js, либо проверьте корректность значения owner в записи "${key}".`,
-      );
-    }
+    const owner = entry.owner;
+
+    // Шаг 1: owner есть в responsibility?
+    if (coveredByResponsibility.has(owner)) continue;
+
+    // Шаг 2: owner есть в architecture?
+    if (isObject(architecture) && owner in architecture) continue;
+
+    // Шаг 3: не найден нигде — WARNING
+    warnings.push(
+      `[ownership.${key}] Владелец "${owner}" не найден ни в responsibility (ownerDirector), ни в architecture.`,
+    );
+    recommendations.push(
+      `Добавьте "${owner}" в contract.responsibility.js или в contract.architecture.js.`,
+    );
   }
 }
 
@@ -269,7 +283,7 @@ function run(registry) {
   // Условие 5 — уникальность path
   checkUniquePaths(registry.ownership, problems, recommendations);
 
-  // Условие 6 — покрытие владельцев в responsibility
+  // Условие 6 — покрытие владельцев в responsibility ИЛИ architecture
   // Запускаем только если responsibility доступна; иначе — предупреждение
   if (!isObject(registry.responsibility)) {
     warnings.push(
@@ -279,9 +293,11 @@ function run(registry) {
       "Подключите contract.responsibility.js в contract.registry.js для полного аудита.",
     );
   } else {
+    // architecture передаём как необязательный аргумент — может быть null/undefined
     checkOwnersCoverage(
       registry.ownership,
       registry.responsibility,
+      registry.architecture || null,
       warnings,
       recommendations,
     );
