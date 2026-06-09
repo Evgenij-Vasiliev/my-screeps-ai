@@ -54,7 +54,7 @@ const BUYABLE_RESOURCES = new Set([
  * НЕ продаём: OH, X, O, Z (сами закупаем).
  */
 const SELLABLE_RESOURCES = new Set([
-  // RESOURCE_ENERGY,
+  RESOURCE_ENERGY,
   // Energy economy
   RESOURCE_BATTERY,
 
