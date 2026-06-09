@@ -11,11 +11,9 @@
  * ИСПОЛЬЗОВАНИЕ:
  *   const contracts = require('contract.registry');
  *
- *   contracts.policy.economy.state                   // => 'ENABLED'
- *   contracts.policy.POLICY_STATES                   // => ['ENABLED','DISABLED']
- *   contracts.directorDiagnostics.createReport()     // => { state, warnings, ... }
- *   contracts.diagnostics.run(contracts)             // => { state, ... }
- *   contracts.auditor.run(contracts)                 // => { state, ... }
+ *   contracts.consistency.run(contracts)   // => { state, ... }
+ *   contracts.diagnostics.run(contracts)   // => { state, ... }
+ *   contracts.auditor.run(contracts)       // => { state, ... }
  */
 
 "use strict";
@@ -28,6 +26,7 @@ const catalog = require("contract.catalog");
 const director = require("contract.director");
 const directorDiagnostics = require("contract.directorDiagnostics");
 const policy = require("contract.policy");
+const consistency = require("contract.consistency");
 const diagnostics = require("contract.diagnostics");
 const auditor = require("contract.auditor");
 
@@ -44,6 +43,7 @@ const auditor = require("contract.auditor");
  * ├── director            — контракт Director Layer
  * ├── directorDiagnostics — нормативный формат диагностики Director
  * ├── policy              — контракт Policy Layer
+ * ├── consistency         — аудит согласованности контрактов
  * ├── diagnostics         — диагностика целостности контракта
  * └── auditor             — аудит корректности Ownership Contract
  */
@@ -56,6 +56,7 @@ const CONTRACT_REGISTRY = {
   director,
   directorDiagnostics,
   policy,
+  consistency,
   diagnostics,
   auditor,
 };
