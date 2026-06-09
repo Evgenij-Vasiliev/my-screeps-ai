@@ -19,8 +19,9 @@
  *   LIFECYCLE_CONTRACT   — описывает жизненные циклы объектов
  *   GOVERNANCE_CONTRACT  — описывает карту ответственности подсистем
  *   ARCHITECTURE_CONTRACT — описывает корневые архитектурные сущности
- *   DIAGNOSTIC_CONTRACT  — выполняет диагностику целостности
+ *   DIAGNOSTIC_CONTRACT  — выполняет диагностику / определяет формат диагностики
  *   AUDIT_CONTRACT       — выполняет аудит корректности
+ *   LAYER_CONTRACT       — определяет структуру слоя архитектуры
  */
 
 "use strict";
@@ -81,6 +82,30 @@ const CATALOG_CONTRACT = {
     description:
       "Аудит корректности Ownership Contract. Проверяет поля, уникальность путей, покрытие владельцев в responsibility.",
     owner: "DiagnosticsDirector",
+  },
+
+  director: {
+    name: "director",
+    type: "LAYER_CONTRACT",
+    description:
+      "Контракт Director Layer. Определяет обязательную структуру любого Director: ownerScope, stateProvider, diagnosticsProvider, manualControl.",
+    owner: "EmpireDirector",
+  },
+
+  directorDiagnostics: {
+    name: "directorDiagnostics",
+    type: "DIAGNOSTIC_CONTRACT",
+    description:
+      "Нормативный формат диагностического отчёта любого Director: state, warnings, problems, recommendations.",
+    owner: "DiagnosticsDirector",
+  },
+
+  policy: {
+    name: "policy",
+    type: "GOVERNANCE_CONTRACT",
+    description:
+      "Контракт Policy Layer. Определяет нормативную структуру политики империи: name, owner, state, description.",
+    owner: "EmpireDirector",
   },
 };
 
