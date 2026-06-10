@@ -1,101 +1,78 @@
-const roomManager = require("./roomManager");
-const roles = require("./roleRegistry");
-const cpuMonitor = require("./cpuMonitor");
-const cmd = require("./console");
-const empireResourceRegistry = require("./empireResourceRegistry");
-const economyManager = require("./economyManager");
-const factoryDirector = require("./factoryDirector");
-const logisticsDirector = require("./logisticsDirector");
-const taskDispatcher = require("./taskDispatcher");
-const labDirector = require("./labDirector");
-const labController = require("./labController");
-const marketManager = require("./marketManager");
-const marketExecutor = require("./marketExecutor");
-const marketDirector = require("./marketDirector");
-const diagnostics = require("./diagnostics");
-const labsPlanner = require("./labs.planner");
-const labsAutoConfig = require("./labs.autoconfig");
+const utils = require("utils");
+const roleHarvester = require("role.harvester");
+const roleUpgrader = require("role.upgrader");
+const roleBuilder = require("role.builder");
+const roleMiner = require("role.miner");
+const roleTransporter = require("role.transporter");
+const roleTower = require("role.tower"); // Добавляем башни
 
 module.exports.loop = function () {
-  cpuMonitor.startTick();
+  const spawn = Game.spawns["Spawn1"];
+  if (!spawn || !spawn.room) return;
 
-  /**
-   * 1. ОЧИСТКА ПАМЯТИ
-   */
+  // Очистка памяти
   for (const name in Memory.creeps) {
-    if (!Game.creeps[name]) {
-      delete Memory.creeps[name];
-    }
+    if (!Game.creeps[name]) delete Memory.creeps[name];
   }
 
-  // Реестр ресурсов империи (offset 0, каждые 20 тиков)
-  const firstRoom = Object.keys(Game.rooms)
-    .filter(n => Game.rooms[n].controller && Game.rooms[n].controller.my)
-    .sort()[0];
-  if (firstRoom) empireResourceRegistry.run();
+  // Подсчет крипов
+  const harvesters = _.filter(Game.creeps, c => c.memory.role === "harvester");
+  const upgraders = _.filter(Game.creeps, c => c.memory.role === "upgrader");
+  const builders = _.filter(Game.creeps, c => c.memory.role === "builder");
+  const miners = _.filter(Game.creeps, c => c.memory.role === "miner");
+  const transporters = _.filter(
+    Game.creeps,
+    c => c.memory.role === "transporter",
+  );
 
-  // Экономический менеджер (offset 1, каждые 20 тиков)
-  economyManager.run();
+  // Режим выживания
+  if (harvesters.length === 0 && !spawn.spawning) {
+    utils.spawnRoleCreep("harvester");
+  }
 
-  // Директор завода (offset 2, каждые 20 тиков)
-  factoryDirector.run();
+  // Основная логика спавна
+  if (!spawn.spawning) {
+    if (miners.length < 2) utils.spawnRoleCreep("miner");
+    else if (transporters.length < 2) utils.spawnRoleCreep("transporter");
+    else if (harvesters.length < 4) utils.spawnRoleCreep("harvester");
+    else if (upgraders.length < 3) utils.spawnRoleCreep("upgrader");
+    else if (builders.length < 2) utils.spawnRoleCreep("builder");
+  }
 
-  // Логистический директор (offset 3, каждые 20 тиков)
-  logisticsDirector.run();
-
-  // Диспетчер задач (каждые 5 тиков)
-  // Читает queued deliveries → назначает воркерам
-  // Должен запускаться ПОСЛЕ logisticsDirector
-  taskDispatcher.run();
-
-  // Лаб Директор
-  labDirector.run();
-
-  // Лаб Контроллер
-  labController.run();
-
-  labsPlanner.run();
-
-  labsAutoConfig.run();
-
-  // marketManager
-  marketManager.run();
-
-  marketExecutor.run();
-
-  marketDirector.run();
-
-  diagnostics.run();
-
-  // ПРИМЕЧАНИЕ: autoRefill() удалена из автоматического цикла (ТЗ №16).
-  // Функция по-прежнему доступна для РУЧНОГО вызова из консоли Screeps:
-  //   > autoRefill()
-  // Причина удаления: функция проверяла только терминал (не empire total),
-  // что приводило к бесконтрольным покупкам Z при пустом терминале.
-
-  /**
-   * 2. ЛОГИКА КОМНАТ
-   */
-  cpuMonitor.trackRole("roomManager", () => {
-    for (const roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
-      if (room.controller && room.controller.my) {
-        roomManager.run(room);
-      }
-    }
-  });
-
-  /**
-   * 3. ЛОГИКА КРИПОВ
-   */
+  // Управление крипами
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
-    const roleModule = roles[creep.memory.role];
-    if (!roleModule) continue;
-    cpuMonitor.trackRole(creep.memory.role, () => {
-      roleModule.run(creep);
-    });
+    if (!creep) continue;
+
+    try {
+      switch (creep.memory.role) {
+        case "harvester":
+          roleHarvester.run(creep);
+          break;
+        case "upgrader":
+          roleUpgrader.run(creep);
+          break;
+        case "builder":
+          roleBuilder.run(creep);
+          break;
+        case "miner":
+          roleMiner.run(creep);
+          break;
+        case "transporter":
+          roleTransporter.run(creep);
+          break;
+      }
+    } catch (e) {
+      console.log(`Ошибка в крипе ${name}: ${e.message}`);
+    }
   }
 
-  cpuMonitor.endTick();
+  // Управление башнями
+  const towers = _.filter(
+    Game.structures,
+    s => s.structureType === STRUCTURE_TOWER,
+  );
+  for (const tower of towers) {
+    roleTower.run(tower);
+  }
 };
