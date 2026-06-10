@@ -4,10 +4,11 @@ const roleUpgrader = require("role.upgrader");
 const roleBuilder = require("role.builder");
 const roleMiner = require("role.miner");
 const roleTransporter = require("role.transporter");
-const roleTower = require("role.tower"); // Добавляем башни
+const roleTower = require("role.tower");
+const roleTowerSupplier = require("role.towerSupplier");
 
 module.exports.loop = function () {
-  const spawn = Game.spawns["Spawn1"];
+  const spawn = Game.spawns["Spawn2"];
   if (!spawn || !spawn.room) return;
 
   // Очистка памяти
@@ -20,6 +21,10 @@ module.exports.loop = function () {
   const upgraders = _.filter(Game.creeps, c => c.memory.role === "upgrader");
   const builders = _.filter(Game.creeps, c => c.memory.role === "builder");
   const miners = _.filter(Game.creeps, c => c.memory.role === "miner");
+  const towerSuppliers = _.filter(
+    Game.creeps,
+    c => c.memory.role === "towerSupplier",
+  );
   const transporters = _.filter(
     Game.creeps,
     c => c.memory.role === "transporter",
@@ -34,9 +39,10 @@ module.exports.loop = function () {
   if (!spawn.spawning) {
     if (miners.length < 2) utils.spawnRoleCreep("miner");
     else if (transporters.length < 2) utils.spawnRoleCreep("transporter");
-    else if (harvesters.length < 4) utils.spawnRoleCreep("harvester");
-    else if (upgraders.length < 3) utils.spawnRoleCreep("upgrader");
-    else if (builders.length < 2) utils.spawnRoleCreep("builder");
+    else if (towerSuppliers.length < 2) utils.spawnRoleCreep("towerSupplier");
+    else if (harvesters.length < 1) utils.spawnRoleCreep("harvester");
+    else if (upgraders.length < 1) utils.spawnRoleCreep("upgrader");
+    else if (builders.length < 1) utils.spawnRoleCreep("builder");
   }
 
   // Управление крипами
@@ -60,6 +66,9 @@ module.exports.loop = function () {
           break;
         case "transporter":
           roleTransporter.run(creep);
+          break;
+        case "towerSupplier":
+          roleTowerSupplier.run(creep);
           break;
       }
     } catch (e) {
