@@ -1,3 +1,9 @@
+/**
+ * ГЛАВНЫЙ ЦИКЛ (Main Loop)
+ * Многокомнатная архитектура: вся работа с комнатами — через roomManager.
+ * Жёсткая привязка к именам и количеству комнат отсутствует.
+ */
+const roomManager = require("roomManager");
 const utils = require("utils");
 const roleHarvester = require("role.harvester");
 const roleUpgrader = require("role.upgrader");
@@ -7,49 +13,113 @@ const roleTransporter = require("role.transporter");
 const roleTower = require("role.tower");
 const roleTowerSupplier = require("role.towerSupplier");
 
-module.exports.loop = function () {
-  const spawn = Game.spawns["Spawn2"];
-  if (!spawn || !spawn.room) return;
+// ─── Тела крипов по ролям ─────────────────────────────────────────────────────
+// Единственное место определения состава тел.
+// cost      — минимальная энергия для основного тела.
+// emergency — аварийное тело: используется в режиме выживания,
+//             когда энергии недостаточно для основного состава.
+const CREEP_BODIES = {
+  miner: { body: [WORK, WORK, WORK, WORK, WORK, MOVE], cost: 550 },
+  transporter: { body: [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE], cost: 400 },
+  towerSupplier: { body: [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE], cost: 400 },
+  harvester: {
+    body: [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE],
+    cost: 550,
+    emergency: { body: [WORK, CARRY, MOVE], cost: 200 },
+  },
+  upgrader: {
+    body: [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE],
+    cost: 550,
+  },
+  builder: {
+    body: [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE],
+    cost: 550,
+  },
+};
 
-  // Очистка памяти
-  for (const name in Memory.creeps) {
-    if (!Game.creeps[name]) delete Memory.creeps[name];
+// ─── Вспомогательная функция спавна через roomState ──────────────────────────
+/**
+ * Спавнит крипа в контексте конкретной комнаты.
+ * Если энергии не хватает на основное тело — пробует аварийное (если есть).
+ * @param {Object} roomState
+ * @param {string} role
+ * @param {boolean} allowEmergency — разрешить аварийное тело
+ */
+function spawnCreepForRoom(roomState, role, allowEmergency = false) {
+  const spawn = roomState.spawn;
+  if (!spawn || spawn.spawning) return;
+
+  const config = CREEP_BODIES[role];
+  if (!config) return;
+
+  const energy = roomState.room.energyAvailable;
+
+  // Выбираем тело: основное или аварийное
+  let selected = null;
+  if (energy >= config.cost) {
+    selected = { body: config.body };
+  } else if (
+    allowEmergency &&
+    config.emergency &&
+    energy >= config.emergency.cost
+  ) {
+    selected = config.emergency;
+    console.log(
+      `[${roomState.roomName}] АВАРИЙНЫЙ спавн ${role} (emergency body)`,
+    );
   }
 
-  // Подсчет крипов
-  const harvesters = _.filter(Game.creeps, c => c.memory.role === "harvester");
-  const upgraders = _.filter(Game.creeps, c => c.memory.role === "upgrader");
-  const builders = _.filter(Game.creeps, c => c.memory.role === "builder");
-  const miners = _.filter(Game.creeps, c => c.memory.role === "miner");
-  const towerSuppliers = _.filter(
-    Game.creeps,
-    c => c.memory.role === "towerSupplier",
+  if (!selected) return;
+
+  const result = spawn.spawnCreep(
+    selected.body,
+    `${role}_${roomState.roomName}_${Game.time}`,
+    {
+      memory: {
+        role,
+        homeRoom: roomState.roomName,
+        state: "harvesting",
+      },
+    },
   );
-  const transporters = _.filter(
-    Game.creeps,
-    c => c.memory.role === "transporter",
-  );
 
-  // Режим выживания
-  if (harvesters.length === 0 && !spawn.spawning) {
-    utils.spawnRoleCreep("harvester");
+  if (result === OK) {
+    console.log(`[${roomState.roomName}] Spawning ${role}`);
+  }
+}
+
+// ─── Логика спавна для одной комнаты ─────────────────────────────────────────
+function runSpawnLogic(roomState) {
+  const creeps = roomState.creeps;
+
+  const count = role => creeps.filter(c => c.memory.role === role).length;
+
+  const harvesters = count("harvester");
+  const miners = count("miner");
+  const transporters = count("transporter");
+  const towerSuppliers = count("towerSupplier");
+  const upgraders = count("upgrader");
+  const builders = count("builder");
+
+  // Режим выживания — аварийный харвестер с минимальным телом
+  if (harvesters === 0) {
+    spawnCreepForRoom(roomState, "harvester", true);
+    return;
   }
 
-  // Основная логика спавна
-  if (!spawn.spawning) {
-    if (miners.length < 2) utils.spawnRoleCreep("miner");
-    else if (transporters.length < 2) utils.spawnRoleCreep("transporter");
-    else if (towerSuppliers.length < 2) utils.spawnRoleCreep("towerSupplier");
-    else if (harvesters.length < 1) utils.spawnRoleCreep("harvester");
-    else if (upgraders.length < 1) utils.spawnRoleCreep("upgrader");
-    else if (builders.length < 1) utils.spawnRoleCreep("builder");
-  }
+  // Основная очередь спавна
+  if (miners < 2) spawnCreepForRoom(roomState, "miner");
+  else if (transporters < 2) spawnCreepForRoom(roomState, "transporter");
+  else if (towerSuppliers < 2) spawnCreepForRoom(roomState, "towerSupplier");
+  else if (harvesters < 1) spawnCreepForRoom(roomState, "harvester");
+  else if (upgraders < 1) spawnCreepForRoom(roomState, "upgrader");
+  else if (builders < 2) spawnCreepForRoom(roomState, "builder");
+}
 
-  // Управление крипами
-  for (const name in Game.creeps) {
-    const creep = Game.creeps[name];
+// ─── Управление крипами одной комнаты ────────────────────────────────────────
+function runCreepLogic(roomState) {
+  for (const creep of roomState.creeps) {
     if (!creep) continue;
-
     try {
       switch (creep.memory.role) {
         case "harvester":
@@ -72,16 +142,34 @@ module.exports.loop = function () {
           break;
       }
     } catch (e) {
-      console.log(`Ошибка в крипе ${name}: ${e.message}`);
+      console.log(
+        `[${roomState.roomName}] Ошибка крипа ${creep.name}: ${e.message}`,
+      );
     }
   }
+}
 
-  // Управление башнями
-  const towers = _.filter(
-    Game.structures,
-    s => s.structureType === STRUCTURE_TOWER,
-  );
-  for (const tower of towers) {
+// ─── Управление башнями одной комнаты ────────────────────────────────────────
+function runTowerLogic(roomState) {
+  for (const tower of roomState.towers) {
     roleTower.run(tower);
+  }
+}
+
+// ─── ГЛАВНЫЙ ЦИКЛ ─────────────────────────────────────────────────────────────
+module.exports.loop = function () {
+  // 1. Очистка памяти мёртвых крипов
+  for (const name in Memory.creeps) {
+    if (!Game.creeps[name]) delete Memory.creeps[name];
+  }
+
+  // 2. Получаем состояние всех собственных комнат
+  const allRooms = roomManager.buildAllRoomStates();
+
+  // 3. Обрабатываем каждую комнату независимо
+  for (const roomState of allRooms) {
+    runSpawnLogic(roomState);
+    runCreepLogic(roomState);
+    runTowerLogic(roomState);
   }
 };
