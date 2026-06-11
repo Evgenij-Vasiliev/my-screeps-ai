@@ -1,77 +1,53 @@
 /**
  * ЛОГИКА ХАРВЕСТЕРА (Harvester Role)
- * Основная задача: сбор энергии и заправка ключевых зданий комнаты.
+ * Задача: сбор энергии и заправка ключевых зданий комнаты.
+ * Используется как запасной крип пока майнеры/транспортёры не готовы.
  */
 module.exports = {
   run: function (creep) {
-    /**
-     * 1. СОСТОЯНИЕ (State Management)
-     * Инициализируем переменную в памяти, если её еще нет.
-     */
-    if (creep.memory.working === undefined) {
-      creep.memory.working = false;
-    }
-
-    /**
-     * 2. ТУМБЛЕР (Logic Switch)
-     * Переключаем режимы: "Сбор" (false) и "Доставка" (true).
-     */
+    // Тумблер
     if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true; // Рюкзак полон -> везем энергию
+      creep.memory.working = true;
     } else if (
       creep.memory.working === true &&
       creep.store[RESOURCE_ENERGY] === 0
     ) {
-      creep.memory.working = false; // Энергия кончилась -> идем добывать
+      creep.memory.working = false;
     }
+    if (creep.memory.working === undefined) creep.memory.working = false;
 
-    /**
-     * 3. РЕЖИМ СБОРА (Harvesting Mode)
-     * Используем Slot Booking: идем к источнику по индексу из памяти.
-     */
     if (!creep.memory.working) {
-      // Получаем все источники в текущей комнате
+      // Сбор: по индексу из памяти или ближайший
       const sources = creep.room.find(FIND_SOURCES);
-
-      // Если в памяти есть индекс (0 или 1), берем его. Для старых крипов ищем ближайший.
-      const targetSource =
+      const target =
         creep.memory.sourceIndex !== undefined
           ? sources[creep.memory.sourceIndex]
           : creep.pos.findClosestByRange(FIND_SOURCES);
 
-      if (targetSource) {
-        if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(targetSource, {
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
-        }
+      if (target && creep.harvest(target) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(target, {
+          visualizePathStyle: { stroke: "#ffaa00" },
+          reusePath: 10,
+        });
       }
     } else {
-      /**
-       * 4. РЕЖИМ ПЕРЕДАЧИ (Delivery Mode)
-       * Развозим энергию согласно установленным приоритетам.
-       */
+      // Доставка: Extensions → Spawn → Terminal → Storage
       let target = null;
 
-      // ПРИОРИТЕТ 1: Расширения (Extensions) - важны для лимита энергии
+      target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+        filter: s =>
+          s.structureType === STRUCTURE_EXTENSION &&
+          s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      });
+
       if (!target) {
         target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-          filter: structure =>
-            structure.structureType === STRUCTURE_EXTENSION &&
-            structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+          filter: s =>
+            s.structureType === STRUCTURE_SPAWN &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
         });
       }
 
-      // ПРИОРИТЕТ 2: Спавн (Spawn) - заправляем базу
-      if (!target) {
-        target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-          filter: structure =>
-            structure.structureType === STRUCTURE_SPAWN &&
-            structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-        });
-      }
-
-      // ПРИОРИТЕТ 3: Терминал (Terminal) - используем для рыночных операций
       if (
         !target &&
         creep.room.terminal &&
@@ -80,16 +56,22 @@ module.exports = {
         target = creep.room.terminal;
       }
 
-      // ПРИОРИТЕТ 4: Хранилище (Storage) - основной склад
-      if (!target && creep.room.storage) {
+      if (
+        !target &&
+        creep.room.storage &&
+        creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+      ) {
         target = creep.room.storage;
       }
 
-      // ВЫПОЛНЕНИЕ ДОСТАВКИ
-      if (target) {
-        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, { visualizePathStyle: { stroke: "#ffffff" } });
-        }
+      if (
+        target &&
+        creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+      ) {
+        creep.moveTo(target, {
+          visualizePathStyle: { stroke: "#ffffff" },
+          reusePath: 10,
+        });
       }
     }
   },
