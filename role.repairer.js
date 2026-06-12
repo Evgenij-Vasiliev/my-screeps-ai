@@ -1,10 +1,7 @@
 /**
  * ЛОГИКА РЕМОНТНИКА (Repairer Role)
- * Задача: чинить дороги и контейнеры. Стены/рампарты — задача башни.
- * Если всё исправно — помогает строителю.
- *
- * Примечание: в оригинале этот файл не использовался (не подключён в main.js).
- * Теперь подключён через creep.runner.js.
+ * Энергия: Storage → если пусто → Source напрямую.
+ * Если чинить нечего — помогает строителю.
  */
 const roleBuilder = require("role.builder");
 
@@ -12,42 +9,44 @@ module.exports = {
   run: function (creep) {
     if (creep.memory.working === undefined) creep.memory.working = false;
 
-    // Тумблер
-    if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true;
-    } else if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
-      creep.memory.working = false;
-    }
+    if (creep.store[RESOURCE_ENERGY] === 0) creep.memory.working = false;
+    if (creep.store.getFreeCapacity() === 0) creep.memory.working = true;
 
     if (!creep.memory.working) {
-      // Dropped energy → контейнер → источник
-      const dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-        filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 50,
-      });
-      if (dropped) {
-        if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) creep.moveTo(dropped);
-        return;
-      }
+      this._collect(creep);
+    } else {
+      this._repair(creep);
+    }
+  },
 
-      const source = creep.pos.findClosestByRange(FIND_SOURCES);
-      if (source && creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+  _collect: function (creep) {
+    const storage = creep.room.storage;
+    if (storage && storage.store[RESOURCE_ENERGY] > 0) {
+      if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(storage, { reusePath: 10 });
+      }
+      return;
+    }
+    // Storage пуст — добываем напрямую
+    const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
+    if (source && creep.harvest(source) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(source, { reusePath: 10 });
+    }
+  },
+
+  _repair: function (creep) {
+    const target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+      filter: s =>
+        s.hits < s.hitsMax &&
+        s.structureType !== STRUCTURE_WALL &&
+        s.structureType !== STRUCTURE_RAMPART,
+    });
+    if (target) {
+      if (creep.repair(target) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(target, { reusePath: 10 });
       }
     } else {
-      const target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-        filter: s =>
-          s.hits < s.hitsMax &&
-          s.structureType !== STRUCTURE_WALL &&
-          s.structureType !== STRUCTURE_RAMPART,
-      });
-
-      if (target) {
-        if (creep.repair(target) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, { visualizePathStyle: { stroke: "#00ff00" } });
-        }
-      } else {
-        roleBuilder.run(creep);
-      }
+      roleBuilder.run(creep);
     }
   },
 };

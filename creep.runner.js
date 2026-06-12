@@ -5,6 +5,7 @@ const roleRepairer = require("role.repairer");
 const roleMiner = require("role.miner");
 const roleTransporter = require("role.transporter");
 const roleTowerSupplier = require("role.towerSupplier");
+const roleTerminalUnloader = require("role.terminalUnloader");
 const cpuMonitor = require("cpuMonitor");
 
 module.exports = {
@@ -44,6 +45,9 @@ module.exports = {
         break;
       case "towerSupplier":
         roleTowerSupplier.run(creep);
+        break;
+      case "terminalUnloader":
+        roleTerminalUnloader.run(creep);
         break;
       default:
         console.log(
