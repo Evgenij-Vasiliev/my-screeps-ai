@@ -52,20 +52,27 @@ const factory = {
       }
 
       return {
-        body: prepareBody({ work: 5, carry: 1, move: 3 }),
+        body: prepareBody({ work: 5, carry: 1, move: 1 }),
         memory: { spot: assignedSpot },
       };
     },
 
     // Возит энергию из контейнеров. CARRY:MOVE = 2:1 (едет по дорогам).
     transporter: () => ({
-      body: prepareBody({ carry: 4, move: 4 }),
+      body: prepareBody({ carry: 12, move: 6 }),
       memory: {},
     }),
 
     // Носит энергию в башни. Башни близко — размер поменьше.
     towerSupplier: () => ({
       body: prepareBody({ carry: 8, move: 4 }),
+      memory: {},
+    }),
+
+    // Перекладывает storage ↔ terminal по очереди terminalNeeds.
+    // Только CARRY и MOVE — ничего не добывает.
+    terminalUnloader: () => ({
+      body: prepareBody({ carry: 10, move: 5 }),
       memory: {},
     }),
 
@@ -77,7 +84,7 @@ const factory = {
 
     // Качает контроллер. Много WORK, CARRY для пополнения, MOVE по дорогам.
     upgrader: () => ({
-      body: prepareBody({ work: 2, carry: 2, move: 2 }),
+      body: prepareBody({ work: 15, carry: 8, move: 8 }),
       memory: {},
     }),
 

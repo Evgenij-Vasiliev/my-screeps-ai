@@ -4,11 +4,12 @@ const factory = require("creep.factory");
 const QUOTA = {
   miner: 2,
   towerSupplier: 2,
-  harvester: 4,
-  upgrader: 0,
-  builder: 2,
+  terminalUnloader: 1,
+  harvester: 1,
+  upgrader: 1,
+  builder: 1,
   repairer: 1,
-  transporter: 0,
+  // transporter: 2, // не нужен при линковой логистике
 };
 
 module.exports = {
