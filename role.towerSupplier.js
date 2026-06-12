@@ -1,12 +1,21 @@
 /**
  * ЛОГИКА СНАБЖЕНЦА БАШЕН (TowerSupplier Role)
- * Задача: держать башни заряженными, забирая энергию из контейнеров.
+ *
+ * Приоритеты сбора энергии:
+ *   1. Линк у storage (основной источник при линковой логистике)
+ *   2. Dropped energy (подбираем по пути — не пропадать же)
+ *   3. Контейнер (fallback если линка нет)
+ *
+ * Доставка:
+ *   1. Башни — до полного заряда
+ *   2. Storage — если башни полные
+ *
+ * Временно также перекладывает энергию из storage-линка в storage.
  */
 module.exports = {
   run: function (creep) {
     if (creep.memory.working === undefined) creep.memory.working = false;
 
-    // Тумблер
     if (creep.store[RESOURCE_ENERGY] === 0) creep.memory.working = false;
     if (creep.store.getFreeCapacity() === 0) creep.memory.working = true;
 
@@ -18,7 +27,19 @@ module.exports = {
   },
 
   _collect: function (creep) {
-    // Сначала dropped energy
+    // 1. Линк у storage — основной источник
+    const config = (Memory.rooms[creep.room.name] || {}).links;
+    if (config && config.storage) {
+      const storageLink = Game.getObjectById(config.storage);
+      if (storageLink && storageLink.store[RESOURCE_ENERGY] > 0) {
+        if (creep.withdraw(storageLink, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(storageLink, { reusePath: 10 });
+        }
+        return;
+      }
+    }
+
+    // 2. Dropped energy
     const dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
       filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 50,
     });
@@ -29,6 +50,7 @@ module.exports = {
       return;
     }
 
+    // 3. Контейнер (fallback)
     const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
       filter: s =>
         s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0,
@@ -41,6 +63,7 @@ module.exports = {
   },
 
   _supply: function (creep) {
+    // 1. Башни — до полного
     const tower = creep.pos.findClosestByPath(FIND_STRUCTURES, {
       filter: s =>
         s.structureType === STRUCTURE_TOWER &&
@@ -53,7 +76,7 @@ module.exports = {
       return;
     }
 
-    // Башни полные — везём в storage чтобы не простаивать
+    // 2. Storage — если башни полные (заодно разгружаем storage-линк)
     if (
       creep.room.storage &&
       creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
