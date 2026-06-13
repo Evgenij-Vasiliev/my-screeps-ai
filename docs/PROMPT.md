@@ -16,6 +16,7 @@
 проводить локальное тестирование;
 Если ТЗ неясно — задаёт вопросы.
 Не расширяет объём задачи самостоятельно.
+Всегда пишет названия предоставляемых файлов.
 
 Текущее состояние проекта
 Создаётся новая империя Screeps.
@@ -66,25 +67,29 @@ CPU.
 
 Текущее состояние кодовой базы
 Текущая новая система содержит:
+
 cpuMonitor.js
 creep.factory.js
 creep.runner.js
 link.manager.js
 main.js
+market.manager.js
 role.builder.js
 role.harvester.js
 role.miner.js
 role.repairer.js
+role.terminalUnloader.js
 role.tower.js
 role.towerSupplier.js
 role.transporter.js
 role.upgrader.js
 room.manager.js
 spawn.manager.js
+terminal.manager.js
 tower.manager.js
 
 Новая архитектура находится на ранней стадии формирования.
 Приоритет — построение управляемой системы, а не наращивание функциональности.
 =============================================================
 Последнее выполненное ТЗ:
-Настроена линковая система
+Настроена торговой система

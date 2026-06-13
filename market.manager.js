@@ -12,7 +12,7 @@
 const UPDATE_INTERVAL = 100;
 
 // Минимальный излишек для продажи энергии
-const ENERGY_SELL_SURPLUS = 500000;
+const ENERGY_SELL_SURPLUS = 50000;
 // Минимальный излишек для продажи минералов
 const MINERAL_SELL_SURPLUS = 50000;
 // Минимум энергии в терминале для транзакции
@@ -22,7 +22,7 @@ const MAX_DEAL_AMOUNT = 10000;
 
 // Ресурсы разрешённые к продаже
 const SELLABLE = new Set([
-  RESOURCE_ENERGY,
+  // RESOURCE_ENERGY,
   RESOURCE_BATTERY,
   RESOURCE_UTRIUM,
   RESOURCE_LEMERGIUM,

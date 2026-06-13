@@ -52,16 +52,16 @@ const factory = {
       }
 
       return {
-        body: prepareBody({ work: 5, carry: 1, move: 1 }),
+        body: prepareBody({ work: 5, carry: 1, move: 2 }),
         memory: { spot: assignedSpot },
       };
     },
 
     // Возит энергию из контейнеров. CARRY:MOVE = 2:1 (едет по дорогам).
-    transporter: () => ({
-      body: prepareBody({ carry: 12, move: 6 }),
-      memory: {},
-    }),
+    // transporter: () => ({
+    //   body: prepareBody({ carry: 12, move: 6 }),
+    //   memory: {},
+    // }),
 
     // Носит энергию в башни. Башни близко — размер поменьше.
     towerSupplier: () => ({
@@ -76,29 +76,49 @@ const factory = {
       memory: {},
     }),
 
-    // Аварийный крип — копает и везёт сам. Спавнится только если крипов нет.
-    harvester: () => ({
-      body: prepareBody({ work: 2, carry: 4, move: 6 }),
+    factoryWorker: () => ({
+      body: prepareBody({ carry: 1, move: 1 }),
       memory: {},
     }),
+
+    // Аварийный крип — копает и везёт сам. Спавнится только если крипов нет.
+    worker: () => ({
+      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      memory: {},
+    }),
+
+    mineralMiner: spawn => {
+      let mineralId = null;
+      if (spawn.room.memory.mineralId) {
+        mineralId = spawn.room.memory.mineralId;
+      } else {
+        const minerals = spawn.room.find(FIND_MINERALS);
+        mineralId = minerals.length > 0 ? minerals[0].id : null;
+        spawn.room.memory.mineralId = mineralId;
+      }
+      return {
+        body: prepareBody({ work: 5, carry: 5, move: 5 }),
+        memory: { mineralId },
+      };
+    },
 
     // Качает контроллер. Много WORK, CARRY для пополнения, MOVE по дорогам.
-    upgrader: () => ({
-      body: prepareBody({ work: 15, carry: 8, move: 8 }),
-      memory: {},
-    }),
+    // upgrader: () => ({
+    //   body: prepareBody({ work: 15, carry: 8, move: 8 }),
+    //   memory: {},
+    // }),
 
     // Строит здания, запасной апгрейдер.
-    builder: () => ({
-      body: prepareBody({ work: 5, carry: 5, move: 5 }),
-      memory: {},
-    }),
+    // builder: () => ({
+    //   body: prepareBody({ work: 5, carry: 5, move: 5 }),
+    //   memory: {},
+    // }),
 
     // Чинит дороги и контейнеры.
-    repairer: () => ({
-      body: prepareBody({ work: 4, carry: 4, move: 4 }),
-      memory: {},
-    }),
+    // repairer: () => ({
+    //   body: prepareBody({ work: 4, carry: 4, move: 4 }),
+    //   memory: {},
+    // }),
 
     // --- Заготовки (раскомментировать когда понадобятся) ---
 
@@ -122,6 +142,31 @@ const factory = {
     //   memory: { homeRoom: spawn.room.name },
     // }),
 
+    remoteMiner: (spawn, roleData) => ({
+      body: prepareBody({ work: 5, carry: 1, move: 6 }),
+      memory: { target: roleData.targetRoom || null },
+    }),
+
+    remoteHauler: (spawn, roleData) => ({
+      body: prepareBody({ carry: 10, move: 10 }),
+      memory: { working: false, targetRoom: roleData.targetRoom || null },
+    }),
+
+    reserver: (spawn, roleData) => ({
+      body: prepareBody({ claim: 2, move: 4 }),
+      memory: { working: false, targetRoom: roleData.targetRoom || null },
+    }),
+
+    attacker: spawn => ({
+      body: prepareBody({
+        tough: 0,
+        move: 10,
+        heal: 0,
+        ranged_attack: 10,
+      }),
+      memory: { targetRoom: null, homeRoom: spawn.room.name },
+    }),
+
     default: () => ({
       body: prepareBody({ work: 1, carry: 1, move: 1 }),
       memory: {},
@@ -139,7 +184,7 @@ const factory = {
     const blueprint = blueprintFn(spawn, roleData);
 
     if (!blueprint.body || blueprint.body.length === 0) {
-      console.log(`[factory] Пустое тело для роли ${role} в ${roomName}`);
+      // console.log(`[factory] Пустое тело для роли ${role} в ${roomName}`);
       return ERR_INVALID_ARGS;
     }
 
@@ -156,9 +201,9 @@ const factory = {
       const summary = Object.entries(parts)
         .map(([p, n]) => `${p}×${n}`)
         .join(" ");
-      console.log(`[factory] ${roomName}: +${role} [${summary}]`);
+      // console.log(`[factory] ${roomName}: +${role} [${summary}]`);
     } else if (result !== ERR_NOT_ENOUGH_ENERGY && result !== ERR_BUSY) {
-      console.log(`[factory] Ошибка спавна ${role} в ${roomName}: ${result}`);
+      // console.log(`[factory] Ошибка спавна ${role} в ${roomName}: ${result}`);
     }
 
     return result;
