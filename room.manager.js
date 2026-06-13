@@ -3,6 +3,10 @@ const creepRunner = require("creep.runner");
 const towerManager = require("tower.manager");
 const linkManager = require("link.manager");
 const terminalManager = require("terminal.manager");
+const marketManager = require("market.manager");
+const factoryManager = require("factory.manager");
+const roomRemote = require("room.remote");
+const observerManager = require("observer.manager");
 const cpuMonitor = require("cpuMonitor");
 
 module.exports = {
@@ -14,6 +18,10 @@ module.exports = {
     cpuMonitor.trackRole("terminalManager", () => terminalManager.run(room));
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(room));
     creepRunner.run(room);
+    factoryManager.run(room);
+    marketManager.run();
+    roomRemote.run(room);
+    observerManager.run(room);
 
     this._drawStats(room);
   },
