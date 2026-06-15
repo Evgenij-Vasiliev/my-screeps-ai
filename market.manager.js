@@ -12,7 +12,7 @@
 const UPDATE_INTERVAL = 100;
 
 // Минимальный излишек для продажи энергии
-const ENERGY_SELL_SURPLUS = 50000;
+const ENERGY_SELL_SURPLUS = 100000;
 // Минимальный излишек для продажи минералов
 const MINERAL_SELL_SURPLUS = 50000;
 // Минимум энергии в терминале для транзакции
