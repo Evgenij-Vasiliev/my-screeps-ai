@@ -57,6 +57,11 @@ const factory = {
       };
     },
 
+    // harvester: () => ({
+    //   body: prepareBody({ work: 1, carry: 1, move: 1 }),
+    //   memory: {},
+    // }),
+
     // Возит энергию из контейнеров. CARRY:MOVE = 2:1 (едет по дорогам).
     // transporter: () => ({
     //   body: prepareBody({ carry: 12, move: 6 }),
@@ -66,6 +71,11 @@ const factory = {
     // Носит энергию в башни. Башни близко — размер поменьше.
     towerSupplier: () => ({
       body: prepareBody({ carry: 8, move: 4 }),
+      memory: {},
+    }),
+
+    linkWorker: () => ({
+      body: prepareBody({ carry: 8, move: 2 }),
       memory: {},
     }),
 

@@ -7,6 +7,7 @@ const roles = {
   miner: require("role.miner"),
   transporter: require("role.transporter"),
   towerSupplier: require("role.towerSupplier"),
+  linkWorker: require("role.linkWorker"),
   terminalUnloader: require("role.terminalUnloader"),
   mineralMiner: require("role.mineralMiner"),
   factoryWorker: require("role.factoryWorker"),
