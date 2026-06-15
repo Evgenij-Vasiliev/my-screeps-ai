@@ -20,7 +20,6 @@ const QUOTA = {
 
 module.exports = {
   run: function (room) {
-    if (room.name === "E36S38") console.log("[spawn] вызван для E36S38");
     const spawn = room.find(FIND_MY_SPAWNS)[0];
     if (!spawn || spawn.spawning) return;
 
