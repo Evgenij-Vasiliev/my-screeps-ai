@@ -57,17 +57,6 @@ const factory = {
       };
     },
 
-    // harvester: () => ({
-    //   body: prepareBody({ work: 1, carry: 1, move: 1 }),
-    //   memory: {},
-    // }),
-
-    // Возит энергию из контейнеров. CARRY:MOVE = 2:1 (едет по дорогам).
-    // transporter: () => ({
-    //   body: prepareBody({ carry: 12, move: 6 }),
-    //   memory: {},
-    // }),
-
     // Носит энергию в башни. Башни близко — размер поменьше.
     towerSupplier: () => ({
       body: prepareBody({ carry: 8, move: 4 }),
@@ -111,46 +100,6 @@ const factory = {
         memory: { mineralId },
       };
     },
-
-    // Качает контроллер. Много WORK, CARRY для пополнения, MOVE по дорогам.
-    // upgrader: () => ({
-    //   body: prepareBody({ work: 15, carry: 8, move: 8 }),
-    //   memory: {},
-    // }),
-
-    // Строит здания, запасной апгрейдер.
-    // builder: () => ({
-    //   body: prepareBody({ work: 5, carry: 5, move: 5 }),
-    //   memory: {},
-    // }),
-
-    // Чинит дороги и контейнеры.
-    // repairer: () => ({
-    //   body: prepareBody({ work: 4, carry: 4, move: 4 }),
-    //   memory: {},
-    // }),
-
-    // --- Заготовки (раскомментировать когда понадобятся) ---
-
-    // claimer: (spawn, roleData) => ({
-    //   body: prepareBody({ claim: 2, move: 4 }),
-    //   memory: { targetRoom: roleData.targetRoom || null },
-    // }),
-
-    // remoteMiner: (spawn, roleData) => ({
-    //   body: prepareBody({ work: 5, carry: 1, move: 5 }),
-    //   memory: { targetRoom: roleData.targetRoom || null },
-    // }),
-
-    // remoteHauler: (spawn, roleData) => ({
-    //   body: prepareBody({ carry: 20, move: 20 }),
-    //   memory: { targetRoom: roleData.targetRoom || null },
-    // }),
-
-    // attacker: spawn => ({
-    //   body: prepareBody({ tough: 2, move: 10, ranged_attack: 8, heal: 2 }),
-    //   memory: { homeRoom: spawn.room.name },
-    // }),
 
     remoteMiner: (spawn, roleData) => ({
       body: prepareBody({ work: 5, carry: 1, move: 6 }),

@@ -68,28 +68,41 @@ CPU.
 Текущее состояние кодовой базы
 Текущая новая система содержит:
 
+control.js
 cpuMonitor.js
 creep.factory.js
 creep.runner.js
+docs/CURRENT_TASK.md
+docs/PLAN.md
+docs/PROMPT.md
+factory.manager.js
 link.manager.js
 main.js
 market.manager.js
+observer.manager.js
+role.attacker.js
 role.builder.js
+role.factoryWorker.js
 role.harvester.js
+role.linkWorker.js
 role.miner.js
+role.mineralMiner.js
+role.remoteHauler.js
+role.remoteMiner.js
 role.repairer.js
+role.reserver.js
 role.terminalUnloader.js
 role.tower.js
 role.towerSupplier.js
 role.transporter.js
 role.upgrader.js
+role.worker.js
 room.manager.js
+room.remote.js
 spawn.manager.js
+taskManager.js
 terminal.manager.js
 tower.manager.js
 
 Новая архитектура находится на ранней стадии формирования.
 Приоритет — построение управляемой системы, а не наращивание функциональности.
-=============================================================
-Последнее выполненное ТЗ:
-Настроена торговой система
