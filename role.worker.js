@@ -2,7 +2,7 @@
  * ===================================================
  * ROLE.WORKER.JS — Универсальный рабочий крип
  * ===================================================
- * VERSION: 4.1
+ * VERSION: 4.2
  *
  * Заменяет: upgrader, builder, repairer, harvester
  * Источник энергии: storage (аварийно — source)
@@ -40,10 +40,7 @@ const roleWorker = {
       if (!creep.memory.task) {
         const storage = creep.room.storage;
         if (storage && creep.pos.getRangeTo(storage) < 4) {
-          creep.moveTo(creep.room.controller, {
-            reusePath: 20,
-            visualizePathStyle: { stroke: "#aaaaaa" },
-          });
+          creep.moveTo(creep.room.controller, { reusePath: 20 });
         }
         return;
       }
@@ -67,10 +64,7 @@ const roleWorker = {
           return;
         }
         if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#ffffff" },
-          });
+          creep.moveTo(target, { reusePath: 20 });
         }
         break;
       }
@@ -84,10 +78,7 @@ const roleWorker = {
           return;
         }
         if (creep.repair(target) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#00ff00" },
-          });
+          creep.moveTo(target, { reusePath: 20 });
         }
         break;
       }
@@ -101,10 +92,7 @@ const roleWorker = {
           return;
         }
         if (creep.build(site) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(site, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#ffff00" },
-          });
+          creep.moveTo(site, { reusePath: 20 });
         }
         break;
       }
@@ -114,10 +102,7 @@ const roleWorker = {
         const controller = creep.room.controller;
         if (!controller) return;
         if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(controller, {
-            reusePath: 5,
-            visualizePathStyle: { stroke: "#00ff00" },
-          });
+          creep.moveTo(controller, { reusePath: 20 });
         }
         break;
       }
@@ -133,10 +118,7 @@ const roleWorker = {
 
     if (storage && storage.store[RESOURCE_ENERGY] > 200) {
       if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, {
-          reusePath: 5,
-          visualizePathStyle: { stroke: "#ffaa00" },
-        });
+        creep.moveTo(storage, { reusePath: 20 });
       }
       return;
     }
@@ -146,10 +128,7 @@ const roleWorker = {
     const source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
     if (source) {
       if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(source, {
-          reusePath: 5,
-          visualizePathStyle: { stroke: "#ff0000" },
-        });
+        creep.moveTo(source, { reusePath: 20 });
       }
     }
   },

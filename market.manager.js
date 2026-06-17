@@ -58,7 +58,7 @@ module.exports = {
     );
 
     for (const room of ourRooms) {
-      this._trySell(room);
+      // this._trySell(room);
     }
   },
 

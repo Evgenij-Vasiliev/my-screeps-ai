@@ -2,7 +2,7 @@
  * ===================================================
  * DIAGNOSTIC.JS — Диагностика состояния империи
  * ===================================================
- * VERSION: 2.0
+ * VERSION: 2.1
  *
  * Использование из консоли:
  *   const D = require("diagnostic");
@@ -15,6 +15,9 @@
  *   D.overrides()         — все активные override
  *   D.balance()           — энергия по всей империи
  *   D.cpu()               — использование CPU
+ *   D.storages()          — снимок всех storage с предупреждениями
+ *   D.terminals()         — снимок всех terminal с заполненностью
+ *   D.logistics()         — очереди terminalNeeds по всем комнатам
  * ===================================================
  */
 
@@ -155,6 +158,13 @@ const Diagnostic = {
     lines.push("\n--- Storage ---");
     if (room.storage) {
       const st = room.storage.store;
+      const used = room.storage.store.getUsedCapacity();
+      const cap = room.storage.store.getCapacity();
+      const pct = Math.round((used / cap) * 100);
+      const fill = pct > 90 ? "🔴" : pct > 70 ? "🟡" : "🟢";
+      lines.push(
+        "  " + fill + " заполнен: " + used + "/" + cap + " (" + pct + "%)",
+      );
       lines.push("  energy: " + _fmt(st[RESOURCE_ENERGY] || 0));
       for (const res in st) {
         if (res === RESOURCE_ENERGY) continue;
@@ -193,6 +203,21 @@ const Diagnostic = {
       }
     } else {
       lines.push("  ❌ нет");
+    }
+
+    // terminalNeeds
+    const needs = mem.terminalNeeds;
+    if (needs && needs.length > 0) {
+      lines.push("\n--- terminalNeeds ---");
+      for (const n of needs) {
+        lines.push(
+          "  " +
+            n.resource +
+            ": " +
+            n.amount +
+            (n.toRoom ? " → " + n.toRoom : " → terminal"),
+        );
+      }
     }
 
     // Sources
@@ -264,6 +289,170 @@ const Diagnostic = {
         lines.push("  " + _pad(res, 20) + ": " + amt);
       }
     }
+
+    return lines.join("\n");
+  },
+
+  // ── STORAGES ─────────────────────────────────────────────────────────────
+  storages: function () {
+    const lines = ["=== STORAGES (все комнаты) ==="];
+    let totalEnergy = 0;
+    let warnings = 0;
+
+    for (const roomName in Game.rooms) {
+      const room = Game.rooms[roomName];
+      if (!room.controller || !room.controller.my) continue;
+
+      const st = room.storage;
+      if (!st) {
+        lines.push("  ❌ " + roomName + ": storage отсутствует");
+        continue;
+      }
+
+      const used = st.store.getUsedCapacity();
+      const cap = st.store.getCapacity();
+      const pct = Math.round((used / cap) * 100);
+      const energy = st.store[RESOURCE_ENERGY] || 0;
+      const fill = pct > 90 ? "🔴" : pct > 70 ? "🟡" : "🟢";
+
+      totalEnergy += energy;
+
+      // Список ресурсов кроме энергии
+      const minerals = Object.entries(st.store)
+        .filter(([r, v]) => r !== RESOURCE_ENERGY && v > 0)
+        .map(([r, v]) => r + ":" + v)
+        .join(" ");
+
+      lines.push(
+        "  " +
+          fill +
+          " " +
+          roomName +
+          "  energy:" +
+          _fmt(energy) +
+          "  заполнен:" +
+          pct +
+          "%" +
+          (minerals ? "  [" + minerals + "]" : ""),
+      );
+
+      // Предупреждения
+      if (pct > 90) {
+        lines.push("    ⚠ ПЕРЕПОЛНЕНИЕ: " + used + "/" + cap);
+        warnings++;
+      } else if (energy < 50000) {
+        lines.push("    ⚠ мало энергии: " + _fmt(energy));
+        warnings++;
+      }
+    }
+
+    lines.push("");
+    lines.push("Суммарная энергия в storage: " + _fmt(totalEnergy));
+    if (warnings > 0) {
+      lines.push("⚠ Предупреждений: " + warnings);
+    } else {
+      lines.push("✅ Все storage в норме");
+    }
+
+    return lines.join("\n");
+  },
+
+  // ── TERMINALS ────────────────────────────────────────────────────────────
+  terminals: function () {
+    const lines = ["=== TERMINALS (все комнаты) ==="];
+    let warnings = 0;
+
+    for (const roomName in Game.rooms) {
+      const room = Game.rooms[roomName];
+      if (!room.controller || !room.controller.my) continue;
+
+      const term = room.terminal;
+      if (!term) {
+        lines.push("  ❌ " + roomName + ": terminal отсутствует");
+        continue;
+      }
+
+      const used = term.store.getUsedCapacity();
+      const cap = term.store.getCapacity();
+      const pct = Math.round((used / cap) * 100);
+      const energy = term.store[RESOURCE_ENERGY] || 0;
+      const fill = pct > 90 ? "🔴" : pct > 70 ? "🟡" : "🟢";
+      const cd = term.cooldown > 0 ? " ⏱cd:" + term.cooldown : "";
+
+      // Список ресурсов
+      const resources = Object.entries(term.store)
+        .filter(([, v]) => v > 0)
+        .sort(([, a], [, b]) => b - a)
+        .map(([r, v]) => r + ":" + _fmt(v))
+        .join(" ");
+
+      lines.push(
+        "  " +
+          fill +
+          " " +
+          roomName +
+          "  " +
+          used +
+          "/" +
+          cap +
+          " (" +
+          pct +
+          "%)" +
+          cd +
+          "\n    " +
+          (resources || "(пусто)"),
+      );
+
+      // Предупреждения
+      if (pct > 90) {
+        lines.push("    ⚠ ПЕРЕПОЛНЕНИЕ терминала!");
+        warnings++;
+      }
+      if (energy < 10000) {
+        lines.push("    ⚠ мало энергии в терминале: " + energy);
+        warnings++;
+      }
+    }
+
+    lines.push("");
+    if (warnings > 0) {
+      lines.push("⚠ Предупреждений: " + warnings);
+    } else {
+      lines.push("✅ Все terminals в норме");
+    }
+
+    return lines.join("\n");
+  },
+
+  // ── LOGISTICS ────────────────────────────────────────────────────────────
+  logistics: function () {
+    const lines = ["=== LOGISTICS (terminalNeeds по комнатам) ==="];
+    let total = 0;
+
+    for (const roomName in Memory.rooms) {
+      const mem = Memory.rooms[roomName];
+      const needs = mem && mem.terminalNeeds;
+
+      if (!needs || needs.length === 0) {
+        lines.push("  " + roomName + ": очередь пуста");
+        continue;
+      }
+
+      lines.push("  " + roomName + " (" + needs.length + " задач):");
+      for (const n of needs) {
+        lines.push(
+          "    " +
+            n.resource +
+            ": " +
+            n.amount +
+            (n.toRoom ? " → " + n.toRoom : " → terminal"),
+        );
+        total++;
+      }
+    }
+
+    lines.push("");
+    lines.push("Задач в очередях: " + total);
 
     return lines.join("\n");
   },
@@ -415,18 +604,118 @@ const Diagnostic = {
     return lines.join("\n");
   },
 
+  // ── MEMORY ───────────────────────────────────────────────────────────────
+  memory: function (roomName) {
+    const mem = Memory.rooms && Memory.rooms[roomName];
+    if (!mem) return "Memory.rooms[" + roomName + "] пуста";
+
+    const TEMPLATE = [
+      "sources",
+      "towers",
+      "mineralId",
+      "links",
+      "minerSpots",
+      "energyTargets",
+      "hasSites",
+      "needsRepair",
+      "earlySpawnThresholds",
+      "terminalNeeds",
+      "terminalMode",
+      "wallThreshold",
+      "labs",
+      "labs2",
+      "labs3",
+      "boostLab",
+      "labWorkerIndex",
+    ];
+
+    const lines = ["=== MEMORY: " + roomName + " ==="];
+    const missing = TEMPLATE.filter(k => !(k in mem));
+    const extra = Object.keys(mem).filter(
+      k => !TEMPLATE.includes(k) && k !== "diagnostics" && k !== "paused",
+    );
+
+    if (missing.length > 0) lines.push("⚠ отсутствуют: " + missing.join(", "));
+    if (extra.length > 0) lines.push("⚠ лишние: " + extra.join(", "));
+    if (missing.length === 0 && extra.length === 0)
+      lines.push("✅ структура верна");
+
+    lines.push("");
+    for (const key of TEMPLATE) {
+      const val = mem[key];
+      if (val === undefined) {
+        lines.push("  ❌ " + key + ": отсутствует");
+      } else if (typeof val === "object" && val !== null) {
+        lines.push("  ✅ " + key + ": " + JSON.stringify(val).slice(0, 60));
+      } else {
+        lines.push("  ✅ " + key + ": " + val);
+      }
+    }
+    return lines.join("\n");
+  },
+
+  memoryAll: function () {
+    const TEMPLATE = [
+      "sources",
+      "towers",
+      "mineralId",
+      "links",
+      "minerSpots",
+      "energyTargets",
+      "hasSites",
+      "needsRepair",
+      "earlySpawnThresholds",
+      "terminalNeeds",
+      "terminalMode",
+      "wallThreshold",
+      "labs",
+      "labs2",
+      "labs3",
+      "boostLab",
+      "labWorkerIndex",
+    ];
+
+    const lines = ["=== MEMORY ALL ==="];
+    for (const roomName in Memory.rooms) {
+      const mem = Memory.rooms[roomName];
+      const keys = Object.keys(mem || {});
+      if (keys.length === 0) {
+        lines.push(roomName + ": пуста");
+        continue;
+      }
+      const missing = TEMPLATE.filter(k => !(k in mem));
+      const extra = keys.filter(
+        k => !TEMPLATE.includes(k) && k !== "diagnostics" && k !== "paused",
+      );
+      const status = missing.length === 0 && extra.length === 0 ? "✅" : "⚠";
+      lines.push(
+        status +
+          " " +
+          roomName +
+          (missing.length > 0 ? "  ❌ нет: " + missing.join(", ") : "") +
+          (extra.length > 0 ? "  ➕ лишние: " + extra.join(", ") : ""),
+      );
+    }
+    return lines.join("\n");
+  },
+
   // ── HELP ─────────────────────────────────────────────────────────────────
   help: function () {
     return [
       "=== DIAGNOSTIC ===",
-      "  D.empire()            — сводка по всей империи",
-      "  D.room('E35S37')      — детали комнаты",
-      "  D.terminal('E35S37')  — содержимое терминала",
-      "  D.creeps('E35S37')    — крипы комнаты",
-      "  D.creep('Worker1')    — детали крипа",
-      "  D.overrides()         — все активные override",
-      "  D.balance()           — энергия по империи",
-      "  D.cpu()               — CPU",
+      "  D.memory('E35S37')     — память комнаты",
+      "  D.memoryAll()          — сравнение памяти всех комнат",
+      "  D.empire()             — сводка по всей империи",
+      "  D.room('E35S37')       — детали комнаты",
+      "  D.terminal('E35S37')   — содержимое терминала",
+      "  D.creeps('E35S37')     — крипы комнаты",
+      "  D.creep('Worker1')     — детали крипа",
+      "  D.overrides()          — все активные override",
+      "  D.balance()            — энергия по империи",
+      "  D.cpu()                — CPU",
+      "  D.storages()           — снимок всех storage с предупреждениями",
+      "  D.terminals()          — снимок всех terminal с заполненностью",
+      "  D.logistics()          — очереди terminalNeeds по всем комнатам",
     ].join("\n");
   },
 };

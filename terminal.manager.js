@@ -1,25 +1,35 @@
 /**
- * МЕНЕДЖЕР ТЕРМИНАЛА (Terminal Manager)
- * Балансировка энергии между комнатами.
- * Запускается из room.manager каждый тик, глобальные операции — из первой комнаты.
+ * ===================================================
+ * TERMINAL MANAGER
+ * ===================================================
+ * VERSION: 2.1
+ *
+ * Запускается из room.manager каждый тик для каждой комнаты.
+ * Глобальные операции (балансировка) — только из первой комнаты по алфавиту.
  *
  * Логика:
- * - Бедная комната (< 20000 energy в storage) получает от богатой (> 100000)
+ * - Глобальная балансировка энергии между комнатами (каждые 100 тиков)
+ * - resourceBalancer — балансировка всех ресурсов (каждые 100 тиков)
+ * - processIncoming — проверка входящих грузов каждый тик (автоматическая
+ *   разгрузка терминала в storage после получения от другой комнаты)
  * - terminalNeeds — очередь задач для terminalUnloader (storage → terminal)
+ * - Подготовка ресурсов к продаже (перенос из storage в terminal)
+ * ===================================================
  */
 
 const marketManager = require("market.manager");
+const resourceBalancer = require("resourceBalancer");
 
 const ENERGY_POOR_THRESHOLD = 20000;
 const ENERGY_RICH_THRESHOLD = 100000;
 const ENERGY_SEND_AMOUNT = 20000;
-const TERMINAL_ENERGY_MIN = 20000;
-const TERMINAL_ENERGY_MAX = 100000;
+const TERMINAL_ENERGY_MIN = 100000;
+const TERMINAL_ENERGY_MAX = 150000;
 const CHECK_INTERVAL = 100;
 
 module.exports = {
   run: function (room) {
-    // Глобальная балансировка — только из первой комнаты по алфавиту
+    // ── ГЛОБАЛЬНЫЕ ОПЕРАЦИИ (только из первой комнаты) ───────────────────
     const firstRoom = Object.keys(Game.rooms)
       .filter(n => {
         const r = Game.rooms[n];
@@ -29,13 +39,20 @@ module.exports = {
 
     if (room.name === firstRoom) {
       this._runEnergyBalance();
+      resourceBalancer.run(); // балансировка всех ресурсов
       marketManager.run();
     }
 
-    // Подготовка ресурсов к продаже — перенос из storage в terminal
+    // ── КАЖДЫЙ ТИК ДЛЯ КАЖДОЙ КОМНАТЫ ───────────────────────────────────
+
+    // Автоматическая разгрузка входящих грузов из терминала в storage
+    resourceBalancer.processIncoming(room);
+
+    // Подготовка ресурсов к продаже
     this._runSellPrep(room);
   },
 
+  // ── БАЛАНСИРОВКА ЭНЕРГИИ ─────────────────────────────────────────────
   _runEnergyBalance: function () {
     if (Game.time % CHECK_INTERVAL !== 0) return;
 
@@ -61,7 +78,6 @@ module.exports = {
 
       const donorTerminal = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      // Энергия уже в терминале донора — отправляем
       if (donorTerminal >= ENERGY_SEND_AMOUNT + TERMINAL_ENERGY_MIN) {
         if (donor.terminal.cooldown > 0) continue;
 
@@ -84,25 +100,34 @@ module.exports = {
             `[Terminal] ✅ ${donor.name} → ${poorRoom.name}: ${ENERGY_SEND_AMOUNT} energy`,
           );
           this._clearNeed(donor, RESOURCE_ENERGY, poorRoom.name);
+          // Регистрируем входящий груз на стороне получателя
+          resourceBalancer.registerIncoming(
+            poorRoom.name,
+            RESOURCE_ENERGY,
+            ENERGY_SEND_AMOUNT,
+          );
         }
       } else {
-        // Энергии в терминале мало — просим unloader перенести из storage
         this._addNeed(
           donor,
           RESOURCE_ENERGY,
           ENERGY_SEND_AMOUNT,
           poorRoom.name,
         );
+        resourceBalancer.registerIncoming(
+          poorRoom.name,
+          RESOURCE_ENERGY,
+          ENERGY_SEND_AMOUNT,
+        );
       }
     }
   },
 
-  // Готовим ресурсы к продаже: просим unloader перенести из storage в terminal
+  // ── ПОДГОТОВКА К ПРОДАЖЕ ─────────────────────────────────────────────
   _runSellPrep: function (room) {
     if (Game.time % CHECK_INTERVAL !== 0) return;
     if (!room.terminal || !room.storage) return;
 
-    // Энергия в терминале для продажи
     const totalEnergy =
       (room.storage.store[RESOURCE_ENERGY] || 0) +
       (room.terminal.store[RESOURCE_ENERGY] || 0);
@@ -113,6 +138,7 @@ module.exports = {
     }
   },
 
+  // ── УТИЛИТЫ ──────────────────────────────────────────────────────────
   _addNeed: function (room, resource, amount, toRoom) {
     if (!room.memory.terminalNeeds) room.memory.terminalNeeds = [];
     const needs = room.memory.terminalNeeds;

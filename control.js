@@ -2,7 +2,7 @@
  * ===================================================
  * CONTROL.JS — Модуль управления империей
  * ===================================================
- * VERSION: 2.0
+ * VERSION: 2.1
  *
  * Использование из консоли:
  *   const C = require("control");
@@ -33,13 +33,26 @@
  * ТЕРМИНАЛ
  *   C.Terminal.send("E35S37", "E36S38", "energy", 10000)
  *   C.Terminal.status("E35S37")
+ *   C.Terminal.move("E35S37", "E36S38", "energy", 10000)
+ *     — полный цикл: storage(A) → terminal(A) → terminal(B) → storage(B)
+ *     — unloader комнаты A перенесёт ресурс в терминал,
+ *       терминал отправит в B, unloader B разгрузит в storage
+ *   C.Terminal.moveStatus("E35S37")
+ *     — статус активных заданий на переброску из комнаты
+ *   C.Terminal.moveCancel("E35S37", "E36S38", "energy")
+ *     — отменить задание на переброску
  *
  * ПАМЯТЬ
  *   C.Memory.clearRoom("E35S37")
  *   C.Memory.setRoom("E35S37", "key", value)
  *   C.Memory.show("E35S37")
+ *   C.Memory.deleteField("E35S37", "key")
+ *   C.Memory.compare()
+ *   C.Memory.restore("E35S37")
  * ===================================================
  */
+
+const resourceBalancer = require("resourceBalancer");
 
 const Control = {
   // ── EMPIRE ───────────────────────────────────────────────────────────────
@@ -230,6 +243,10 @@ const Control = {
 
   // ── TERMINAL ─────────────────────────────────────────────────────────────
   Terminal: {
+    /**
+     * Прямая отправка из терминала в терминал (ресурс уже в терминале).
+     * C.Terminal.send("E35S37", "E36S38", "energy", 10000)
+     */
     send: function (fromRoom, toRoom, resource, amount) {
       const room = Game.rooms[fromRoom];
       if (!room) return "❌ Комната не видна: " + fromRoom;
@@ -262,6 +279,165 @@ const Control = {
         );
       return "❌ Ошибка отправки: код " + result;
     },
+
+    /**
+     * Переброска ресурса из ХРАНИЛИЩА одной комнаты в ХРАНИЛИЩЕ другой.
+     * Полный цикл: storage(A) → terminal(A) → terminal(B) → storage(B)
+     *
+     * Шаг 1: ставит задачу в terminalNeeds комнаты A (unloader перенесёт из storage в terminal)
+     * Шаг 2: terminal.manager подхватит и выполнит send в следующем цикле
+     * Шаг 3: на стороне B unloader в режиме toStorage разгрузит terminal в storage
+     *
+     * C.Terminal.move("E35S37", "E36S38", "energy", 10000)
+     */
+    move: function (fromRoom, toRoom, resource, amount) {
+      // Валидация комнат
+      if (!Memory.rooms) return "❌ Memory.rooms не инициализирована";
+
+      const roomA = Game.rooms[fromRoom];
+      const roomB = Game.rooms[toRoom];
+
+      if (!roomA) return "❌ Комната-источник не видна: " + fromRoom;
+      if (!roomB) return "❌ Комната-получатель не видна: " + toRoom;
+      if (!roomA.storage)
+        return "❌ Нет storage в комнате-источнике: " + fromRoom;
+      if (!roomB.storage)
+        return "❌ Нет storage в комнате-получателе: " + toRoom;
+      if (!roomA.terminal)
+        return "❌ Нет terminal в комнате-источнике: " + fromRoom;
+      if (!roomB.terminal)
+        return "❌ Нет terminal в комнате-получателе: " + toRoom;
+
+      // Проверяем наличие ресурса в storage источника
+      const inStorage = roomA.storage.store[resource] || 0;
+      if (inStorage < amount) {
+        return (
+          "❌ В storage " +
+          fromRoom +
+          " только " +
+          inStorage +
+          " " +
+          resource +
+          " (нужно " +
+          amount +
+          ")"
+        );
+      }
+
+      // Шаг 1: ставим задачу unloader'у комнаты A — перенести из storage в terminal
+      Memory.rooms[fromRoom] = Memory.rooms[fromRoom] || {};
+      const needs = Memory.rooms[fromRoom].terminalNeeds || [];
+
+      // Проверяем дубликат
+      const existing = needs.find(
+        n => n.resource === resource && n.toRoom === toRoom,
+      );
+      if (existing) {
+        existing.amount = amount;
+        Memory.rooms[fromRoom].terminalNeeds = needs;
+        return (
+          "♻ Задача обновлена: " +
+          resource +
+          " x" +
+          amount +
+          "  storage(" +
+          fromRoom +
+          ") → storage(" +
+          toRoom +
+          ")" +
+          "\n  Unloader перенесёт в terminal, затем terminal.manager отправит."
+        );
+      }
+
+      needs.push({ resource, amount, toRoom });
+      Memory.rooms[fromRoom].terminalNeeds = needs;
+
+      // Шаг 2: регистрируем ожидание на стороне получателя —
+      // resourceBalancer.processIncoming автоматически разгрузит терминал в storage
+      resourceBalancer.registerIncoming(toRoom, resource, amount);
+
+      return (
+        "✅ Задача поставлена: " +
+        resource +
+        " x" +
+        amount +
+        "\n  storage(" +
+        fromRoom +
+        ") → terminal(" +
+        fromRoom +
+        ") → terminal(" +
+        toRoom +
+        ") → storage(" +
+        toRoom +
+        ")" +
+        "\n  Unloader в " +
+        fromRoom +
+        " перенесёт ресурс в терминал." +
+        "\n  Terminal.manager выполнит отправку в следующем цикле (до 100 тиков)." +
+        "\n  После получения — автоматически разгрузится в storage(" +
+        toRoom +
+        ")."
+      );
+    },
+
+    /**
+     * Статус активных заданий на переброску из комнаты.
+     * C.Terminal.moveStatus("E35S37")
+     */
+    moveStatus: function (roomName) {
+      const mem = Memory.rooms && Memory.rooms[roomName];
+      if (!mem) return "❌ Память комнаты не найдена: " + roomName;
+
+      const needs = mem.terminalNeeds || [];
+      if (needs.length === 0) return "✅ " + roomName + ": очередь пуста";
+
+      const lines = ["=== MOVE STATUS: " + roomName + " ==="];
+      for (const n of needs) {
+        const dest = n.toRoom ? " → storage(" + n.toRoom + ")" : " → terminal";
+        lines.push("  " + n.resource + " x" + n.amount + dest);
+
+        // Показываем сколько уже в терминале
+        const room = Game.rooms[roomName];
+        if (room && room.terminal) {
+          const inTerm = room.terminal.store[n.resource] || 0;
+          if (inTerm > 0) {
+            lines.push("    в терминале уже: " + inTerm);
+          }
+        }
+      }
+      return lines.join("\n");
+    },
+
+    /**
+     * Отменить задание на переброску.
+     * C.Terminal.moveCancel("E35S37", "E36S38", "energy")
+     */
+    moveCancel: function (fromRoom, toRoom, resource) {
+      const mem = Memory.rooms && Memory.rooms[fromRoom];
+      if (!mem || !mem.terminalNeeds) return "❌ Нет заданий в: " + fromRoom;
+
+      const before = mem.terminalNeeds.length;
+      mem.terminalNeeds = mem.terminalNeeds.filter(
+        n => !(n.resource === resource && n.toRoom === toRoom),
+      );
+      const after = mem.terminalNeeds.length;
+
+      if (before === after) {
+        return (
+          "❌ Задание не найдено: " + resource + " " + fromRoom + " → " + toRoom
+        );
+      }
+      return (
+        "✅ Задание отменено: " +
+        resource +
+        " storage(" +
+        fromRoom +
+        ") → storage(" +
+        toRoom +
+        ")"
+      );
+    },
+
     status: function (roomName) {
       const room = Game.rooms[roomName];
       if (!room) return "❌ Комната не видна: " + roomName;
@@ -308,6 +484,39 @@ const Control = {
       const mem = Memory.rooms && Memory.rooms[roomName];
       if (!mem) return "Memory.rooms[" + roomName + "] пуста";
       return JSON.stringify(mem, null, 2);
+    },
+    deleteField: function (roomName, key) {
+      if (!Memory.rooms || !Memory.rooms[roomName])
+        return "❌ Память комнаты не найдена: " + roomName;
+      delete Memory.rooms[roomName][key];
+      return "✅ " + roomName + "." + key + " удалено";
+    },
+    compare: function () {
+      const D = require("diagnostic");
+      return D.memoryAll();
+    },
+    restore: function (roomName) {
+      const DEFAULTS = {
+        energyTargets: [],
+        hasSites: false,
+        needsRepair: false,
+        earlySpawnThresholds: { miner: 43 },
+        terminalNeeds: [],
+        terminalMode: "toTerminal",
+        labWorkerIndex: 0,
+      };
+      Memory.rooms = Memory.rooms || {};
+      Memory.rooms[roomName] = Memory.rooms[roomName] || {};
+      const mem = Memory.rooms[roomName];
+      const restored = [];
+      for (const key in DEFAULTS) {
+        if (!(key in mem)) {
+          mem[key] = DEFAULTS[key];
+          restored.push(key);
+        }
+      }
+      if (restored.length === 0) return "✅ " + roomName + " — всё на месте";
+      return "✅ восстановлено в " + roomName + ": " + restored.join(", ");
     },
   },
 };
