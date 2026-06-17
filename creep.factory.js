@@ -51,6 +51,10 @@ const factory = {
         }
       }
 
+      if (!assignedSpot) {
+        assignedSpot = spots[0] || null;
+      }
+
       return {
         body: prepareBody({ work: 5, carry: 1, move: 2 }),
         memory: { spot: assignedSpot },
@@ -71,7 +75,7 @@ const factory = {
     // Перекладывает storage ↔ terminal по очереди terminalNeeds.
     // Только CARRY и MOVE — ничего не добывает.
     terminalUnloader: () => ({
-      body: prepareBody({ carry: 10, move: 5 }),
+      body: prepareBody({ carry: 5, move: 2 }),
       memory: {},
     }),
 
@@ -82,7 +86,7 @@ const factory = {
 
     // Аварийный крип — копает и везёт сам. Спавнится только если крипов нет.
     worker: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      body: prepareBody({ work: 5, carry: 5, move: 10 }),
       memory: {},
     }),
 

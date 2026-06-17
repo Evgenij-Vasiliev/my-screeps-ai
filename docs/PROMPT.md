@@ -72,6 +72,9 @@ control.js
 cpuMonitor.js
 creep.factory.js
 creep.runner.js
+diagnostic.js
+docs/CHEATSHEET.md
+docs/CONTROL_DOC.md
 docs/CURRENT_TASK.md
 docs/PLAN.md
 docs/PROMPT.md
