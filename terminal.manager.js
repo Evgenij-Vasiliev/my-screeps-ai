@@ -17,7 +17,7 @@
  * ===================================================
  */
 
-const marketManager = require("market.manager");
+// const marketManager = require("market.manager");
 const resourceBalancer = require("resourceBalancer");
 
 const ENERGY_POOR_THRESHOLD = 20000;
@@ -40,7 +40,7 @@ module.exports = {
     if (room.name === firstRoom) {
       this._runEnergyBalance();
       resourceBalancer.run(); // балансировка всех ресурсов
-      marketManager.run();
+      // marketManager.run();
     }
 
     // ── КАЖДЫЙ ТИК ДЛЯ КАЖДОЙ КОМНАТЫ ───────────────────────────────────

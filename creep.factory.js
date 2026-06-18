@@ -32,35 +32,60 @@ const factory = {
   blueprints: {
     // Стоит на рабочей клетке (x,y) в range 1 от источника и линка одновременно.
     // Свободный слот назначается при спавне — майнер сразу знает куда идти.
+
     miner: spawn => {
-      const spots = (Memory.rooms[spawn.room.name] || {}).minerSpots || [];
+      const roomMemory = Memory.rooms[spawn.room.name] || {};
+      const spots = roomMemory.minerSpots || [];
+      const threshold = (roomMemory.earlySpawnThresholds || {}).miner || 43;
       let assignedSpot = null;
 
       for (const spot of spots) {
+        // const taken = _.some(
+        //   Game.creeps,
+        //   c =>
+        //     c.memory.role === "miner" &&
+        //     c.memory.spot &&
+        //     c.memory.spot.x === spot.x &&
+        //     c.memory.spot.y === spot.y &&
+        //     c.ticksToLive > threshold,
+        // );
+
         const taken = _.some(
           Game.creeps,
           c =>
             c.memory.role === "miner" &&
+            c.memory.room === spawn.room.name &&
             c.memory.spot &&
             c.memory.spot.x === spot.x &&
-            c.memory.spot.y === spot.y,
+            c.memory.spot.y === spot.y &&
+            c.ticksToLive > threshold,
         );
+
         if (!taken) {
           assignedSpot = spot;
           break;
         }
       }
 
+      // if (!assignedSpot) return null;
       if (!assignedSpot) {
-        assignedSpot = spots[0] || null;
+        assignedSpot = spots[Game.time % spots.length];
       }
+
+      // return {
+      //   body: prepareBody({ work: 5, carry: 1, move: 2 }),
+      //   memory: { role: "miner", spot: assignedSpot },
+      // };
 
       return {
         body: prepareBody({ work: 5, carry: 1, move: 2 }),
-        memory: { spot: assignedSpot },
+        memory: {
+          role: "miner",
+          spot: assignedSpot,
+          assigned: true,
+        },
       };
     },
-
     // Носит энергию в башни. Башни близко — размер поменьше.
     towerSupplier: () => ({
       body: prepareBody({ carry: 8, move: 4 }),
@@ -86,7 +111,7 @@ const factory = {
 
     // Аварийный крип — копает и везёт сам. Спавнится только если крипов нет.
     worker: () => ({
-      body: prepareBody({ work: 5, carry: 5, move: 10 }),
+      body: prepareBody({ work: 1, carry: 1, move: 2 }),
       memory: {},
     }),
 
@@ -145,6 +170,8 @@ const factory = {
   run: function (spawn, role, roomName, roleData = {}) {
     const blueprintFn = this.blueprints[role] || this.blueprints.default;
     const blueprint = blueprintFn(spawn, roleData);
+
+    if (!blueprint) return ERR_INVALID_ARGS;
 
     if (!blueprint.body || blueprint.body.length === 0) {
       // console.log(`[factory] Пустое тело для роли ${role} в ${roomName}`);

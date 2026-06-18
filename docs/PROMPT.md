@@ -80,9 +80,11 @@ docs/PLAN.md
 docs/PROMPT.md
 factory.manager.js
 link.manager.js
+logger.js
 main.js
 market.manager.js
 observer.manager.js
+resourceBalancer.js
 role.attacker.js
 role.builder.js
 role.factoryWorker.js
