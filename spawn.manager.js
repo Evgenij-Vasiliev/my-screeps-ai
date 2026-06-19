@@ -4,9 +4,9 @@ const factory = require("creep.factory");
 const QUOTA = {
   worker: 1,
   miner: 2,
-  towerSupplier: 1,
+  towerSupplier: 0,
   linkWorker: 1,
-  terminalUnloader: 1,
+  terminalUnloader: 0,
   attacker: 1,
   mineralMiner: 1,
   factoryWorker: 0,
