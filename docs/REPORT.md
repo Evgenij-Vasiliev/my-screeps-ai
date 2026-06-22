@@ -10,9 +10,9 @@
 "labs": true
 },
 "state": {
-"tick": 80966069,
+"tick": 81027437,
 "rooms": 5,
-"creeps": 34,
+"creeps": 54,
 "cpuBucket": 10000
 },
 "infrastructure": {
@@ -22,58 +22,58 @@
 "labs": 50,
 "observer": 1,
 "nukers": 1,
-"totalEnergy": 757300
+"totalEnergy": 350412
 },
 "readiness": {
 "energyStability": "ok",
-"weakRooms": 0,
-"criticalRooms": 0,
-"overflowRooms": 2
+"weakRooms": 1,
+"criticalRooms": 1,
+"overflowRooms": 0
 },
 "rooms": {
 "E35S37": {
 "role": "remoteMiningHub+boostCenter",
-"storageEnergy": 212653,
-"terminalEnergy": 100414,
+"storageEnergy": 100253,
+"terminalEnergy": 24202,
 "storageState": "ok",
 "terminalState": "normal",
-"availableEnergy": 11219,
+"availableEnergy": 12100,
 "energyCapacity": 12100
 },
 "E35S39": {
 "role": "generalPurpose",
-"storageEnergy": 181799,
-"terminalEnergy": 102409,
+"storageEnergy": 80112,
+"terminalEnergy": 18670,
 "storageState": "ok",
 "terminalState": "normal",
-"availableEnergy": 8950,
+"availableEnergy": 8050,
 "energyCapacity": 9500
 },
 "E36S38": {
 "role": "generalPurpose",
-"storageEnergy": 65090,
-"terminalEnergy": 163560,
-"storageState": "ok",
-"terminalState": "reserve",
-"availableEnergy": 12300,
+"storageEnergy": 0,
+"terminalEnergy": 91799,
+"storageState": "critical",
+"terminalState": "normal",
+"availableEnergy": 11850,
 "energyCapacity": 12300
 },
 "E37S37": {
 "role": "generalPurpose",
-"storageEnergy": 131491,
-"terminalEnergy": 157706,
+"storageEnergy": 89709,
+"terminalEnergy": 23427,
 "storageState": "ok",
-"terminalState": "reserve",
-"availableEnergy": 10750,
+"terminalState": "normal",
+"availableEnergy": 10250,
 "energyCapacity": 11300
 },
 "E37S38": {
 "role": "generalPurpose",
-"storageEnergy": 166267,
-"terminalEnergy": 19112,
+"storageEnergy": 80338,
+"terminalEnergy": 13214,
 "storageState": "ok",
 "terminalState": "normal",
-"availableEnergy": 9698,
+"availableEnergy": 10300,
 "energyCapacity": 10300
 }
 },
