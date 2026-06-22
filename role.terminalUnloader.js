@@ -2,7 +2,7 @@
  * ===================================================
  * ROLE.TERMINALUNLOADER.JS — Разгрузчик терминала
  * ===================================================
- * VERSION: 2.0
+ * VERSION: 2.1
  *
  * Направление управляется из консоли:
  *   Memory.rooms["E35S37"].terminalMode = "toTerminal" // storage → terminal
@@ -112,14 +112,16 @@ module.exports = {
     }
 
     if (creep.memory.task === "toTerminal") {
+      // ВАЖНО: фиксируем количество ДО transfer() — transfer() мгновенно
+      // обнуляет store крипа по этому ресурсу, поэтому считать "после" нельзя.
+      const amount = creep.store[creep.memory.resource] || 0;
       const r = creep.transfer(terminal, creep.memory.resource);
       if (r === ERR_NOT_IN_RANGE) {
         creep.moveTo(terminal, { reusePath: 5 });
         return;
       }
       if (r === OK) {
-        creep.memory.transferred =
-          (creep.memory.transferred || 0) + creep.store.getUsedCapacity();
+        creep.memory.transferred = (creep.memory.transferred || 0) + amount;
         creep.memory.working = false;
       }
       return;

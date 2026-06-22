@@ -2,18 +2,18 @@ const factory = require("creep.factory");
 
 // Квоты крипов на комнату
 const QUOTA = {
-  worker: 1,
+  worker: 2,
   miner: 2,
-  towerSupplier: 0,
+  towerSupplier: 1,
   linkWorker: 1,
-  terminalUnloader: 0,
+  terminalUnloader: 1,
   attacker: 1,
   mineralMiner: 1,
   factoryWorker: 0,
 
   // harvester: 1,
   // upgrader: 0,
-  // builder: 1,
+  builder: 1,
   // repairer: 1,
   // transporter: 2,
 };

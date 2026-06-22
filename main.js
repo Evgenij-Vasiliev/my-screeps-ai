@@ -1,8 +1,11 @@
+const empire = require("empire");
 const roomManager = require("room.manager");
 const cpuMonitor = require("cpuMonitor");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
+
+  empire.run();
 
   // Очистка памяти умерших крипов
   for (const name in Memory.creeps) {

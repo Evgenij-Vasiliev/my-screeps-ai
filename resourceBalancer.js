@@ -1,40 +1,9 @@
-/**
- * ===================================================
- * RESOURCEBALANCER.JS — Глобальный балансировщик ресурсов
- * ===================================================
- * VERSION: 1.0 (новая архитектура)
- *
- * Запускается из terminal.manager.run() один раз за тик
- * (только из первой комнаты по алфавиту).
- *
- * Работает раз в BALANCE_INTERVAL тиков.
- *
- * Логика:
- * 1. Собирает запасы всех ресурсов во всех наших комнатах
- * 2. Для каждого ресурса находит "богатых" (излишек) и "бедных" (дефицит)
- * 3. Богатый отправляет бедному через терминал (или ставит запрос в очередь)
- * 4. На стороне получателя — автоматически ставит задачу разгрузить
- *    терминал в storage через terminalIncoming
- *
- * АВТОМАТИЧЕСКАЯ РАЗГРУЗКА НА СТОРОНЕ ПОЛУЧАТЕЛЯ:
- * - При отправке ресурса записывает ожидание в Memory.rooms[toRoom].terminalIncoming
- * - terminal.manager проверяет терминал получателя каждый тик
- * - Когда ресурс появился — ставит задачу unloader'у через terminalNeeds (toRoom=null)
- * - Работает и для ручных переброссок через C.Terminal.move()
- *
- * Управление через консоль:
- *   Memory.balancerEnabled = false  — остановить балансировщик
- *   Memory.balancerEnabled = true   — возобновить (по умолчанию включён)
- *   Memory.balancerDebug = true     — подробные логи
- * ===================================================
- */
-
 const Logger = require("./logger");
 
 const BALANCE_INTERVAL = 100;
 const TERMINAL_ENERGY_MIN = 20000;
 
-// Минимальный резерв в комнате (storage + terminal суммарно)
+// минимальные резервы
 const RESERVE_MIN = {
   energy: 50000,
   battery: 10000,
@@ -64,7 +33,7 @@ const RESERVE_MIN = {
   GH2O: 3000,
 };
 
-// Порог дефицита — ниже этого комната считается бедной
+// дефицит
 const DEFICIT_THRESHOLD = {
   energy: 20000,
   battery: 3000,
@@ -94,7 +63,7 @@ const DEFICIT_THRESHOLD = {
   GH2O: 1000,
 };
 
-// Сколько отправляем за один раз
+// отправка
 const SEND_AMOUNT = {
   energy: 30000,
   battery: 5000,
@@ -125,59 +94,52 @@ const SEND_AMOUNT = {
 };
 
 const resourceBalancer = {
-  // ── УТИЛИТЫ ────────────────────────────────────────────────────────────
-
-  // Суммарный запас ресурса в комнате (storage + terminal)
-  getTotal: function (room, resource) {
-    const s = room.storage ? room.storage.store[resource] || 0 : 0;
-    const t = room.terminal ? room.terminal.store[resource] || 0 : 0;
-    return s + t;
+  getTotal(room, resource) {
+    return (
+      (room.storage ? room.storage.store[resource] || 0 : 0) +
+      (room.terminal ? room.terminal.store[resource] || 0 : 0)
+    );
   },
 
-  // Добавить задачу unloader'у: перенести resource из storage в terminal
-  addNeed: function (room, resource, amount, toRoom) {
+  addNeed(room, resource, amount, toRoom) {
     if (!room.memory.terminalNeeds) room.memory.terminalNeeds = [];
+
     const needs = room.memory.terminalNeeds;
+
     const existing = needs.find(
       n => n.resource === resource && n.toRoom === toRoom,
     );
+
     if (existing) {
       existing.amount = amount;
-      return false; // обновили существующую
+      return false;
     }
+
     needs.push({ resource, amount, toRoom });
-    return true; // новая задача
+    return true;
   },
 
-  // ── АВТОМАТИЧЕСКАЯ РАЗГРУЗКА НА СТОРОНЕ ПОЛУЧАТЕЛЯ ────────────────────
-
-  /**
-   * Зарегистрировать ожидаемый входящий груз в комнате-получателе.
-   * Вызывается при отправке (send) или постановке задачи (addNeed).
-   * terminal.manager проверяет incoming каждый тик и ставит задачу unloader'у.
-   */
-  registerIncoming: function (toRoomName, resource, amount) {
+  registerIncoming(toRoomName, resource, amount) {
     if (!Memory.rooms) Memory.rooms = {};
     if (!Memory.rooms[toRoomName]) Memory.rooms[toRoomName] = {};
     if (!Memory.rooms[toRoomName].terminalIncoming) {
       Memory.rooms[toRoomName].terminalIncoming = [];
     }
+
     const incoming = Memory.rooms[toRoomName].terminalIncoming;
     const existing = incoming.find(i => i.resource === resource);
+
     if (existing) {
       existing.amount = Math.max(existing.amount, amount);
       return;
     }
+
     incoming.push({ resource, amount, registeredAt: Game.time });
   },
 
-  /**
-   * Проверить терминалы всех комнат на наличие ожидаемых грузов.
-   * Если груз пришёл — поставить задачу unloader'у разгрузить в storage.
-   * Вызывается каждый тик из terminal.manager.
-   */
-  processIncoming: function (room) {
+  processIncoming(room) {
     if (!room.terminal || !room.storage) return;
+
     const incoming = room.memory.terminalIncoming;
     if (!incoming || incoming.length === 0) return;
 
@@ -187,215 +149,88 @@ const resourceBalancer = {
       const inTerminal = room.terminal.store[entry.resource] || 0;
 
       if (inTerminal <= 0) {
-        // Груз ещё не пришёл — ждём, но не вечно (макс 500 тиков)
         if (Game.time - entry.registeredAt < 500) {
           stillWaiting.push(entry);
-        } else {
-          console.log(
-            `[Balancer] ⏱ ${room.name}: входящий ${entry.resource} не пришёл за 500 тиков, отменяем`,
-          );
         }
         continue;
       }
 
-      // Груз в терминале — ставим задачу unloader'у разгрузить в storage
-      // toRoom = null означает "переложить в свой storage"
       this.addNeed(room, entry.resource, inTerminal, null);
-
-      Logger.event(
-        "incoming_received",
-        room.name,
-        `получен ${entry.resource} x${inTerminal}, разгружаем в storage`,
-        { resource: entry.resource, amount: inTerminal },
-      );
     }
 
     room.memory.terminalIncoming = stillWaiting;
   },
 
-  // ── ОСНОВНОЙ ЦИКЛ ──────────────────────────────────────────────────────
-
-  run: function () {
+  run() {
     if (Memory.balancerEnabled === false) return;
     if (Game.time % BALANCE_INTERVAL !== 0) return;
 
-    const debug = Memory.balancerDebug === true;
-
-    const ourRooms = Object.values(Game.rooms).filter(
+    const rooms = Object.values(Game.rooms).filter(
       r => r.controller && r.controller.my && r.terminal && r.storage,
     );
 
-    if (ourRooms.length < 2) return;
+    if (rooms.length < 2) return;
 
-    // Собираем все ресурсы которые есть хоть в одной комнате
     const allResources = new Set([RESOURCE_ENERGY]);
-    for (const room of ourRooms) {
-      for (const res of Object.keys(room.storage.store)) allResources.add(res);
-      for (const res of Object.keys(room.terminal.store)) allResources.add(res);
+
+    for (const room of rooms) {
+      for (const r of Object.keys(room.storage.store)) allResources.add(r);
+      for (const r of Object.keys(room.terminal.store)) allResources.add(r);
     }
 
-    // Каждый донор делает максимум ОДИН запрос/отправку за запуск
-    const busyDonors = new Set();
-
-    // Статистика
-    let transferCount = 0;
-    let queuedCount = 0;
-    const imbalances = [];
+    const busy = new Set();
 
     for (const resource of allResources) {
-      const reserveMin = RESERVE_MIN[resource] || 5000;
-      const deficitThresh = DEFICIT_THRESHOLD[resource] || 2000;
-      const sendAmount = SEND_AMOUNT[resource] || 3000;
+      const reserve = RESERVE_MIN[resource] || 5000;
+      const deficit = DEFICIT_THRESHOLD[resource] || 2000;
+      const send = SEND_AMOUNT[resource] || 3000;
 
-      // Бедные комнаты
-      const poorRooms = ourRooms.filter(
-        r => this.getTotal(r, resource) < deficitThresh,
-      );
-      if (poorRooms.length === 0) continue;
+      const poor = rooms.filter(r => this.getTotal(r, resource) < deficit);
 
-      // Богатые комнаты (не заняты в этом запуске)
-      const richRooms = ourRooms.filter(
+      if (!poor.length) continue;
+
+      const rich = rooms.filter(
         r =>
-          this.getTotal(r, resource) > reserveMin + sendAmount &&
+          this.getTotal(r, resource) > reserve + send &&
           r.terminal.cooldown === 0 &&
-          !busyDonors.has(r.name),
+          !busy.has(r.name),
       );
 
-      if (richRooms.length === 0) {
-        if (debug)
-          console.log(
-            `[Balancer] ${resource}: бедных ${poorRooms.length}, нет доноров`,
-          );
-        continue;
-      }
+      if (!rich.length) continue;
 
-      const poorRoom = poorRooms[0];
-      const donor = richRooms.find(r => r.name !== poorRoom.name);
+      const target = poor[0];
+      const donor = rich.find(r => r.name !== target.name);
       if (!donor) continue;
 
-      const actualSend = Math.min(
-        sendAmount,
-        this.getTotal(donor, resource) - reserveMin,
-      );
-      if (actualSend <= 0) continue;
+      const amount = Math.min(send, this.getTotal(donor, resource) - reserve);
 
-      imbalances.push({
-        resource,
-        from: donor.name,
-        to: poorRoom.name,
-        amount: actualSend,
-      });
-
-      Logger.event(
-        "resource_imbalance",
-        donor.name,
-        `${resource}: ${donor.name}→${poorRoom.name} (~${actualSend})`,
-        { resource, from: donor.name, to: poorRoom.name, amount: actualSend },
-      );
+      if (amount <= 0) continue;
 
       const inTerminal = donor.terminal.store[resource] || 0;
 
-      if (inTerminal < actualSend) {
-        // Ресурс в storage — просим unloader перенести в терминал
-        const isNew = this.addNeed(donor, resource, actualSend, poorRoom.name);
-        if (isNew || debug) {
-          console.log(
-            `[Balancer] 📦 ${donor.name}: перенести ${actualSend} ${resource} → ${poorRoom.name}`,
-          );
-          Logger.event(
-            "transfer_created",
-            donor.name,
-            `queued: ${actualSend} ${resource} → ${poorRoom.name}`,
-            {
-              resource,
-              to: poorRoom.name,
-              amount: actualSend,
-              via: "terminalNeeds",
-            },
-          );
-        }
-        // Регистрируем ожидание на стороне получателя
-        this.registerIncoming(poorRoom.name, resource, actualSend);
-        busyDonors.add(donor.name);
-        queuedCount++;
+      if (inTerminal < amount) {
+        this.addNeed(donor, resource, amount, target.name);
+        this.registerIncoming(target.name, resource, amount);
+        busy.add(donor.name);
         continue;
       }
 
-      // Ресурс уже в терминале — проверяем энергию на транзакцию
-      const txCost = Game.market.calcTransactionCost(
-        actualSend,
+      const cost = Game.market.calcTransactionCost(
+        amount,
         donor.name,
-        poorRoom.name,
+        target.name,
       );
-      const donorEnergy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      if (txCost > donorEnergy - TERMINAL_ENERGY_MIN) {
-        console.log(
-          `[Balancer] ⚡ ${donor.name}: мало энергии для ${resource}` +
-            ` (нужно: ${txCost}, есть: ${donorEnergy})`,
-        );
-        Logger.event(
-          "terminal_blocked",
-          donor.name,
-          `нет энергии для transfer ${resource}: нужно ${txCost}, есть ${donorEnergy}`,
-          { resource, txCost, energy: donorEnergy },
-        );
-        continue;
-      }
+      const energy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      // Отправляем
-      const result = donor.terminal.send(resource, actualSend, poorRoom.name);
+      if (cost > energy - TERMINAL_ENERGY_MIN) continue;
+
+      const result = donor.terminal.send(resource, amount, target.name);
+
       if (result === OK) {
-        console.log(
-          `[Balancer] ✅ ${donor.name} → ${poorRoom.name}: ${actualSend} ${resource}`,
-        );
-        Logger.event(
-          "transfer_completed",
-          donor.name,
-          `sent ${actualSend} ${resource} → ${poorRoom.name}`,
-          { resource, to: poorRoom.name, amount: actualSend },
-        );
-        // Регистрируем ожидание на стороне получателя
-        this.registerIncoming(poorRoom.name, resource, actualSend);
-        // Чистим очередь донора если была
-        if (donor.memory.terminalNeeds) {
-          donor.memory.terminalNeeds = donor.memory.terminalNeeds.filter(
-            n => !(n.resource === resource && n.toRoom === poorRoom.name),
-          );
-        }
-        busyDonors.add(donor.name);
-        transferCount++;
-      } else {
-        console.log(`[Balancer] ❌ Ошибка отправки ${resource}: ${result}`);
-        Logger.event(
-          "terminal_send_failed",
-          donor.name,
-          `ошибка отправки ${resource} → ${poorRoom.name}: ${result}`,
-          { resource, to: poorRoom.name, result },
-        );
+        this.registerIncoming(target.name, resource, amount);
+        busy.add(donor.name);
       }
-    }
-
-    // Публикуем статистику
-    if (!Memory.empire) Memory.empire = {};
-    Memory.empire.balancer = {
-      generatedAt: Game.time,
-      transferCount,
-      queuedCount,
-      imbalanceCount: imbalances.length,
-      transfers: imbalances.slice(0, 10).map(i => ({
-        resource: i.resource,
-        from: i.from,
-        to: i.to,
-        amount: i.amount,
-        status: "planned",
-      })),
-    };
-
-    if (imbalances.length > 0 || debug) {
-      console.log(
-        `[Balancer] 📊 sent=${transferCount} queued=${queuedCount} imbalances=${imbalances.length}`,
-      );
     }
   },
 };

@@ -2,34 +2,21 @@
  * ===================================================
  * TERMINAL MANAGER
  * ===================================================
- * VERSION: 2.1
- *
- * Запускается из room.manager каждый тик для каждой комнаты.
- * Глобальные операции (балансировка) — только из первой комнаты по алфавиту.
- *
- * Логика:
- * - Глобальная балансировка энергии между комнатами (каждые 100 тиков)
- * - resourceBalancer — балансировка всех ресурсов (каждые 100 тиков)
- * - processIncoming — проверка входящих грузов каждый тик (автоматическая
- *   разгрузка терминала в storage после получения от другой комнаты)
- * - terminalNeeds — очередь задач для terminalUnloader (storage → terminal)
- * - Подготовка ресурсов к продаже (перенос из storage в terminal)
- * ===================================================
  */
 
-// const marketManager = require("market.manager");
 const resourceBalancer = require("resourceBalancer");
+const empire = require("empire");
 
-const ENERGY_POOR_THRESHOLD = 20000;
-const ENERGY_RICH_THRESHOLD = 100000;
-const ENERGY_SEND_AMOUNT = 20000;
-const TERMINAL_ENERGY_MIN = 100000;
-const TERMINAL_ENERGY_MAX = 150000;
-const CHECK_INTERVAL = 100;
+const ENERGY_POOR_THRESHOLD = empire.energy.poorThreshold;
+const ENERGY_RICH_THRESHOLD = empire.energy.richThreshold;
+const ENERGY_SEND_AMOUNT = empire.energy.sendAmount;
+const TERMINAL_ENERGY_MIN = empire.energy.terminalMin;
+const TERMINAL_ENERGY_MAX = empire.energy.terminalMax;
+
+const CHECK_INTERVAL = empire.energy.balanceInterval;
 
 module.exports = {
-  run: function (room) {
-    // ── ГЛОБАЛЬНЫЕ ОПЕРАЦИИ (только из первой комнаты) ───────────────────
+  run(room) {
     const firstRoom = Object.keys(Game.rooms)
       .filter(n => {
         const r = Game.rooms[n];
@@ -39,35 +26,30 @@ module.exports = {
 
     if (room.name === firstRoom) {
       this._runEnergyBalance();
-      resourceBalancer.run(); // балансировка всех ресурсов
-      // marketManager.run();
+      resourceBalancer.run();
     }
 
-    // ── КАЖДЫЙ ТИК ДЛЯ КАЖДОЙ КОМНАТЫ ───────────────────────────────────
-
-    // Автоматическая разгрузка входящих грузов из терминала в storage
     resourceBalancer.processIncoming(room);
 
-    // Подготовка ресурсов к продаже
     this._runSellPrep(room);
   },
 
-  // ── БАЛАНСИРОВКА ЭНЕРГИИ ─────────────────────────────────────────────
-  _runEnergyBalance: function () {
+  _runEnergyBalance() {
     if (Game.time % CHECK_INTERVAL !== 0) return;
 
-    const ourRooms = Object.values(Game.rooms).filter(
+    const rooms = Object.values(Game.rooms).filter(
       r => r.controller && r.controller.my && r.terminal && r.storage,
     );
 
-    const poorRooms = ourRooms.filter(
+    const poorRooms = rooms.filter(
       r => (r.storage.store[RESOURCE_ENERGY] || 0) < ENERGY_POOR_THRESHOLD,
     );
-    const richRooms = ourRooms.filter(
+
+    const richRooms = rooms.filter(
       r => (r.storage.store[RESOURCE_ENERGY] || 0) > ENERGY_RICH_THRESHOLD,
     );
 
-    if (poorRooms.length === 0 || richRooms.length === 0) return;
+    if (!poorRooms.length || !richRooms.length) return;
 
     for (const poorRoom of poorRooms) {
       const terminalEnergy = poorRoom.terminal.store[RESOURCE_ENERGY] || 0;
@@ -76,18 +58,18 @@ module.exports = {
       const donor = richRooms.find(r => r.name !== poorRoom.name);
       if (!donor) continue;
 
-      const donorTerminal = donor.terminal.store[RESOURCE_ENERGY] || 0;
+      const donorEnergy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      if (donorTerminal >= ENERGY_SEND_AMOUNT + TERMINAL_ENERGY_MIN) {
+      if (donorEnergy >= ENERGY_SEND_AMOUNT + TERMINAL_ENERGY_MIN) {
         if (donor.terminal.cooldown > 0) continue;
 
-        const txCost = Game.market.calcTransactionCost(
+        const cost = Game.market.calcTransactionCost(
           ENERGY_SEND_AMOUNT,
           donor.name,
           poorRoom.name,
         );
 
-        if (txCost + ENERGY_SEND_AMOUNT > donorTerminal - TERMINAL_ENERGY_MIN)
+        if (cost + ENERGY_SEND_AMOUNT > donorEnergy - TERMINAL_ENERGY_MIN)
           continue;
 
         const result = donor.terminal.send(
@@ -95,12 +77,14 @@ module.exports = {
           ENERGY_SEND_AMOUNT,
           poorRoom.name,
         );
+
         if (result === OK) {
           console.log(
-            `[Terminal] ✅ ${donor.name} → ${poorRoom.name}: ${ENERGY_SEND_AMOUNT} energy`,
+            `[Terminal] ${donor.name} → ${poorRoom.name}: ${ENERGY_SEND_AMOUNT}`,
           );
+
           this._clearNeed(donor, RESOURCE_ENERGY, poorRoom.name);
-          // Регистрируем входящий груз на стороне получателя
+
           resourceBalancer.registerIncoming(
             poorRoom.name,
             RESOURCE_ENERGY,
@@ -114,6 +98,7 @@ module.exports = {
           ENERGY_SEND_AMOUNT,
           poorRoom.name,
         );
+
         resourceBalancer.registerIncoming(
           poorRoom.name,
           RESOURCE_ENERGY,
@@ -123,37 +108,44 @@ module.exports = {
     }
   },
 
-  // ── ПОДГОТОВКА К ПРОДАЖЕ ─────────────────────────────────────────────
-  _runSellPrep: function (room) {
+  _runSellPrep(room) {
     if (Game.time % CHECK_INTERVAL !== 0) return;
     if (!room.terminal || !room.storage) return;
 
     const totalEnergy =
       (room.storage.store[RESOURCE_ENERGY] || 0) +
       (room.terminal.store[RESOURCE_ENERGY] || 0);
+
     const inTerminal = room.terminal.store[RESOURCE_ENERGY] || 0;
 
-    if (totalEnergy > 500000 && inTerminal < TERMINAL_ENERGY_MIN) {
+    if (
+      totalEnergy > empire.energy.sellPrepThreshold &&
+      inTerminal < TERMINAL_ENERGY_MIN
+    ) {
       this._addNeed(room, RESOURCE_ENERGY, TERMINAL_ENERGY_MIN, null);
     }
   },
 
-  // ── УТИЛИТЫ ──────────────────────────────────────────────────────────
-  _addNeed: function (room, resource, amount, toRoom) {
+  _addNeed(room, resource, amount, toRoom) {
     if (!room.memory.terminalNeeds) room.memory.terminalNeeds = [];
+
     const needs = room.memory.terminalNeeds;
+
     const existing = needs.find(
       n => n.resource === resource && n.toRoom === toRoom,
     );
+
     if (existing) {
       existing.amount = amount;
       return;
     }
+
     needs.push({ resource, amount, toRoom });
   },
 
-  _clearNeed: function (room, resource, toRoom) {
+  _clearNeed(room, resource, toRoom) {
     if (!room.memory.terminalNeeds) return;
+
     room.memory.terminalNeeds = room.memory.terminalNeeds.filter(
       n => !(n.resource === resource && n.toRoom === toRoom),
     );
