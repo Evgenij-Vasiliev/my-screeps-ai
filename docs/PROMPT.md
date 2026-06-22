@@ -74,11 +74,14 @@ creep.factory.js
 creep.runner.js
 diagnostic.js
 docs/CHEATSHEET.md
+docs/CONTROL_AUDIT.md
 docs/CONTROL_DOC.md
 docs/CURRENT_TASK.md
+docs/INSTRUCTIONS.md
 docs/PLAN.md
 docs/PROMPT.md
 docs/REPORT.md
+empire.js
 empire.report.js
 factory.manager.js
 link.manager.js
