@@ -78,6 +78,8 @@ docs/CONTROL_DOC.md
 docs/CURRENT_TASK.md
 docs/PLAN.md
 docs/PROMPT.md
+docs/REPORT.md
+empire.report.js
 factory.manager.js
 link.manager.js
 logger.js

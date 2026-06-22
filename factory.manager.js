@@ -9,7 +9,7 @@
  * ===================================================
  */
 
-const ENERGY_RESERVE = 10000;
+const Empire = require("empire");
 
 module.exports = {
   run: function (room) {
@@ -23,7 +23,7 @@ module.exports = {
     const storage = room.storage;
     if (!storage) return;
 
-    if (storage.store[RESOURCE_ENERGY] < ENERGY_RESERVE) return;
+    if (storage.store[RESOURCE_ENERGY] < Empire.energy.factoryReserve) return;
 
     // Производим батарейки если есть энергия на фабрике
     if (factory.store[RESOURCE_ENERGY] >= 600) {
