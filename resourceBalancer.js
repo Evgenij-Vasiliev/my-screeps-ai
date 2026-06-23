@@ -1,97 +1,5 @@
 const Logger = require("./logger");
-
-const BALANCE_INTERVAL = 100;
-const TERMINAL_ENERGY_MIN = 20000;
-
-// минимальные резервы
-const RESERVE_MIN = {
-  energy: 50000,
-  battery: 10000,
-  O: 3000,
-  H: 3000,
-  Z: 15000,
-  K: 15000,
-  L: 15000,
-  U: 15000,
-  X: 15000,
-  OH: 8000,
-  ZK: 8000,
-  ZO: 8000,
-  KH: 8000,
-  LO: 8000,
-  UO: 8000,
-  UH: 8000,
-  LH: 8000,
-  GH: 8000,
-  ZHO2: 3000,
-  KHO2: 3000,
-  LHO2: 3000,
-  UHO2: 3000,
-  UH2O: 3000,
-  KH2O: 3000,
-  LH2O: 3000,
-  GH2O: 3000,
-};
-
-// дефицит
-const DEFICIT_THRESHOLD = {
-  energy: 20000,
-  battery: 3000,
-  O: 1000,
-  H: 1000,
-  Z: 5000,
-  K: 5000,
-  L: 5000,
-  U: 5000,
-  X: 5000,
-  OH: 2000,
-  ZK: 2000,
-  ZO: 2000,
-  KH: 2000,
-  LO: 2000,
-  UO: 2000,
-  UH: 2000,
-  LH: 2000,
-  GH: 2000,
-  ZHO2: 1000,
-  KHO2: 1000,
-  LHO2: 1000,
-  UHO2: 1000,
-  UH2O: 1000,
-  KH2O: 1000,
-  LH2O: 1000,
-  GH2O: 1000,
-};
-
-// отправка
-const SEND_AMOUNT = {
-  energy: 30000,
-  battery: 5000,
-  O: 2000,
-  H: 2000,
-  Z: 10000,
-  K: 10000,
-  L: 10000,
-  U: 10000,
-  X: 10000,
-  OH: 5000,
-  ZK: 5000,
-  ZO: 5000,
-  KH: 5000,
-  LO: 5000,
-  UO: 5000,
-  UH: 5000,
-  LH: 5000,
-  GH: 5000,
-  ZHO2: 2000,
-  KHO2: 2000,
-  LHO2: 2000,
-  UHO2: 2000,
-  UH2O: 2000,
-  KH2O: 2000,
-  LH2O: 2000,
-  GH2O: 2000,
-};
+const empire = require("./empire"); // ТЗ №1: резервы теперь берутся из empire.js
 
 const resourceBalancer = {
   getTotal(room, resource) {
@@ -149,7 +57,10 @@ const resourceBalancer = {
       const inTerminal = room.terminal.store[entry.resource] || 0;
 
       if (inTerminal <= 0) {
-        if (Game.time - entry.registeredAt < 500) {
+        if (
+          Game.time - entry.registeredAt <
+          empire.getIncomingTransferTimeout()
+        ) {
           stillWaiting.push(entry);
         }
         continue;
@@ -163,7 +74,7 @@ const resourceBalancer = {
 
   run() {
     if (Memory.balancerEnabled === false) return;
-    if (Game.time % BALANCE_INTERVAL !== 0) return;
+    if (Game.time % empire.getBalanceInterval() !== 0) return;
 
     const rooms = Object.values(Game.rooms).filter(
       r => r.controller && r.controller.my && r.terminal && r.storage,
@@ -181,25 +92,38 @@ const resourceBalancer = {
     const busy = new Set();
 
     for (const resource of allResources) {
-      const reserve = RESERVE_MIN[resource] || 5000;
-      const deficit = DEFICIT_THRESHOLD[resource] || 2000;
-      const send = SEND_AMOUNT[resource] || 3000;
+      // ТЗ №1: резерв берётся из empire.js, а не из локальной таблицы
+      const reserve = empire.getReserveMin(resource);
+      // ТЗ №2: дефицит берётся из empire.js, а не из локальной таблицы
+      const deficit = empire.getDeficitThreshold(resource);
+      // ТЗ №3: объём поставки берётся из empire.js, а не из локальной таблицы
+      const send = empire.getSendAmount(resource);
 
-      const poor = rooms.filter(r => this.getTotal(r, resource) < deficit);
+      // ТЗ №6: критерий дефицита комнаты определяет empire.js
+      const poor = rooms.filter(r =>
+        empire.isResourceDeficitRoom(r, this.getTotal(r, resource), deficit),
+      );
 
       if (!poor.length) continue;
 
-      const rich = rooms.filter(
-        r =>
-          this.getTotal(r, resource) > reserve + send &&
-          r.terminal.cooldown === 0 &&
-          !busy.has(r.name),
+      // ТЗ №7: критерий комнаты-донора определяет empire.js
+      const rich = rooms.filter(r =>
+        empire.isResourceDonorRoom(
+          r,
+          this.getTotal(r, resource),
+          reserve,
+          send,
+          busy.has(r.name),
+        ),
       );
 
       if (!rich.length) continue;
 
-      const target = poor[0];
-      const donor = rich.find(r => r.name !== target.name);
+      // ТЗ №4: решение о выборе получателя принимает empire.js
+      const target = empire.selectBalanceTarget(resource, poor);
+      if (!target) continue;
+      // ТЗ №5: решение о выборе донора принимает empire.js
+      const donor = empire.selectBalanceDonor(resource, target, rich);
       if (!donor) continue;
 
       const amount = Math.min(send, this.getTotal(donor, resource) - reserve);
@@ -223,7 +147,7 @@ const resourceBalancer = {
 
       const energy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      if (cost > energy - TERMINAL_ENERGY_MIN) continue;
+      if (cost > energy - empire.getTerminalEnergyReserve()) continue;
 
       const result = donor.terminal.send(resource, amount, target.name);
 

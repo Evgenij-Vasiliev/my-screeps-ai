@@ -22,7 +22,7 @@ const MAX_DEAL_AMOUNT = 10000;
 
 // Ресурсы разрешённые к продаже
 const SELLABLE = new Set([
-  // RESOURCE_ENERGY,
+  RESOURCE_ENERGY,
   RESOURCE_BATTERY,
   RESOURCE_UTRIUM,
   RESOURCE_LEMERGIUM,
