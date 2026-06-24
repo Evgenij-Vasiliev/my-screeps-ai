@@ -25,8 +25,8 @@ module.exports = {
 
     cpuMonitor.trackRole("towerManager", () => towerManager.run(room));
     cpuMonitor.trackRole("linkManager", () => linkManager.run(room));
-    cpuMonitor.trackRole("terminalManager", () => terminalManager.run(room));
-    cpuMonitor.trackRole("marketManager", () => marketManager.run(room));
+    // cpuMonitor.trackRole("terminalManager", () => terminalManager.run(room));
+    // cpuMonitor.trackRole("marketManager", () => marketManager.run(room));
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(room));
 
     // Управление поведением крипов (добыча, перенос, ремонт и т.д.)
