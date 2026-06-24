@@ -7,8 +7,6 @@
 const resourceBalancer = require("resourceBalancer");
 const empire = require("empire");
 
-const ENERGY_POOR_THRESHOLD = empire.energy.poorThreshold;
-const ENERGY_RICH_THRESHOLD = empire.energy.richThreshold;
 const ENERGY_SEND_AMOUNT = empire.energy.sendAmount;
 const TERMINAL_ENERGY_MIN = empire.energy.terminalMin;
 const TERMINAL_ENERGY_MAX = empire.energy.terminalMax;
@@ -41,12 +39,14 @@ module.exports = {
       r => r.controller && r.controller.my && r.terminal && r.storage,
     );
 
-    const poorRooms = rooms.filter(
-      r => (r.storage.store[RESOURCE_ENERGY] || 0) < ENERGY_POOR_THRESHOLD,
+    // ТЗ №13: решение "бедная ли комната" перенесено в empire.js
+    const poorRooms = rooms.filter(r =>
+      empire.isEnergyPoorRoom(r, r.storage.store[RESOURCE_ENERGY] || 0),
     );
 
-    const richRooms = rooms.filter(
-      r => (r.storage.store[RESOURCE_ENERGY] || 0) > ENERGY_RICH_THRESHOLD,
+    // ТЗ №11: решение "богатая ли комната" перенесено в empire.js
+    const richRooms = rooms.filter(r =>
+      empire.isEnergyRichRoom(r, r.storage.store[RESOURCE_ENERGY] || 0),
     );
 
     if (!poorRooms.length || !richRooms.length) return;
@@ -55,12 +55,14 @@ module.exports = {
       const terminalEnergy = poorRoom.terminal.store[RESOURCE_ENERGY] || 0;
       if (terminalEnergy >= TERMINAL_ENERGY_MAX) continue;
 
-      const donor = richRooms.find(r => r.name !== poorRoom.name);
+      // ТЗ №16: единый метод выбора донора
+      const donor = empire.selectDonor(richRooms, poorRoom);
       if (!donor) continue;
 
       const donorEnergy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      if (donorEnergy >= ENERGY_SEND_AMOUNT + TERMINAL_ENERGY_MIN) {
+      // ТЗ №17: условие достаточности энергии у донора перенесено в empire.js
+      if (empire.canSendEnergy(donorEnergy)) {
         if (donor.terminal.cooldown > 0) continue;
 
         const cost = Game.market.calcTransactionCost(

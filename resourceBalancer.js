@@ -92,11 +92,11 @@ const resourceBalancer = {
     const busy = new Set();
 
     for (const resource of allResources) {
-      // ТЗ №1: резерв берётся из empire.js, а не из локальной таблицы
+      // ТЗ №1: резерв берётся из empire.js
       const reserve = empire.getReserveMin(resource);
-      // ТЗ №2: дефицит берётся из empire.js, а не из локальной таблицы
+      // ТЗ №2: дефицит берётся из empire.js
       const deficit = empire.getDeficitThreshold(resource);
-      // ТЗ №3: объём поставки берётся из empire.js, а не из локальной таблицы
+      // ТЗ №3: объём поставки берётся из empire.js
       const send = empire.getSendAmount(resource);
 
       // ТЗ №6: критерий дефицита комнаты определяет empire.js
@@ -122,8 +122,9 @@ const resourceBalancer = {
       // ТЗ №4: решение о выборе получателя принимает empire.js
       const target = empire.selectBalanceTarget(resource, poor);
       if (!target) continue;
-      // ТЗ №5: решение о выборе донора принимает empire.js
-      const donor = empire.selectBalanceDonor(resource, target, rich);
+
+      // ТЗ №16: единый метод выбора донора (заменяет selectBalanceDonor)
+      const donor = empire.selectDonor(rich, target);
       if (!donor) continue;
 
       const amount = Math.min(send, this.getTotal(donor, resource) - reserve);

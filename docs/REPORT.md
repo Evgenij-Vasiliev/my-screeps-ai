@@ -10,9 +10,9 @@
 "labs": true
 },
 "state": {
-"tick": 81027437,
+"tick": 81074708,
 "rooms": 5,
-"creeps": 54,
+"creeps": 55,
 "cpuBucket": 10000
 },
 "infrastructure": {
@@ -22,7 +22,7 @@
 "labs": 50,
 "observer": 1,
 "nukers": 1,
-"totalEnergy": 350412
+"totalEnergy": 643614
 },
 "readiness": {
 "energyStability": "ok",
@@ -32,48 +32,48 @@
 },
 "rooms": {
 "E35S37": {
-"role": "remoteMiningHub+boostCenter",
-"storageEnergy": 100253,
-"terminalEnergy": 24202,
-"storageState": "ok",
-"terminalState": "normal",
-"availableEnergy": 12100,
-"energyCapacity": 12100
-},
-"E35S39": {
-"role": "generalPurpose",
-"storageEnergy": 80112,
-"terminalEnergy": 18670,
-"storageState": "ok",
-"terminalState": "normal",
-"availableEnergy": 8050,
-"energyCapacity": 9500
-},
-"E36S38": {
-"role": "generalPurpose",
-"storageEnergy": 0,
-"terminalEnergy": 91799,
-"storageState": "critical",
-"terminalState": "normal",
-"availableEnergy": 11850,
-"energyCapacity": 12300
-},
-"E37S37": {
-"role": "generalPurpose",
-"storageEnergy": 89709,
-"terminalEnergy": 23427,
+"role": "rcl8",
+"storageEnergy": 51612,
+"terminalEnergy": 19195,
 "storageState": "ok",
 "terminalState": "normal",
 "availableEnergy": 10250,
+"energyCapacity": 12100
+},
+"E35S39": {
+"role": "rcl8",
+"storageEnergy": 226461,
+"terminalEnergy": 19824,
+"storageState": "ok",
+"terminalState": "normal",
+"availableEnergy": 7500,
+"energyCapacity": 9500
+},
+"E36S38": {
+"role": "rcl8",
+"storageEnergy": 440,
+"terminalEnergy": 96838,
+"storageState": "critical",
+"terminalState": "normal",
+"availableEnergy": 9450,
+"energyCapacity": 12300
+},
+"E37S37": {
+"role": "rcl8",
+"storageEnergy": 190633,
+"terminalEnergy": 11295,
+"storageState": "ok",
+"terminalState": "normal",
+"availableEnergy": 9300,
 "energyCapacity": 11300
 },
 "E37S38": {
-"role": "generalPurpose",
-"storageEnergy": 80338,
-"terminalEnergy": 13214,
+"role": "rcl8",
+"storageEnergy": 174468,
+"terminalEnergy": 14426,
 "storageState": "ok",
 "terminalState": "normal",
-"availableEnergy": 10300,
+"availableEnergy": 8300,
 "energyCapacity": 10300
 }
 },

@@ -1,3 +1,4 @@
+const empire = require("empire");
 module.exports = {
   generate() {
     const ownedRooms = _.filter(
@@ -12,18 +13,30 @@ module.exports = {
       const storageEnergy = room.storage?.store[RESOURCE_ENERGY] || 0;
       const terminalEnergy = room.terminal?.store[RESOURCE_ENERGY] || 0;
 
+      // -----------------------------
+      // STATE (CONTROLLED BY EMPIRE)
+      // -----------------------------
+
       let storageState = "ok";
-      if (storageEnergy < 10000) storageState = "critical";
-      else if (storageEnergy < 50000) storageState = "low";
+
+      if (storageEnergy < empire.energy.poorThreshold) {
+        storageState = "critical";
+      } else if (storageEnergy < empire.energy.lowThreshold) {
+        storageState = "low";
+      }
 
       let terminalState = "normal";
-      if (terminalEnergy >= 150000) terminalState = "reserve";
+
+      if (terminalEnergy >= empire.energy.terminalReserveThreshold) {
+        terminalState = "reserve";
+      }
+
+      // -----------------------------
+      // ROOM INFO
+      // -----------------------------
 
       roomInfo[room.name] = {
-        role:
-          room.name === "E35S37"
-            ? "remoteMiningHub+boostCenter"
-            : "generalPurpose",
+        role: room.controller.level === 8 ? "rcl8" : "generalPurpose",
 
         storageEnergy,
         terminalEnergy,
@@ -89,36 +102,11 @@ module.exports = {
       if (r.terminalState === "reserve") readiness.overflowRooms++;
     }
 
-    if (readiness.criticalRooms >= 2) {
+    if (readiness.criticalRooms >= empire.energy.criticalRoomThreshold) {
       readiness.energyStability = "unstable";
-    } else if (readiness.weakRooms >= 2) {
+    } else if (readiness.weakRooms >= empire.energy.weakRoomThreshold) {
       readiness.energyStability = "fragile";
     }
-
-    // // ---------- ENERGY FLOW (FIXED) ----------
-    // const energyFlow = [];
-
-    // const consumers = Object.entries(roomInfo)
-    //   .filter(
-    //     ([_, r]) => r.storageState === "critical" || r.storageState === "low",
-    //   )
-    //   .map(([name]) => name);
-
-    // for (const [fromName, fromRoom] of Object.entries(roomInfo)) {
-    //   const isDonor = fromRoom.terminalState === "reserve";
-
-    //   if (!isDonor) continue;
-
-    //   if (consumers.length === 0) continue;
-
-    //   const target = consumers.find(c => c !== fromName) || consumers[0];
-
-    //   energyFlow.push({
-    //     from: fromName,
-    //     to: target,
-    //     type: "energy_rebalance",
-    //   });
-    // }
 
     // ---------- RETURN ----------
     return {
@@ -143,7 +131,6 @@ module.exports = {
 
       infrastructure,
       readiness,
-      // energyFlow,
 
       rooms: roomInfo,
       issues: [],
