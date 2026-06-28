@@ -2,7 +2,7 @@
  * ===================================================
  * ROLE.TERMINALUNLOADER.JS — Разгрузчик терминала
  * ===================================================
- * VERSION: 2.1
+ * VERSION: 2.2
  *
  * Направление управляется из консоли:
  *   Memory.rooms["E35S37"].terminalMode = "toTerminal" // storage → terminal
@@ -13,6 +13,40 @@
  * Очередь задач через terminalNeeds остаётся для автоматики.
  * ===================================================
  */
+
+const empire = require("empire");
+
+// Ресурсы для загрузки в терминал под продажу (порядок: энергия первой)
+const SELL_RESOURCES = [
+  RESOURCE_ENERGY,
+  RESOURCE_BATTERY,
+  RESOURCE_UTRIUM,
+  RESOURCE_LEMERGIUM,
+  RESOURCE_KEANIUM,
+  RESOURCE_ZYNTHIUM,
+  RESOURCE_OXYGEN,
+  RESOURCE_HYDROGEN,
+  RESOURCE_CATALYST,
+  RESOURCE_GHODIUM,
+  RESOURCE_UTRIUM_HYDRIDE,
+  RESOURCE_UTRIUM_OXIDE,
+  RESOURCE_KEANIUM_HYDRIDE,
+  RESOURCE_KEANIUM_OXIDE,
+  RESOURCE_LEMERGIUM_HYDRIDE,
+  RESOURCE_LEMERGIUM_OXIDE,
+  RESOURCE_ZYNTHIUM_HYDRIDE,
+  RESOURCE_ZYNTHIUM_OXIDE,
+  RESOURCE_GHODIUM_HYDRIDE,
+  RESOURCE_ZYNTHIUM_KEANITE,
+  RESOURCE_UTRIUM_LEMERGITE,
+  RESOURCE_KEANIUM_ACID,
+  RESOURCE_LEMERGIUM_ALKALIDE,
+  RESOURCE_UTRIUM_ALKALIDE,
+  RESOURCE_ZYNTHIUM_ALKALIDE,
+];
+
+// Минимальный целевой объём ресурса в терминале для продажи
+const TERMINAL_SELL_TARGET = 10000;
 
 module.exports = {
   run: function (creep) {
@@ -25,6 +59,9 @@ module.exports = {
     // ── ПЕРЕКЛЮЧЕНИЕ СОСТОЯНИЯ ────────────────────────────────────────────
     if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
       creep.memory.working = false;
+      delete creep.memory.task;
+      delete creep.memory.resource;
+      delete creep.memory.transferred;
     }
     if (!creep.memory.working && creep.store.getUsedCapacity() > 0) {
       creep.memory.working = true;
@@ -80,20 +117,61 @@ module.exports = {
         return;
       }
 
-      // Режим по умолчанию: terminal → storage (лишние минералы)
-      const resource = Object.keys(terminal.store).find(
-        r => r !== RESOURCE_ENERGY && terminal.store[r] > 0,
-      );
+      // Режим по умолчанию — два приоритета:
+      // 1. Энергия: довезти до TERMINAL_ENERGY_MIN если не хватает для сделок
+      // 2. Ресурсы: загрузить излишки сверх sellSurplus для продажи на рынке
+
+      // Приоритет 1: энергия для транзакций
+      const TERMINAL_ENERGY_MIN = empire.energy.terminalMin;
+      const energyInTerminal = terminal.store[RESOURCE_ENERGY] || 0;
+      const energyInStorage = storage.store[RESOURCE_ENERGY] || 0;
+
+      if (energyInTerminal < TERMINAL_ENERGY_MIN && energyInStorage > 0) {
+        const needed = TERMINAL_ENERGY_MIN - energyInTerminal;
+        const amount = Math.min(
+          needed,
+          energyInStorage,
+          creep.store.getFreeCapacity(),
+        );
+        if (amount > 0) {
+          creep.memory.resource = RESOURCE_ENERGY;
+          creep.memory.task = "toTerminal";
+          if (
+            creep.withdraw(storage, RESOURCE_ENERGY, amount) ===
+            ERR_NOT_IN_RANGE
+          ) {
+            creep.moveTo(storage, { reusePath: 5 });
+          }
+          return;
+        }
+      }
+
+      // Приоритет 2: излишки ресурсов для продажи
+      const resource = SELL_RESOURCES.find(r => {
+        const inStorage = storage.store[r] || 0;
+        const inTerminal = terminal.store[r] || 0;
+        const total = inStorage + inTerminal;
+        const sellSurplus =
+          r === RESOURCE_ENERGY
+            ? empire.energy.sellSurplus
+            : empire.minerals.sellSurplus;
+        return total > sellSurplus && inTerminal < TERMINAL_SELL_TARGET;
+      });
+
       if (!resource) return;
 
+      const inStorage = storage.store[resource] || 0;
+      const inTerminal = terminal.store[resource] || 0;
+      const needed = TERMINAL_SELL_TARGET - inTerminal;
+      const amount = Math.min(needed, inStorage, creep.store.getFreeCapacity());
+
+      if (amount <= 0) return;
+
       creep.memory.resource = resource;
-      creep.memory.task = "toStorage";
-      const amount = Math.min(
-        terminal.store[resource],
-        creep.store.getFreeCapacity(),
-      );
-      if (creep.withdraw(terminal, resource, amount) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(terminal, { reusePath: 5 });
+      creep.memory.task = "toTerminal";
+
+      if (creep.withdraw(storage, resource, amount) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(storage, { reusePath: 5 });
       }
       return;
     }

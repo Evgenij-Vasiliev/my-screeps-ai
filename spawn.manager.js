@@ -13,7 +13,7 @@ const QUOTA = {
 
   // harvester: 1,
   // upgrader: 0,
-  builder: 1,
+  builder: 2,
   // repairer: 1,
   // transporter: 2,
 };

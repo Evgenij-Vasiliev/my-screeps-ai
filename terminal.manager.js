@@ -7,11 +7,10 @@
 const resourceBalancer = require("resourceBalancer");
 const empire = require("empire");
 
+const ENERGY_RICH_THRESHOLD = empire.energy.richThreshold;
 const ENERGY_SEND_AMOUNT = empire.energy.sendAmount;
 const TERMINAL_ENERGY_MIN = empire.energy.terminalMin;
 const TERMINAL_ENERGY_MAX = empire.energy.terminalMax;
-
-const CHECK_INTERVAL = empire.energy.balanceInterval;
 
 module.exports = {
   run(room) {
@@ -33,19 +32,22 @@ module.exports = {
   },
 
   _runEnergyBalance() {
-    if (Game.time % CHECK_INTERVAL !== 0) return;
+    // ТЗ №20: решение о запуске балансировки перенесено в empire.js
+    if (!empire.shouldRunEnergyBalance()) return;
 
     const rooms = Object.values(Game.rooms).filter(
       r => r.controller && r.controller.my && r.terminal && r.storage,
     );
 
-    // ТЗ №13: решение "бедная ли комната" перенесено в empire.js
-    const poorRooms = rooms.filter(r =>
-      empire.isEnergyPoorRoom(r, r.storage.store[RESOURCE_ENERGY] || 0),
+    const poorRooms = rooms.filter(
+      // ТЗ №23: порог бедной комнаты перенесён в empire.js
+      r =>
+        (r.storage.store[RESOURCE_ENERGY] || 0) <
+        empire.energy.energyPoorThreshold,
     );
 
-    // ТЗ №11: решение "богатая ли комната" перенесено в empire.js
     const richRooms = rooms.filter(r =>
+      // ТЗ №11: критерий богатой комнаты перенесён в empire.js
       empire.isEnergyRichRoom(r, r.storage.store[RESOURCE_ENERGY] || 0),
     );
 
@@ -55,14 +57,12 @@ module.exports = {
       const terminalEnergy = poorRoom.terminal.store[RESOURCE_ENERGY] || 0;
       if (terminalEnergy >= TERMINAL_ENERGY_MAX) continue;
 
-      // ТЗ №16: единый метод выбора донора
-      const donor = empire.selectDonor(richRooms, poorRoom);
+      const donor = richRooms.find(r => r.name !== poorRoom.name);
       if (!donor) continue;
 
       const donorEnergy = donor.terminal.store[RESOURCE_ENERGY] || 0;
 
-      // ТЗ №17: условие достаточности энергии у донора перенесено в empire.js
-      if (empire.canSendEnergy(donorEnergy)) {
+      if (donorEnergy >= ENERGY_SEND_AMOUNT + TERMINAL_ENERGY_MIN) {
         if (donor.terminal.cooldown > 0) continue;
 
         const cost = Game.market.calcTransactionCost(
@@ -111,7 +111,8 @@ module.exports = {
   },
 
   _runSellPrep(room) {
-    if (Game.time % CHECK_INTERVAL !== 0) return;
+    // ТЗ №21: решение о запуске подготовки к продаже перенесено в empire.js
+    if (!empire.shouldRunSellPrep()) return;
     if (!room.terminal || !room.storage) return;
 
     const totalEnergy =
