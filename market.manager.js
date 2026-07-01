@@ -1,127 +1,56 @@
 /**
  * МЕНЕДЖЕР РЫНКА (Market Manager)
- * Только исполнение чужих buy orders — никогда не создаём свои ордера.
- * Запускается раз в UPDATE_INTERVAL тиков из первой комнаты.
- *
- * Логика:
- * 1. Смотрим излишки ресурсов по всей империи
- * 2. Находим лучший buy order на рынке
- * 3. Исполняем через terminal.deal()
+ * Чистый исполнитель чужих buy orders — никогда не принимает решений сам.
  */
 
-const UPDATE_INTERVAL = 100;
-
-// Минимальный излишек для продажи энергии
-const ENERGY_SELL_SURPLUS = 100000;
-// Минимальный излишек для продажи минералов
-const MINERAL_SELL_SURPLUS = 50000;
-// Минимум энергии в терминале для транзакции
-const TERMINAL_ENERGY_MIN = 20000;
-// Максимум за одну сделку
-const MAX_DEAL_AMOUNT = 10000;
-
-// Ресурсы разрешённые к продаже
-const SELLABLE = new Set([
-  RESOURCE_ENERGY,
-  RESOURCE_BATTERY,
-  RESOURCE_UTRIUM,
-  RESOURCE_LEMERGIUM,
-  RESOURCE_KEANIUM,
-  RESOURCE_ZYNTHIUM,
-  RESOURCE_OXYGEN,
-  RESOURCE_HYDROGEN,
-  RESOURCE_CATALYST,
-  RESOURCE_GHODIUM,
-  RESOURCE_UTRIUM_HYDRIDE,
-  RESOURCE_UTRIUM_OXIDE,
-  RESOURCE_KEANIUM_HYDRIDE,
-  RESOURCE_KEANIUM_OXIDE,
-  RESOURCE_LEMERGIUM_HYDRIDE,
-  RESOURCE_LEMERGIUM_OXIDE,
-  RESOURCE_ZYNTHIUM_HYDRIDE,
-  RESOURCE_ZYNTHIUM_OXIDE,
-  RESOURCE_GHODIUM_HYDRIDE,
-  RESOURCE_ZYNTHIUM_KEANITE,
-  RESOURCE_UTRIUM_LEMERGITE,
-  RESOURCE_KEANIUM_ACID,
-  RESOURCE_LEMERGIUM_ALKALIDE,
-  RESOURCE_UTRIUM_ALKALIDE,
-  RESOURCE_ZYNTHIUM_ALKALIDE,
-]);
+const empire = require("empire");
 
 module.exports = {
-  run: function () {
-    if (Game.time % UPDATE_INTERVAL !== 0) return;
-
-    const ourRooms = Object.values(Game.rooms).filter(
-      r => r.controller && r.controller.my && r.terminal && r.storage,
-    );
-
-    for (const room of ourRooms) {
-      this._trySell(room);
-    }
-  },
-
-  _trySell: function (room) {
+  // Исполнительный контур: просто выполняет сделку по указке Империи
+  executeDeal: function (room, resource, amount) {
     const terminal = room.terminal;
     if (!terminal || terminal.cooldown > 0) return;
 
     const terminalEnergy = terminal.store[RESOURCE_ENERGY] || 0;
-    if (terminalEnergy < TERMINAL_ENERGY_MIN) return;
+    const terminalEnergyMin = empire.getTerminalEnergyReserve();
+    if (terminalEnergy < terminalEnergyMin) return;
 
-    // Перебираем продаваемые ресурсы — энергия первой
-    const resources = [RESOURCE_ENERGY, ...SELLABLE].filter(
-      r => r !== RESOURCE_ENERGY,
+    // Проверяем, сколько реально доступно физически в терминале
+    const inTerminal = terminal.store[resource] || 0;
+    const available = Math.min(inTerminal, amount, empire.market.maxDealAmount);
+    if (available <= 0) return;
+
+    // Ищем лучший buy order под этот ресурс
+    const order = this._findBestOrder(resource, available, room.name);
+    if (!order) return;
+
+    const finalAmount = Math.min(available, order.amount);
+    const txCost = Game.market.calcTransactionCost(
+      finalAmount,
+      room.name,
+      order.roomName,
     );
-    resources.unshift(RESOURCE_ENERGY);
 
-    for (const resource of resources) {
-      const inTerminal = terminal.store[resource] || 0;
-      const inStorage = room.storage ? room.storage.store[resource] || 0 : 0;
-      const total = inTerminal + inStorage;
-
-      const minSurplus =
-        resource === RESOURCE_ENERGY
-          ? ENERGY_SELL_SURPLUS
-          : MINERAL_SELL_SURPLUS;
-
-      if (total < minSurplus) continue;
-
-      // Сколько можем продать из терминала
-      const available = Math.min(inTerminal, MAX_DEAL_AMOUNT);
-      if (available <= 0) continue;
-
-      // Ищем лучший buy order
-      const order = this._findBestOrder(resource, available, room.name);
-      if (!order) continue;
-
-      const amount = Math.min(available, order.amount);
-      const txCost = Game.market.calcTransactionCost(
-        amount,
-        room.name,
-        order.roomName,
+    // Проверяем цену доставки
+    if (txCost > terminalEnergy - terminalEnergyMin) {
+      console.log(
+        `[Market] ⚡ ${room.name}: мало энергии для сделки` +
+          ` ${resource} (нужно: ${txCost}, есть: ${terminalEnergy})`,
       );
-
-      if (txCost > terminalEnergy - TERMINAL_ENERGY_MIN) {
-        console.log(
-          `[Market] ⚡ ${room.name}: мало энергии для сделки` +
-            ` ${resource} (нужно: ${txCost}, есть: ${terminalEnergy})`,
-        );
-        continue;
-      }
-
-      const result = Game.market.deal(order.id, amount, room.name);
-      if (result === OK) {
-        console.log(
-          `[Market] ✅ ${room.name}: продано ${amount} ${resource}` +
-            ` по ${order.price} = ${Math.floor(amount * order.price)} кредитов`,
-        );
-      } else {
-        console.log(`[Market] ❌ Ошибка сделки ${resource}: ${result}`);
-      }
-
-      // Один ресурс за тик с одного терминала
       return;
+    }
+
+    // Проводим сделку
+    const result = Game.market.deal(order.id, finalAmount, room.name);
+    if (result === OK) {
+      console.log(
+        `[Market] ✅ ${room.name}: продано ${finalAmount} ${resource}` +
+          ` по ${order.price} = ${Math.floor(
+            finalAmount * order.price,
+          )} кредитов`,
+      );
+    } else {
+      console.log(`[Market] ❌ Ошибка сделки ${resource}: ${result}`);
     }
   },
 
