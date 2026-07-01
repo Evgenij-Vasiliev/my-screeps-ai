@@ -6,14 +6,14 @@ const QUOTA = {
   miner: 2,
   towerSupplier: 1,
   linkWorker: 1,
-  terminalUnloader: 1,
+  // terminalUnloader: 1,
   attacker: 1,
   mineralMiner: 1,
   factoryWorker: 0,
 
   // harvester: 1,
   // upgrader: 0,
-  builder: 2,
+  builder: 0,
   // repairer: 1,
   // transporter: 2,
 };

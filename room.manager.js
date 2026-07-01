@@ -3,10 +3,7 @@ const creepRunner = require("creep.runner");
 const towerManager = require("tower.manager");
 const linkManager = require("link.manager");
 const terminalManager = require("terminal.manager");
-const marketManager = require("market.manager");
 const factoryManager = require("factory.manager");
-const roomRemote = require("room.remote");
-const observerManager = require("observer.manager");
 const cpuMonitor = require("cpuMonitor");
 
 module.exports = {
@@ -26,7 +23,6 @@ module.exports = {
     cpuMonitor.trackRole("towerManager", () => towerManager.run(room));
     cpuMonitor.trackRole("linkManager", () => linkManager.run(room));
     cpuMonitor.trackRole("terminalManager", () => terminalManager.run(room));
-    cpuMonitor.trackRole("marketManager", () => marketManager.run(room));
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(room));
 
     // Управление поведением крипов (добыча, перенос, ремонт и т.д.)
@@ -34,12 +30,6 @@ module.exports = {
 
     // Производственные здания (factory)
     factoryManager.run(room);
-
-    // Работа с удалёнными комнатами (remote mining)
-    roomRemote.run(room);
-
-    // Разведка карты (observer)
-    observerManager.run(room);
 
     // --------------------------------------------------------
     // 3. ВИЗУАЛИЗАЦИЯ СТАТУСА КРИПОВ

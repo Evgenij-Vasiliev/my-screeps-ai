@@ -25,43 +25,40 @@ const RALLY_Y = 45;
 
 module.exports = {
   run: function (creep) {
-    // ── 1. САМОЗАЩИТА — ВЫСШИЙ ПРИОРИТЕТ ─────────────────────────────────
-    // Если крипа атакуют — немедленно лечимся и атакуем обидчика.
-    // Работает в ЛЮБОЙ комнате, независимо от текущей задачи.
+    // ── 1. ЛЕЧЕНИЕ ───────────────────────────────────────────────────────
     if (creep.hits < creep.hitsMax) {
       creep.heal(creep);
     }
 
-    // Ищем того кто нас атакует прямо сейчас (в радиусе 4 клеток)
-    const attacker = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS, {
-      filter: c => c.pos.getRangeTo(creep) <= 4,
-    });
+    // Определяем текущую целевую комнату боевой задачи
+    const targetRoom =
+      Memory.rallyOverride ||
+      (Memory.attackAlert ? Memory.attackAlert.room : null);
 
-    if (attacker) {
-      // Нас атакуют — немедленно отвечаем не глядя на задачу
-      this.attackTarget(creep, attacker, [attacker]);
+    // ── 2. САМОЗАЩИТА В ПУТИ ─────────────────────────────────────────────
+    // Включается только если мы ЕЩЕ НЕ в целевой комнате (на автостраде или точке сбора)
+    if (creep.room.name !== targetRoom) {
+      const attacker = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS, {
+        filter: c => c.pos.getRangeTo(creep) <= 4,
+      });
 
-      return;
+      if (attacker) {
+        this.attackTarget(creep, attacker, [attacker]);
+        return;
+      }
     }
 
-    // ── 2. РУЧНОЕ УПРАВЛЕНИЕ ──────────────────────────────────────────────
-    // Memory.rallyOverride = "E36S37" — отправить всех аттакеров в комнату
-    // delete Memory.rallyOverride     — вернуть на точку сбора
+    // ── 3. РУЧНОЕ УПРАВЛЕНИЕ ──────────────────────────────────────────────
     if (Memory.rallyOverride) {
       this.respondToAlert(creep, Memory.rallyOverride);
-
       return;
     }
 
-    // ── 3. АВТОМАТИЧЕСКАЯ ТРЕВОГА ─────────────────────────────────────────
-    // Memory.attackAlert устанавливается в roomManager когда
-    // обнаружены враги в наших комнатах или комнатах добычи.
+    // ── 4. АВТОМАТИЧЕСКАЯ ТРЕВОГА ─────────────────────────────────────────
     const alert = Memory.attackAlert;
-
     if (alert && alert.room) {
       this.respondToAlert(creep, alert.room);
     } else {
-      // Нет тревоги — идём на точку сбора
       this.goToRally(creep);
     }
   },

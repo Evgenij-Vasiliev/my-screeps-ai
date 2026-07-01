@@ -1,5 +1,5 @@
 const Logger = require("./logger");
-const empire = require("./empire"); // ТЗ №1: резервы теперь берутся из empire.js
+const empire = require("./empire");
 
 const resourceBalancer = {
   getTotal(room, resource) {
@@ -13,7 +13,6 @@ const resourceBalancer = {
     if (!room.memory.terminalNeeds) room.memory.terminalNeeds = [];
 
     const needs = room.memory.terminalNeeds;
-
     const existing = needs.find(
       n => n.resource === resource && n.toRoom === toRoom,
     );
@@ -73,90 +72,8 @@ const resourceBalancer = {
   },
 
   run() {
-    if (Memory.balancerEnabled === false) return;
-    if (Game.time % empire.getBalanceInterval() !== 0) return;
-
-    const rooms = Object.values(Game.rooms).filter(
-      r => r.controller && r.controller.my && r.terminal && r.storage,
-    );
-
-    if (rooms.length < 2) return;
-
-    const allResources = new Set([RESOURCE_ENERGY]);
-
-    for (const room of rooms) {
-      for (const r of Object.keys(room.storage.store)) allResources.add(r);
-      for (const r of Object.keys(room.terminal.store)) allResources.add(r);
-    }
-
-    const busy = new Set();
-
-    for (const resource of allResources) {
-      // ТЗ №1: резерв берётся из empire.js
-      const reserve = empire.getReserveMin(resource);
-      // ТЗ №2: дефицит берётся из empire.js
-      const deficit = empire.getDeficitThreshold(resource);
-      // ТЗ №3: объём поставки берётся из empire.js
-      const send = empire.getSendAmount(resource);
-
-      // ТЗ №6: критерий дефицита комнаты определяет empire.js
-      const poor = rooms.filter(r =>
-        empire.isResourceDeficitRoom(r, this.getTotal(r, resource), deficit),
-      );
-
-      if (!poor.length) continue;
-
-      // ТЗ №7: критерий комнаты-донора определяет empire.js
-      const rich = rooms.filter(r =>
-        empire.isResourceDonorRoom(
-          r,
-          this.getTotal(r, resource),
-          reserve,
-          send,
-          busy.has(r.name),
-        ),
-      );
-
-      if (!rich.length) continue;
-
-      // ТЗ №4: решение о выборе получателя принимает empire.js
-      const target = empire.selectBalanceTarget(resource, poor);
-      if (!target) continue;
-
-      // ТЗ №16: единый метод выбора донора (заменяет selectBalanceDonor)
-      const donor = empire.selectDonor(rich, target);
-      if (!donor) continue;
-
-      const amount = Math.min(send, this.getTotal(donor, resource) - reserve);
-
-      if (amount <= 0) continue;
-
-      const inTerminal = donor.terminal.store[resource] || 0;
-
-      if (inTerminal < amount) {
-        this.addNeed(donor, resource, amount, target.name);
-        this.registerIncoming(target.name, resource, amount);
-        busy.add(donor.name);
-        continue;
-      }
-
-      const cost = Game.market.calcTransactionCost(
-        amount,
-        donor.name,
-        target.name,
-      );
-
-      const energy = donor.terminal.store[RESOURCE_ENERGY] || 0;
-
-      if (cost > energy - empire.getTerminalEnergyReserve()) continue;
-
-      const result = donor.terminal.send(resource, amount, target.name);
-
-      if (result === OK) {
-        this.registerIncoming(target.name, resource, amount);
-        busy.add(donor.name);
-      }
-    }
+    // Метод умышленно пуст.
+    // Логика принятия решений полностью перенесена в empire.js
   },
 };
 
