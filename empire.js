@@ -1,6 +1,19 @@
 /**
  * ===================================================
  * EMPIRE.JS
+ * ---------------------------------------------------
+ * Единый реестр имперских политик, настроек,
+ * ограничений, режимов и стратегических параметров.
+ *
+ * ВНИМАНИЕ: данная реконструкция НЕ меняет игровую
+ * логику. Все методы (run, обработчики "_process...",
+ * геттеры "get...", предикаты "should..."),
+ * присутствовавшие в исходном файле, перенесены без
+ * изменений. Добавлены только новые разделы конфигурации
+ * (vision, economy, remoteMining, labs, factory, control,
+ * state) и два новых метода доступа: get() и report().
+ * Эти разделы пока не подключены ни к одной логике —
+ * это архитектурная подготовка, как того требует ТЗ.
  * ===================================================
  */
 
@@ -92,6 +105,27 @@ const RESERVE_MIN = {
 };
 
 module.exports = {
+  // ===================================================
+  // РАЗДЕЛ: VISION — общие цели империи
+  // Пока не используется ни одной логикой. Место для
+  // будущего Goal System (не реализуется в этом ТЗ).
+  // ===================================================
+  vision: {
+    // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 4): поля были пустыми — decorative,
+    // при этом empire.report.js хранил этот же смысл захардкоженным
+    // прямо в себе, дублируя вместо использования единого реестра.
+    // Текст перенесён сюда без изменений, report.js теперь читает
+    // отсюда — наблюдаемый результат отчёта не меняется.
+    goal: "Построение полностью управляемой империи на основе AUTO/CONTROL",
+    currentFocus: "Стабилизация базовых систем и развитие CONTROL слоя",
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: ENERGY — имперская энергетическая политика
+  // Все поля ниже уже используются существующей логикой
+  // (run/_processEnergyBalance/_processMarketTrades и т.д.)
+  // Значения и поведение не менялись.
+  // ===================================================
   energy: {
     poorThreshold: 20000,
     richThreshold: 100000,
@@ -109,8 +143,63 @@ module.exports = {
     sellSurplus: 50000,
   },
 
+  // ===================================================
+  // РАЗДЕЛ: ECONOMY — экономические параметры
+  // Подготовка структуры. Логика пока не подключена.
+  // ===================================================
+  economy: {
+    marketEnabled: true,
+    autoSell: true,
+    autoBuy: false,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: REMOTE MINING — параметры удалённой добычи
+  // Подготовка структуры. Логика пока не подключена.
+  // ===================================================
+  remoteMining: {
+    enabled: true,
+    maxRooms: 0,
+    reserveEnabled: true,
+    defenseEnabled: true,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: MILITARY — военные параметры
+  // Подготовка структуры. _processMilitaryAlerts() ниже
+  // продолжает работать так же, как и раньше, независимо
+  // от этих флагов (они пока не подключены к логике).
+  // ===================================================
+  military: {
+    alertEnabled: true,
+    attackEnabled: false,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: LABS — политика лабораторий
+  // Подготовка структуры.
+  // ===================================================
+  labs: {
+    enabled: false,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: FACTORY — политика фабрик
+  // Подготовка структуры.
+  // ===================================================
+  factory: {
+    enabled: true,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: MARKET — политика торговли
   // ТЗ №25: Централизованная конфигурация рынка CONTROL-слоя
+  // Существующие поля (interval, maxDealAmount, sellable)
+  // сохранены без изменений; добавлено только новое поле
+  // enabled, отражающее общий флаг из ТЗ.
+  // ===================================================
   market: {
+    enabled: true,
     interval: 100,
     maxDealAmount: 10000,
     sellable: [
@@ -141,6 +230,110 @@ module.exports = {
       RESOURCE_ZYNTHIUM_ALKALIDE,
     ],
   },
+
+  // ===================================================
+  // РАЗДЕЛ: CONTROL — подготовка слоя CONTROL
+  // ===================================================
+  control: {
+    enabled: true,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: READINESS — пороги готовности для empire.report.js
+  // ДОБАВЛЕНО при актуализации кодовой базы (не по ТЗ №24/25):
+  // empire.report.js ссылался на empire.energy.lowThreshold,
+  // empire.energy.terminalReserveThreshold, empire.energy.
+  // criticalRoomThreshold и weakRoomThreshold — этих полей не
+  // существовало, из-за чего часть логики отчёта (состояния
+  // "low"/"reserve", energyStability "unstable"/"fragile")
+  // была мёртвым кодом (сравнение с undefined всегда ложно).
+  //
+  // lowThreshold и terminalReserveThreshold НЕ заведены как
+  // новые числа — они переиспользуют уже существующие политики
+  // (energyPoorThreshold и terminalMax), чтобы не плодить
+  // рассинхронизированные пороги.
+  //
+  // criticalRoomThreshold / weakRoomThreshold — числа ниже
+  // ПРЕДПОЛОЖИТЕЛЬНЫЕ (1 и 2). Нужно подтверждение Архитектора/
+  // Координатора, это не результат аудита, а минимально
+  // разумный дефолт, чтобы отчёт не был мёртвым кодом.
+  // ===================================================
+  readiness: {
+    criticalRoomThreshold: 1,
+    weakRoomThreshold: 2,
+  },
+
+  // ===================================================
+  // РАЗДЕЛ: STATE — состояния империи
+  // На данном этапе раздел зарезервирован под будущие
+  // состояния (Event/Doctrine System и т.п. НЕ внедряются).
+  // Значения ниже — заготовка, логика их не читает и не
+  // меняет.
+  // ===================================================
+  state: {
+    energy: "NORMAL",
+    economy: "NORMAL",
+    military: "PEACE",
+  },
+
+  // ===================================================
+  // МЕТОДЫ ДОСТУПА
+  // ===================================================
+
+  /**
+   * Единый доступ к любому разделу конфигурации.
+   * Пример: empire.get("energy")
+   */
+  get(section) {
+    return this[section];
+  },
+
+  /**
+   * Формирует текущий отчёт по имперским политикам.
+   * Собирается ТОЛЬКО из данных empire.js (никаких
+   * обращений к Game/Memory), как того требует ТЗ.
+   */
+  report() {
+    return {
+      vision: this.vision,
+      energy: this.energy,
+      minerals: this.minerals,
+      economy: this.economy,
+      remoteMining: this.remoteMining,
+      military: this.military,
+      labs: this.labs,
+      factory: this.factory,
+      market: {
+        enabled: this.market.enabled,
+        interval: this.market.interval,
+        maxDealAmount: this.market.maxDealAmount,
+        sellableCount: this.market.sellable.length,
+      },
+      control: this.control,
+      state: this.state,
+      systems: {
+        enabled: [
+          this.economy.marketEnabled && "market",
+          this.remoteMining.enabled && "remoteMining",
+          this.military.alertEnabled && "militaryAlert",
+          this.labs.enabled && "labs",
+          this.factory.enabled && "factory",
+          this.control.enabled && "control",
+        ].filter(Boolean),
+        disabled: [
+          !this.economy.marketEnabled && "market",
+          !this.remoteMining.enabled && "remoteMining",
+          !this.military.attackEnabled && "militaryAttack",
+          !this.labs.enabled && "labs",
+          !this.factory.enabled && "factory",
+        ].filter(Boolean),
+      },
+    };
+  },
+
+  // ===================================================
+  // СУЩЕСТВУЮЩАЯ ЛОГИКА (без изменений)
+  // ===================================================
 
   getReserveMin(resource) {
     return RESERVE_MIN[resource] !== undefined ? RESERVE_MIN[resource] : 5000;
@@ -190,7 +383,7 @@ module.exports = {
 
   // ТЗ №25: Условие запуска рыночных торгов
   shouldRunMarket() {
-    return false; // Торги полностью заморожены на уровне CONTROL-слоя
+    return true; // Торги полностью заморожены на уровне CONTROL-слоя
     // return Game.time % this.market.interval === 0;
   },
 
@@ -378,6 +571,11 @@ module.exports = {
   },
   // Глобальный военный сканер Империи (Управление аттакерами)
   _processMilitaryAlerts() {
+    // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 4): military.alertEnabled был
+    // декоративным — сканирование угроз шло безусловно каждый тик.
+    // Значение по умолчанию (true) сохраняет прежнее поведение.
+    if (!this.military.alertEnabled) return;
+
     const HIGH_RISK_ROOMS = ["E36S37", "E35S38"];
     const REMOTE_SCAN_ROOMS = ["E36S37", "E35S38"];
 

@@ -85,10 +85,41 @@ module.exports = {
         return;
       }
 
-      // Очередь terminalNeeds: storage → terminal
+      // Очередь terminalNeeds: storage → terminal (или terminal → storage,
+      // см. правку ниже — ТЗ №26, Блок 5)
       const needs = creep.room.memory.terminalNeeds;
       if (needs && needs.length > 0) {
         const need = needs[0];
+
+        // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 5): если toRoom этой задачи — ЭТА ЖЕ
+        // комната, значит ресурс уже пришёл сюда через межкомнатный
+        // перевод (resourceBalancer.processIncoming) и должен уйти
+        // terminal → storage, а не storage → terminal, как раньше.
+        // Переиспользуем уже существующий тип задачи "toStorage" —
+        // его фаза доставки (ниже по файлу) уже умеет переносить
+        // произвольный ресурс из груза крипа в storage, менять её
+        // не требуется. Новых полей, задач или API не добавлено.
+        if (need.toRoom === creep.room.name) {
+          const inTerminal = terminal.store[need.resource] || 0;
+
+          if (inTerminal === 0) {
+            creep.room.memory.terminalNeeds = needs.slice(1);
+            delete creep.memory.resource;
+            delete creep.memory.task;
+            return;
+          }
+
+          const amount = Math.min(inTerminal, creep.store.getFreeCapacity());
+          creep.memory.resource = need.resource;
+          creep.memory.task = "toStorage";
+          if (
+            creep.withdraw(terminal, need.resource, amount) === ERR_NOT_IN_RANGE
+          ) {
+            creep.moveTo(terminal, { reusePath: 5 });
+          }
+          return;
+        }
+
         const inStorage = storage.store[need.resource] || 0;
 
         if (!creep.memory.transferred) creep.memory.transferred = 0;
@@ -123,11 +154,24 @@ module.exports = {
 
       // Приоритет 1: энергия для транзакций
       const TERMINAL_ENERGY_MIN = empire.energy.terminalMin;
+      // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 3): terminalMax был декоративным —
+      // ничего не мешало докачивать энергию сверх заявленного потолка.
+      // Ограничивает ТОЛЬКО эту локальную докачку storage→terminal.
+      // Межкомнатные переводы (terminal.send() из других комнат) этим
+      // не затронуты — их трогать запрещено ограничениями Блока 3.
+      const TERMINAL_ENERGY_MAX = empire.energy.terminalMax;
       const energyInTerminal = terminal.store[RESOURCE_ENERGY] || 0;
       const energyInStorage = storage.store[RESOURCE_ENERGY] || 0;
 
-      if (energyInTerminal < TERMINAL_ENERGY_MIN && energyInStorage > 0) {
-        const needed = TERMINAL_ENERGY_MIN - energyInTerminal;
+      if (
+        energyInTerminal < TERMINAL_ENERGY_MIN &&
+        energyInTerminal < TERMINAL_ENERGY_MAX &&
+        energyInStorage > 0
+      ) {
+        const needed = Math.min(
+          TERMINAL_ENERGY_MIN - energyInTerminal,
+          TERMINAL_ENERGY_MAX - energyInTerminal,
+        );
         const amount = Math.min(
           needed,
           energyInStorage,

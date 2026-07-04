@@ -65,7 +65,21 @@ const resourceBalancer = {
         continue;
       }
 
-      this.addNeed(room, entry.resource, inTerminal, null);
+      // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 5): раньше здесь передавался toRoom=null,
+      // что role.terminalUnloader.js интерпретировал как обычную задачу
+      // storage → terminal — то есть ресурс, который ТОЛЬКО ЧТО пришёл
+      // В terminal через межкомнатный перевод, вместо разгрузки в storage
+      // заново закачивался ИЗ storage В тот же terminal. Направление было
+      // перепутано на противоположное задокументированному в control.js
+      // ("Unloader в toStorage разгрузит terminal в storage").
+      //
+      // Теперь передаём toRoom = room.name (свою же комнату). Это не новое
+      // поле и не новый параметр — toRoom уже существовал в сигнатуре
+      // addNeed() и в структуре элементов terminalNeeds, здесь лишь другое
+      // значение уже существующего поля. role.terminalUnloader.js проверяет
+      // "toRoom === текущая комната" и обрабатывает такую задачу как
+      // terminal → storage (см. правку в role.terminalUnloader.js).
+      this.addNeed(room, entry.resource, inTerminal, room.name);
     }
 
     room.memory.terminalIncoming = stillWaiting;

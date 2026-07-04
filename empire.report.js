@@ -21,13 +21,25 @@ module.exports = {
 
       if (storageEnergy < empire.energy.poorThreshold) {
         storageState = "critical";
-      } else if (storageEnergy < empire.energy.lowThreshold) {
+      } else if (storageEnergy < empire.energy.energyPoorThreshold) {
+        // ИСПРАВЛЕНО: empire.energy.lowThreshold не существовал в
+        // empire.js — сравнение с undefined всегда было false, эта
+        // ветка была мёртвым кодом. Переиспользуем существующую
+        // политику energyPoorThreshold (уже используется в
+        // empire._processEnergyBalance для того же смысла: "мало").
         storageState = "low";
       }
 
       let terminalState = "normal";
 
-      if (terminalEnergy >= empire.energy.terminalReserveThreshold) {
+      if (terminalEnergy >= empire.energy.terminalMax) {
+        // ИСПРАВЛЕНО: empire.energy.terminalReserveThreshold не
+        // существовал — ветка была мёртвым кодом. Переиспользуем
+        // уже задекларированный потолок terminalMax: если terminal
+        // достиг или превысил заявленный потолок — это буквально
+        // и есть состояние "reserve"/переполнение (см. Конфликт №2
+        // отчёта по ТЗ №24 — этот потолок нигде не исполняется
+        // технически, но здесь хотя бы отражается в отчёте).
         terminalState = "reserve";
       }
 
@@ -102,24 +114,28 @@ module.exports = {
       if (r.terminalState === "reserve") readiness.overflowRooms++;
     }
 
-    if (readiness.criticalRooms >= empire.energy.criticalRoomThreshold) {
+    if (readiness.criticalRooms >= empire.readiness.criticalRoomThreshold) {
+      // ИСПРАВЛЕНО: empire.energy.criticalRoomThreshold не существовал
+      // (правильная секция — empire.readiness, добавлена отдельно).
       readiness.energyStability = "unstable";
-    } else if (readiness.weakRooms >= empire.energy.weakRoomThreshold) {
+    } else if (readiness.weakRooms >= empire.readiness.weakRoomThreshold) {
       readiness.energyStability = "fragile";
     }
 
     // ---------- RETURN ----------
     return {
-      vision: {
-        goal: "Построение полностью управляемой империи на основе AUTO/CONTROL",
-        currentFocus: "Стабилизация базовых систем и развитие CONTROL слоя",
-      },
+      vision: empire.vision,
 
       architecture: {
         spawnSystem: "quota",
         minerAssignment: "fixed spots",
-        remoteMining: true,
-        labs: true,
+        // ИСПРАВЛЕНО: было захардкожено remoteMining:true, labs:true.
+        // labs:true прямо противоречило empire.labs.enabled=false —
+        // отчёт заявлял о работающих лабораториях, которых в
+        // кодовой базе нет вообще ни одного файла (аудит ТЗ №24).
+        // Теперь оба поля берутся из единственного источника политик.
+        remoteMining: empire.remoteMining.enabled,
+        labs: empire.labs.enabled,
       },
 
       state: {
