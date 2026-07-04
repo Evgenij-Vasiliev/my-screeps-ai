@@ -80,3 +80,28 @@
 | `require("diagnostic").storages()`         | Снимок всех storage: заполненность, предупреждения о переполнении |
 | `require("diagnostic").terminals()`        | Снимок всех terminal: заполненность, cooldown, ресурсы            |
 | `require("diagnostic").logistics()`        | Очереди terminalNeeds по всем комнатам                            |
+
+---
+
+## Рапорт по империи `require("empire.report")`
+
+| Команда                               | Описание                                                                                                                                                                                                                                        |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `require("empire.report").generate()` | Единый JSON-снимок: vision, architecture, state, infrastructure (комнаты/фабрики/лабы/обсерв./нюки), readiness (energyStability, критичные/слабые/переполненные комнаты), детали по каждой комнате (storageState/terminalState/energyAvailable) |
+
+Примечание: `architecture.remoteMining` и `architecture.labs` теперь читаются напрямую из `empire.js` (`empire.remoteMining.enabled` / `empire.labs.enabled`), а не захардкожены — если политика в `empire.js` изменится, отчёт обновится автоматически.
+
+---
+
+## Телеметрия энергетики `require("diagnostic.energyTelemetry")`
+
+ВРЕМЕННЫЙ модуль по ТЗ №25. Не влияет на игровую логику, пишет только в собственное пространство `Memory.energyTelemetry`.
+
+| Команда                                                 | Описание                                                                                                                                      |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `require("diagnostic.energyTelemetry").tick()`          | Снимает срез раз в 1000 тиков. Требует подключения в main.js (см. инструкцию в самом файле).                                                  |
+| `require("diagnostic.energyTelemetry").snapshot()`      | Срез состояния прямо сейчас: storage/terminal/factory по комнатам, статусы POOR/NORMAL/RICH, terminalRatio, аварийные worker, баланс империи. |
+| `require("diagnostic.energyTelemetry").deltas()`        | Дельты Storage/Terminal/Total между первым и последним накопленным снимком.                                                                   |
+| `require("diagnostic.energyTelemetry").report()`        | Полный отчёт (snapshot + deltas) одним JSON — то, что нужно копировать для анализа.                                                           |
+| `require("diagnostic.energyTelemetry").exportHistory()` | Вся накопленная история снимков как JSON-строка.                                                                                              |
+| `require("diagnostic.energyTelemetry").reset()`         | Удаляет `Memory.energyTelemetry`. Выполнить по завершении ТЗ №25 вместе с удалением строк из main.js.                                         |

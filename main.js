@@ -1,6 +1,7 @@
 const empire = require("empire");
 const roomManager = require("room.manager");
 const cpuMonitor = require("cpuMonitor");
+const energyTelemetry = require("diagnostic.energyTelemetry");
 
 module.exports.loop = function () {
   cpuMonitor.startTick();
@@ -25,6 +26,8 @@ module.exports.loop = function () {
       console.log(`[main] Ошибка в комнате ${roomName}: ${e.message}`);
     }
   }
+
+  energyTelemetry.tick();
 
   cpuMonitor.endTick();
 };

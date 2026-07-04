@@ -1,4 +1,5 @@
 const factory = require("creep.factory");
+const empire = require("empire");
 
 // Квоты крипов на комнату
 const QUOTA = {
@@ -6,10 +7,10 @@ const QUOTA = {
   miner: 2,
   towerSupplier: 1,
   linkWorker: 1,
-  // terminalUnloader: 1,
+  terminalUnloader: 1,
   attacker: 1,
   mineralMiner: 1,
-  factoryWorker: 0,
+  factoryWorker: 1,
 
   // harvester: 1,
   // upgrader: 0,
@@ -44,14 +45,22 @@ module.exports = {
       }
     }
 
-    if (room.name === "E35S37") {
+    // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 4): empire.remoteMining.enabled и
+    // .reserveEnabled были декоративными. Значения по умолчанию (true)
+    // сохраняют прежнее поведение без изменений.
+    if (room.name === "E35S37" && empire.remoteMining.enabled) {
       const remoteRooms = ["E35S38", "E36S37"];
       const globalRoles = [
-        { role: "reserver", count: 2 },
-        { role: "remoteMiner", count: 2 },
-        { role: "remoteHauler", count: 2 },
+        {
+          role: "reserver",
+          count: 2,
+          enabled: empire.remoteMining.reserveEnabled,
+        },
+        { role: "remoteMiner", count: 2, enabled: true },
+        { role: "remoteHauler", count: 2, enabled: true },
       ];
-      for (const { role, count } of globalRoles) {
+      for (const { role, count, enabled } of globalRoles) {
+        if (!enabled) continue;
         const current = _.filter(
           Game.creeps,
           c => c.memory.role === role,

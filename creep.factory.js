@@ -141,7 +141,7 @@ const factory = {
     }),
 
     remoteHauler: (spawn, roleData) => ({
-      body: prepareBody({ carry: 10, move: 10 }),
+      body: prepareBody({ carry: 20, move: 20 }),
       memory: { working: false, targetRoom: roleData.targetRoom || null },
     }),
 

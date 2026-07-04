@@ -38,7 +38,7 @@ module.exports = {
     if (availableEnergy < cost) {
       // Если топлива нет, и мы отправляем МИНЕРАЛ — заказываем энергию у криптов
       if (resource !== RESOURCE_ENERGY) {
-        this._addNeed(donor.name, RESOURCE_ENERGY, cost);
+        this._addNeed(donor, RESOURCE_ENERGY, cost);
       }
       return;
     }
@@ -58,8 +58,23 @@ module.exports = {
     const result = terminal.send(resource, amount, targetRoom.name);
     if (result === OK) {
       if (this._clearNeed) {
-        this._clearNeed(donor.name, resource);
+        this._clearNeed(donor, resource);
       }
+
+      // ИСПРАВЛЕНИЕ (ТЗ №28): регистрируем входящий перевод на стороне
+      // получателя — ТОЧНО ТЕМ ЖЕ вызовом, которым уже пользуется
+      // control.js Terminal.move() для ручных переводов. Раньше этот
+      // вызов существовал только в control.js; автоматический канал
+      // empire._processEnergyBalance()/_processMineralBalance() →
+      // executeTransfer() → terminal.send() его не делал вообще, из-за
+      // чего resourceBalancer.processIncoming() никогда не запускался
+      // для этих переводов, и энергия оставалась в terminal без
+      // дальнейшей разгрузки в storage (см. отчёты по ТЗ №27/28).
+      // Ни новых менеджеров, ни новых структур Memory — используется
+      // уже существующий resourceBalancer.registerIncoming(), уже
+      // импортированный в этом файле, и уже существующая структура
+      // Memory.rooms[x].terminalIncoming.
+      resourceBalancer.registerIncoming(targetRoom.name, resource, amount);
     }
   },
 
