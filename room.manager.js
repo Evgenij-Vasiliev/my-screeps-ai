@@ -2,6 +2,7 @@ const spawnManager = require("spawn.manager");
 const creepRunner = require("creep.runner");
 const towerManager = require("tower.manager");
 const linkManager = require("link.manager");
+const labManager = require("lab.manager");
 const terminalManager = require("terminal.manager");
 const factoryManager = require("factory.manager");
 const cpuMonitor = require("cpuMonitor");
@@ -30,6 +31,8 @@ module.exports = {
 
     // Производственные здания (factory)
     factoryManager.run(room);
+
+    labManager.run(room);
 
     // --------------------------------------------------------
     // 3. ВИЗУАЛИЗАЦИЯ СТАТУСА КРИПОВ

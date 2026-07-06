@@ -8,6 +8,7 @@ const roles = {
   mineralMiner: require("role.mineralMiner"),
   factoryWorker: require("role.factoryWorker"),
   linkWorker: require("role.linkWorker"),
+  labWorker: require("role.labWorker"),
   attacker: require("role.attacker"),
   reserver: require("role.reserver"),
   remoteMiner: require("role.remoteMiner"),

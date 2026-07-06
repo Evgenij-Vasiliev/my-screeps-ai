@@ -109,6 +109,11 @@ const factory = {
       memory: {},
     }),
 
+    labWorker: () => ({
+      body: prepareBody({ carry: 1, move: 1 }),
+      memory: {},
+    }),
+
     // Аварийный крип — копает и везёт сам. Спавнится только если крипов нет.
     worker: () => ({
       body: prepareBody({ work: 1, carry: 1, move: 2 }),
