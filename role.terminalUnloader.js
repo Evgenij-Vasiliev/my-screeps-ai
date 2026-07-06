@@ -163,10 +163,19 @@ module.exports = {
       const energyInTerminal = terminal.store[RESOURCE_ENERGY] || 0;
       const energyInStorage = storage.store[RESOURCE_ENERGY] || 0;
 
+      // ИСПРАВЛЕНИЕ (ТЗ №32): раньше условие требовало только
+      // energyInStorage > 0 — докачка storage→terminal выполнялась
+      // при ЛЮБОМ положительном остатке в storage, вплоть до полного
+      // истощения комнаты (см. отчёт по ТЗ №31). Теперь докачка
+      // разрешена только если storage уже выше архитектурного резерва
+      // Empire.energy.richThreshold — используется уже существующий
+      // параметр, новых констант не введено. Остальная логика
+      // (terminalNeeds, выгрузка, Приоритет 2, лимиты, рынок, фабрики,
+      // балансировщик) не затронута.
       if (
         energyInTerminal < TERMINAL_ENERGY_MIN &&
         energyInTerminal < TERMINAL_ENERGY_MAX &&
-        energyInStorage > 0
+        energyInStorage >= empire.energy.richThreshold
       ) {
         const needed = Math.min(
           TERMINAL_ENERGY_MIN - energyInTerminal,
