@@ -30,6 +30,8 @@ module.exports = {
     const storage = room.storage;
     if (!storage) return;
 
+    if (storage.store[RESOURCE_ENERGY] < Empire.energy.storageMin) return;
+
     if (storage.store[RESOURCE_ENERGY] < Empire.energy.factoryReserve) return;
 
     // Производим батарейки если есть энергия на фабрике
