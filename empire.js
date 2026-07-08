@@ -128,7 +128,7 @@ module.exports = {
   // ===================================================
   energy: {
     poorThreshold: 20000,
-    richThreshold: 100000,
+    richThreshold: 150000,
     energyPoorThreshold: 50000,
     sendAmount: 20000,
     terminalMin: 100000,
@@ -137,6 +137,7 @@ module.exports = {
     factoryReserve: 10000,
     sellSurplus: 100000,
     sellPrepThreshold: 500000,
+    storageMin: 150000,
   },
 
   minerals: {
@@ -392,7 +393,7 @@ module.exports = {
   },
 
   getTerminalEnergyReserve() {
-    return 20000;
+    return this.energy.terminalMin;
   },
 
   getIncomingTransferTimeout() {
@@ -537,6 +538,9 @@ module.exports = {
     );
 
     for (const room of rooms) {
+      if ((room.storage.store[RESOURCE_ENERGY] || 0) < this.energy.storageMin) {
+        continue;
+      }
       // Формируем список ресурсов (Энергия всегда в приоритете)
       const sellableList = this.market.sellable;
       const resources = [RESOURCE_ENERGY, ...sellableList].filter(
