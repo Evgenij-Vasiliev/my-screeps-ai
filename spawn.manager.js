@@ -6,22 +6,23 @@ const QUOTA = {
   miner: 2,
   towerSupplier: 1,
   linkWorker: 1,
-  terminalUnloader: 1,
+  terminalUnloader: 0,
   attacker: 1,
   mineralMiner: 1,
   factoryWorker: 0,
 
   // harvester: 1,
   // upgrader: 0,
-  // builder: 1,
+  builder: 1,
   // repairer: 1,
   // transporter: 2,
 };
 
 module.exports = {
   run: function (room) {
-    const spawn = room.find(FIND_MY_SPAWNS)[0];
-    if (!spawn || spawn.spawning) return;
+    const spawns = room.find(FIND_MY_SPAWNS).filter(s => !s.spawning);
+    const spawn = spawns[0];
+    if (!spawn) return;
 
     const creeps = _.filter(Game.creeps, c => c.memory.room === room.name);
 

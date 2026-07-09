@@ -1,5 +1,6 @@
 const roles = {
   worker: require("role.worker"),
+  builder: require("role.builder"),
   miner: require("role.miner"),
   transporter: require("role.transporter"),
   towerSupplier: require("role.towerSupplier"),

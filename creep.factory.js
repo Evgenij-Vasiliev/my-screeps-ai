@@ -115,6 +115,11 @@ const factory = {
       memory: {},
     }),
 
+    builder: () => ({
+      body: prepareBody({ work: 5, carry: 5, move: 10 }),
+      memory: {},
+    }),
+
     mineralMiner: spawn => {
       let mineralId = null;
       if (spawn.room.memory.mineralId) {
