@@ -2,27 +2,28 @@ const factory = require("creep.factory");
 
 // Квоты крипов на комнату
 const QUOTA = {
-  worker: 2,
+  worker: 1,
   miner: 2,
   towerSupplier: 1,
   linkWorker: 1,
-  terminalUnloader: 1,
-  attacker: 1,
+  terminalUnloader: 0,
+  attacker: 0,
   mineralMiner: 1,
   factoryWorker: 0,
 
   // harvester: 1,
   // upgrader: 0,
-  // builder: 1,
+  builder: 1,
   // repairer: 1,
   // transporter: 2,
 };
 
 module.exports = {
   run: function (room) {
-    if (room.name === "E36S38") console.log("[spawn] вызван для E36S38");
-    const spawn = room.find(FIND_MY_SPAWNS)[0];
-    if (!spawn || spawn.spawning) return;
+    // if (room.name === "E36S38") console.log("[spawn] вызван для E36S38");
+    const spawns = room.find(FIND_MY_SPAWNS).filter(s => !s.spawning);
+    const spawn = spawns[0];
+    if (!spawn) return;
 
     const creeps = _.filter(Game.creeps, c => c.memory.room === room.name);
 
