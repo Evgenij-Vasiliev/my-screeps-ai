@@ -4,7 +4,6 @@
  * Жёсткая привязка к именам и количеству комнат отсутствует.
  */
 const roomManager = require("roomManager");
-const utils = require("utils");
 const roleHarvester = require("role.harvester");
 const roleUpgrader = require("role.upgrader");
 const roleBuilder = require("role.builder");
