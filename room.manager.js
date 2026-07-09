@@ -15,10 +15,10 @@ module.exports = {
 
     cpuMonitor.trackRole("towerManager", () => towerManager.run(room));
     cpuMonitor.trackRole("linkManager", () => linkManager.run(room));
-    cpuMonitor.trackRole("terminalManager", () => terminalManager.run(room));
+    // cpuMonitor.trackRole("terminalManager", () => terminalManager.run(room));
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(room));
     creepRunner.run(room);
-    factoryManager.run(room);
+    // factoryManager.run(room);
     // marketManager.run();
     roomRemote.run(room);
     observerManager.run(room);
