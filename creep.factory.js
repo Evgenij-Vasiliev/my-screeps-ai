@@ -119,10 +119,10 @@ const factory = {
     // }),
 
     // Строит здания, запасной апгрейдер.
-    // builder: () => ({
-    //   body: prepareBody({ work: 5, carry: 5, move: 5 }),
-    //   memory: {},
-    // }),
+    builder: () => ({
+      body: prepareBody({ work: 5, carry: 5, move: 10 }),
+      memory: {},
+    }),
 
     // Чинит дороги и контейнеры.
     // repairer: () => ({

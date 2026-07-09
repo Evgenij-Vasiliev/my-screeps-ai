@@ -2,7 +2,7 @@ const roles = {
   worker: require("role.worker"),
   // harvester: require("role.harvester"),
   // upgrader: require("role.upgrader"),
-  // builder: require("role.builder"),
+  builder: require("role.builder"),
   // repairer: require("role.repairer"),
   miner: require("role.miner"),
   transporter: require("role.transporter"),
