@@ -1,8 +1,13 @@
 /**
  * ЛОГИКА СТРОИТЕЛЯ (Builder Role)
  * Задача: Возведение новых зданий. Если строек нет — помощь апгрейдеру.
+ *
+ * ТЗ №2: получение энергии из источников убрано. Основной (и единственный)
+ * источник — Storage. Собственного аварийного механизма у builder не было
+ * и не вводится: если Storage недоступен/пуст, крип просто ждёт.
  */
 const roleUpgrader = require("./role.upgrader");
+const energySource = require("energySource");
 
 module.exports = {
   run: function (creep) {
@@ -22,38 +27,23 @@ module.exports = {
       creep.memory.working === true &&
       creep.store[RESOURCE_ENERGY] === 0
     ) {
-      creep.memory.working = false; // Пустой -> пора за едой
+      creep.memory.working = false; // Пустой -> пора за энергией
     }
 
     /**
-     * 3. РЕЖИМ СБОРА (Harvesting Mode)
+     * 3. РЕЖИМ СБОРА (Storage-only, ТЗ №2)
      */
     if (!creep.memory.working) {
-      // Получаем список всех источников в комнате
-      const sources = creep.room.find(FIND_SOURCES);
-
-      // Выбираем цель: если в памяти есть индекс — берем его, иначе — ближайший (для старых крипов)
-      const targetSource =
-        creep.memory.sourceIndex !== undefined
-          ? sources[creep.memory.sourceIndex]
-          : creep.pos.findClosestByRange(FIND_SOURCES);
-
-      if (targetSource) {
-        if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(targetSource, {
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
-        }
-      }
+      energySource.withdrawFromStorage(creep);
+      // Если Storage нет/пуст — аварийного режима для builder не предусмотрено
+      // (ТЗ №2 прямо запрещает возвращаться к добыче из источника).
     } else {
       /**
        * 4. РЕЖИМ СТРОЙКИ (Building Mode)
        */
-      // Находим БЛИЖАЙШУЮ площадку вместо первой в списке
       const target = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
 
       if (target) {
-        // Если стройка найдена — строим
         if (creep.build(target) === ERR_NOT_IN_RANGE) {
           creep.moveTo(target, {
             visualizePathStyle: { stroke: "#ffff00" },
@@ -62,8 +52,7 @@ module.exports = {
       } else {
         /**
          * ЗАПАСНОЙ ВАРИАНТ (Fallthrough Logic)
-         * Если строек в комнате нет, используем логику апгрейдера,
-         * чтобы крип приносил пользу контроллеру.
+         * Если строек в комнате нет, используем логику апгрейдера.
          */
         roleUpgrader.run(creep);
       }

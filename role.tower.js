@@ -9,6 +9,9 @@ module.exports = {
       return;
     }
 
+    if (tower.store[RESOURCE_ENERGY] <= 700) return;
+    if (Game.time % 10 !== 0) return;
+
     // Ремонт стен и валов с пошаговым увеличением прочности
     const wallThreshold = tower.room.memory.wallThreshold || 1000;
     const wallsAndRamparts = tower.room.find(FIND_STRUCTURES, {
