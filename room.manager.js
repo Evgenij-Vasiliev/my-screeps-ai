@@ -5,6 +5,15 @@
  */
 const { getRoomRole } = require("roomRoles");
 
+// Группировка структур по типу — таблица вместо switch/case, как и в
+// остальном проекте: добавление нового типа не требует правки самого цикла.
+const STRUCTURE_BUCKETS = {
+  [STRUCTURE_SPAWN]: "spawns",
+  [STRUCTURE_TOWER]: "towers",
+  [STRUCTURE_LINK]: "links",
+  [STRUCTURE_LAB]: "labs",
+};
+
 module.exports = {
   /**
    * Возвращает массив всех комнат, принадлежащих игроку.
@@ -45,27 +54,10 @@ module.exports = {
   buildRoomState: function (room) {
     const structures = room.find(FIND_MY_STRUCTURES);
 
-    // Группируем структуры за один проход по массиву
-    const spawns = [];
-    const towers = [];
-    const links = [];
-    const labs = [];
-
+    const grouped = { spawns: [], towers: [], links: [], labs: [] };
     for (const s of structures) {
-      switch (s.structureType) {
-        case STRUCTURE_SPAWN:
-          spawns.push(s);
-          break;
-        case STRUCTURE_TOWER:
-          towers.push(s);
-          break;
-        case STRUCTURE_LINK:
-          links.push(s);
-          break;
-        case STRUCTURE_LAB:
-          labs.push(s);
-          break;
-      }
+      const bucket = STRUCTURE_BUCKETS[s.structureType];
+      if (bucket) grouped[bucket].push(s);
     }
 
     // Контейнеры — не owned-структуры, ищем отдельно
@@ -85,17 +77,17 @@ module.exports = {
       room,
       roomName: room.name,
       role: getRoomRole(room), // специализация из памяти комнаты
-      spawn: spawns[0] || null, // основной спавн (для спавн-утилиты)
-      spawns,
+      spawn: grouped.spawns[0] || null, // основной спавн (для спавн-утилиты)
+      spawns: grouped.spawns,
       controller: room.controller,
       storage: room.storage || null,
       terminal: room.terminal || null,
-      towers,
+      towers: grouped.towers,
       creeps,
       sources,
       containers,
-      links,
-      labs,
+      links: grouped.links,
+      labs: grouped.labs,
     };
   },
 
