@@ -1,3 +1,13 @@
+/**
+ * ЛОГИКА АПГРЕЙДЕРА (Upgrader Role)
+ *
+ * ТЗ №2: прямая добыча из источников и контейнеров убрана.
+ * Основной источник — Storage. Линк у контроллера (если есть) сохранён как
+ * приоритетный путь — это не Source и не контейнер, ТЗ №2 его не запрещает
+ * и не упоминает; оставлен как уже работавшая оптимизация.
+ */
+const energySource = require("energySource");
+
 module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
@@ -12,7 +22,7 @@ module.exports = {
 
     // Режим сбора энергии
     if (!creep.memory.working) {
-      // 1. Попробовать взять из линка у контроллера
+      // 1. Линк у контроллера — если есть энергия, самый быстрый путь
       const controllerLink = creep.room.find(FIND_MY_STRUCTURES, {
         filter: s =>
           s.structureType === STRUCTURE_LINK &&
@@ -29,29 +39,9 @@ module.exports = {
         return;
       }
 
-      // 2. Попробовать взять из контейнера
-      const container = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-        filter: s =>
-          s.structureType === STRUCTURE_CONTAINER &&
-          s.store[RESOURCE_ENERGY] > 0,
-      });
-
-      if (container) {
-        if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(container, { reusePath: 10 });
-        }
-        return;
-      }
-
-      // 3. Если нет линка и контейнера - добывать напрямую
-      const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
-      if (source) {
-        if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { reusePath: 10 });
-        }
-      } else {
-        creep.say("Нет энергии");
-      }
+      // 2. Storage — основной источник энергии (ТЗ №2)
+      energySource.withdrawFromStorage(creep);
+      // Источники и контейнеры больше не используются.
     }
     // Режим улучшения
     else {

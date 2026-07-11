@@ -1,12 +1,19 @@
 /**
  * ЛОГИКА ХАРВЕСТЕРА (Harvester Role)
  * Основная задача: сбор энергии и заправка ключевых зданий комнаты.
+ *
+ * ТЗ №2: harvester — единственная роль с правом прямой добычи из источника.
+ * Основной режим — получение энергии из Storage. Аварийный режим (прямая
+ * добыча, как раньше) включается, если Storage отсутствует или пуст, и
+ * автоматически отключается, как только в Storage снова появляется энергия
+ * (условие проверяется заново каждый тик — отдельного флага не требуется).
  */
+const energySource = require("energySource");
+
 module.exports = {
   run: function (creep) {
     /**
      * 1. СОСТОЯНИЕ (State Management)
-     * Инициализируем переменную в памяти, если её еще нет.
      */
     if (creep.memory.working === undefined) {
       creep.memory.working = false;
@@ -14,26 +21,33 @@ module.exports = {
 
     /**
      * 2. ТУМБЛЕР (Logic Switch)
-     * Переключаем режимы: "Сбор" (false) и "Доставка" (true).
      */
     if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true; // Рюкзак полон -> везем энергию
+      creep.memory.working = true;
     } else if (
       creep.memory.working === true &&
       creep.store[RESOURCE_ENERGY] === 0
     ) {
-      creep.memory.working = false; // Энергия кончилась -> идем добывать
+      creep.memory.working = false;
     }
 
     /**
-     * 3. РЕЖИМ СБОРА (Harvesting Mode)
-     * Используем Slot Booking: идем к источнику по индексу из памяти.
+     * 3. РЕЖИМ СБОРА
      */
     if (!creep.memory.working) {
-      // Получаем все источники в текущей комнате
-      const sources = creep.room.find(FIND_SOURCES);
+      const storage = creep.room.storage;
+      const emergency = !storage || storage.store[RESOURCE_ENERGY] === 0;
 
-      // Если в памяти есть индекс (0 или 1), берем его. Для старых крипов ищем ближайший.
+      if (!emergency) {
+        // ОСНОВНОЙ РЕЖИМ (ТЗ №2): энергия берётся из Storage
+        creep.say("📥storage");
+        energySource.withdrawFromStorage(creep);
+        return;
+      }
+
+      // АВАРИЙНЫЙ РЕЖИМ: Storage отсутствует/пуст — старая модель добычи
+      creep.say("⚠️source");
+      const sources = creep.room.find(FIND_SOURCES);
       const targetSource =
         creep.memory.sourceIndex !== undefined
           ? sources[creep.memory.sourceIndex]
@@ -46,51 +60,42 @@ module.exports = {
           });
         }
       }
+      return;
+    }
+
+    /**
+     * 4. РЕЖИМ ПЕРЕДАЧИ (без изменений)
+     */
+    let target = null;
+
+    if (!target) {
+      target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+        filter: structure =>
+          structure.structureType === STRUCTURE_EXTENSION &&
+          structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      });
+    }
+
+    if (!target) {
+      target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+        filter: structure =>
+          structure.structureType === STRUCTURE_SPAWN &&
+          structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      });
+    }
+
+    // Terminal и Storage больше не используются как цели доставки: терминал
+    // предназначен для рыночных операций, а не для сброса лишней энергии от
+    // харвестера. Если extension/spawn заполнены, харвестеру просто нечего
+    // делать — ждёт следующего тика.
+
+    if (target) {
+      creep.say("📤" + target.structureType.slice(0, 6));
+      if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(target, { visualizePathStyle: { stroke: "#ffffff" } });
+      }
     } else {
-      /**
-       * 4. РЕЖИМ ПЕРЕДАЧИ (Delivery Mode)
-       * Развозим энергию согласно установленным приоритетам.
-       */
-      let target = null;
-
-      // ПРИОРИТЕТ 1: Расширения (Extensions) - важны для лимита энергии
-      if (!target) {
-        target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-          filter: structure =>
-            structure.structureType === STRUCTURE_EXTENSION &&
-            structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-        });
-      }
-
-      // ПРИОРИТЕТ 2: Спавн (Spawn) - заправляем базу
-      if (!target) {
-        target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-          filter: structure =>
-            structure.structureType === STRUCTURE_SPAWN &&
-            structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-        });
-      }
-
-      // ПРИОРИТЕТ 3: Терминал (Terminal) - используем для рыночных операций
-      if (
-        !target &&
-        creep.room.terminal &&
-        creep.room.terminal.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-      ) {
-        target = creep.room.terminal;
-      }
-
-      // ПРИОРИТЕТ 4: Хранилище (Storage) - основной склад
-      if (!target && creep.room.storage) {
-        target = creep.room.storage;
-      }
-
-      // ВЫПОЛНЕНИЕ ДОСТАВКИ
-      if (target) {
-        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, { visualizePathStyle: { stroke: "#ffffff" } });
-        }
-      }
+      // creep.say("😴idle");
     }
   },
 };

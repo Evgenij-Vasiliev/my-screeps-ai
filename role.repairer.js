@@ -1,8 +1,13 @@
 /**
  * ЛОГИКА РЕМОНТНИКА (Repairer Role)
  * Задача: Поддержание здоровья дорог и контейнеров. Игнорирует стены/рампарты.
+ *
+ * ТЗ №2: зависимость от источников убрана. Основной источник — Storage.
+ * Собственного резервного режима у repairer не было и не вводится: при
+ * отсутствии/пустом Storage крип просто ждёт следующего тика.
  */
 const roleBuilder = require("./role.builder");
+const energySource = require("energySource");
 
 module.exports = {
   run: function (creep) {
@@ -22,22 +27,18 @@ module.exports = {
       creep.memory.working === true &&
       creep.store[RESOURCE_ENERGY] === 0
     ) {
-      creep.memory.working = false; // Энергия на нуле -> пора добывать
+      creep.memory.working = false; // Энергия на нуле -> пора за энергией
     }
 
     /**
-     * 3. РЕЖИМ СБОРА (Harvesting Mode)
+     * 3. РЕЖИМ СБОРА (Storage-only, ТЗ №2)
      */
     if (!creep.memory.working) {
-      const source = creep.pos.findClosestByRange(FIND_SOURCES);
-      if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
-      }
+      energySource.withdrawFromStorage(creep);
     } else {
       /**
        * 4. РЕЖИМ РЕМОНТА (Repair Mode)
        */
-      // Ищем БЛИЖАЙШУЮ структуру, требующую ремонта (кроме стен и рампартов)
       const target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
         filter: structure =>
           structure.hits < structure.hitsMax &&
@@ -46,7 +47,6 @@ module.exports = {
       });
 
       if (target) {
-        // Если нашли цель — чиним
         if (creep.repair(target) === ERR_NOT_IN_RANGE) {
           creep.moveTo(target, {
             visualizePathStyle: { stroke: "#00ff00" },

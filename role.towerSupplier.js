@@ -1,41 +1,45 @@
+/**
+ * ЛОГИКА ЗАПРАВЩИКА БАШЕН (TowerSupplier Role)
+ *
+ * Одна задача: Storage → башни. Ремонтная версия (по образцу из прошлой
+ * Империи): выбирает башню с НАИМЕНЬШИМ текущим запасом энергии, а не
+ * ближайшую — иначе крип обслуживает одну и ту же башню, пока остальные
+ * стоят пустыми.
+ */
+const energySource = require("energySource");
+
 module.exports = {
   run: function (creep) {
-    // Если энергия закончилась, начинаем собирать
+    if (!creep.room.storage) return;
+
+    // Пусто — идём за энергией в Storage
     if (creep.store[RESOURCE_ENERGY] === 0) {
-      creep.memory.working = false;
+      energySource.withdrawFromStorage(creep);
+      return;
     }
 
-    // Если энергия полная, начинаем передавать
-    if (_.sum(creep.store) === creep.store.getCapacity()) {
-      creep.memory.working = true;
-    }
+    // Есть энергия — ищем самую "голодную" башню (минимум текущей энергии)
+    const towers = creep.room.find(FIND_STRUCTURES, {
+      filter: s => s.structureType === STRUCTURE_TOWER,
+    });
 
-    // Собираем энергию из контейнера
-    if (!creep.memory.working) {
-      // Находим ближайший контейнер с энергией
-      const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-        filter: s =>
-          s.structureType === STRUCTURE_CONTAINER &&
-          s.store[RESOURCE_ENERGY] > 0,
-      });
+    const tower = towers
+      .filter(t => t.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+      .sort((a, b) => a.store[RESOURCE_ENERGY] - b.store[RESOURCE_ENERGY])[0];
 
-      if (container) {
-        if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(container, { reusePath: 15 });
-        }
+    if (tower) {
+      if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(tower, { reusePath: 5 });
       }
-    } else {
-      // Передаём энергию в башню
-      const tower = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-        filter: s =>
-          s.structureType === STRUCTURE_TOWER &&
-          s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-      });
+      return;
+    }
 
-      if (tower) {
-        if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(tower, { reusePath: 15 });
-        }
+    // Все башни полные — возвращаем остаток в Storage
+    if (creep.store[RESOURCE_ENERGY] > 0) {
+      if (
+        creep.transfer(creep.room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
+      ) {
+        creep.moveTo(creep.room.storage, { reusePath: 5 });
       }
     }
   },

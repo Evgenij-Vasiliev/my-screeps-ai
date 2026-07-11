@@ -1,72 +1,52 @@
+/**
+ * ЛОГИКА ЗАПРАВЩИКА БАШЕН (TowerSupplier Role)
+ *
+ * ТЗ №2: закрепляет экстренный механизм, введённый во время ТЗ №1.
+ * Storage становится штатным (приоритетным) источником энергии.
+ * Контейнер — только резервный путь, если где-то ещё остался, не основной.
+ * Прежняя модель (контейнер как основной источник) не возвращается.
+ */
+const energySource = require("energySource");
+
 module.exports = {
   run: function (creep) {
-    // Инициализация состояния при первом запуске
-    if (creep.memory.working === undefined) {
+    // Если энергия закончилась, начинаем собирать
+    if (creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
     }
 
-    // Тумблер: полный -> везём, пустой -> берём
-    if (
-      creep.memory.working === true &&
-      creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0
-    ) {
-      creep.memory.working = false;
-    } else if (
-      creep.memory.working === false &&
-      creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0
-    ) {
+    // Если энергия полная, начинаем передавать
+    if (_.sum(creep.store) === creep.store.getCapacity()) {
       creep.memory.working = true;
     }
 
-    if (creep.memory.working) {
-      // Доставка: спавн/расширения → storage
-      let target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-        filter: structure => {
-          return (
-            (structure.structureType === STRUCTURE_EXTENSION ||
-              structure.structureType === STRUCTURE_SPAWN) &&
-            structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-          );
-        },
+    if (!creep.memory.working) {
+      // ШТАТНЫЙ ИСТОЧНИК (ТЗ №2): Storage
+      if (energySource.withdrawFromStorage(creep)) return;
+
+      // РЕЗЕРВНЫЙ ПУТЬ: контейнер, если где-то ещё остался (не основной источник)
+      const container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+        filter: s =>
+          s.structureType === STRUCTURE_CONTAINER &&
+          s.store[RESOURCE_ENERGY] > 0,
       });
 
-      if (
-        !target &&
-        creep.room.storage &&
-        creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-      ) {
-        target = creep.room.storage;
-      }
-
-      if (target) {
-        const result = creep.transfer(target, RESOURCE_ENERGY);
-        if (result === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, { visualizePathStyle: { stroke: "#ffffff" } });
-        } else if (result === ERR_FULL || result === ERR_INVALID_TARGET) {
-          creep.memory.working = false;
-        }
-      } else {
-        // Если некуда нести — апгрейд контроллера
-        const controller = creep.room.controller;
-        if (controller) {
-          if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(controller, {
-              visualizePathStyle: { stroke: "#ffffff" },
-            });
-          }
+      if (container) {
+        if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(container, { reusePath: 15 });
         }
       }
     } else {
-      // Сбор: берём из контейнера
-      const source = creep.pos.findClosestByPath(FIND_STRUCTURES, {
-        filter: structure =>
-          structure.structureType === STRUCTURE_CONTAINER &&
-          structure.store[RESOURCE_ENERGY] > 0,
+      // Передаём энергию в башню
+      const tower = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+        filter: s =>
+          s.structureType === STRUCTURE_TOWER &&
+          s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
       });
 
-      if (source) {
-        if (creep.withdraw(source, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { visualizePathStyle: { stroke: "#ffaa00" } });
+      if (tower) {
+        if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(tower, { reusePath: 15 });
         }
       }
     }
