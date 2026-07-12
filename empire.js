@@ -14,6 +14,7 @@ const roleTower = require("role.tower");
 const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
 const linkManager = require("linkManager");
+const factoryManager = require("factory.manager");
 const spawnManager = require("spawn.manager");
 const taskManager = require("task.manager");
 const workerRunner = require("worker.runner");
@@ -70,5 +71,6 @@ module.exports.run = function () {
     runCreepLogic(roomState);
     runTowerLogic(roomState);
     runLinkLogic(roomState);
+    factoryManager.run(roomState);
   }
 };
