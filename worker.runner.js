@@ -26,8 +26,12 @@ function assignTask(creep) {
     return reclaimed;
   }
 
+  // Задача своей комнаты: либо свежая pending, либо брошенная умершим крипом.
   const task = Memory.tasks.build.find(
-    t => t.status === "pending" && t.room === creep.room.name,
+    t =>
+      t.room === creep.room.name &&
+      t.status !== "done" &&
+      (t.status === "pending" || !Game.creeps[t.assigned]),
   );
   if (!task) return null;
 

@@ -14,7 +14,7 @@ const QUOTA = {
   repairer: 1,
   builder: 1,
   upgrader: 1,
-  worker: 1,
+  worker: 0,
 };
 
 const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };

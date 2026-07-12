@@ -113,7 +113,7 @@ const factory = {
     worker: () => ({
       body: prepareBody({ work: 1, carry: 2, move: 2 }),
       cost: 250,
-      memory: {},
+      memory: { working: false },
     }),
   },
 
