@@ -23,8 +23,18 @@ function ensureMemory() {
  * @param {string} roomName
  */
 function createTestTask(roomName) {
-  const hasOwn = Memory.tasks.build.some(t => t.room === roomName);
-  if (hasOwn) return;
+  const room = Game.rooms[roomName];
+  if (!room) return;
+
+  // Нет смысла создавать задачу BUILD, если в комнате нет строек —
+  // иначе задача тут же закроется как done и на следующий тик создастся заново.
+  const hasSites = room.find(FIND_CONSTRUCTION_SITES).length > 0;
+  if (!hasSites) return;
+
+  const hasActive = Memory.tasks.build.some(
+    t => t.room === roomName && t.status !== "done",
+  );
+  if (hasActive) return;
 
   Memory.tasks.build.push({
     id: `task_${roomName}_${Game.time}`,
