@@ -88,6 +88,8 @@ module.exports = {
       containers,
       links: grouped.links,
       labs: grouped.labs,
+      factory:
+        structures.find(s => s.structureType === STRUCTURE_FACTORY) || null,
     };
   },
 
