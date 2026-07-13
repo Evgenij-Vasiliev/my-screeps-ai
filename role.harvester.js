@@ -40,13 +40,13 @@ module.exports = {
 
       if (!emergency) {
         // ОСНОВНОЙ РЕЖИМ (ТЗ №2): энергия берётся из Storage
-        creep.say("📥storage");
+        // creep.say("📥storage");
         energySource.withdrawFromStorage(creep);
         return;
       }
 
       // АВАРИЙНЫЙ РЕЖИМ: Storage отсутствует/пуст — старая модель добычи
-      creep.say("⚠️source");
+      // creep.say("⚠️source");
       const sources = creep.room.find(FIND_SOURCES);
       const targetSource =
         creep.memory.sourceIndex !== undefined
@@ -90,7 +90,7 @@ module.exports = {
     // делать — ждёт следующего тика.
 
     if (target) {
-      creep.say("📤" + target.structureType.slice(0, 6));
+      // creep.say("📤" + target.structureType.slice(0, 6));
       if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
         creep.moveTo(target, { visualizePathStyle: { stroke: "#ffffff" } });
       }

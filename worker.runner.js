@@ -10,16 +10,10 @@ const CONFIG = {
   // более высоком приоритете.
   TASK_STALE_TICKS: 100,
 };
-/**
- * WORKER RUNNER (ТЗ №3, Этап 4)
- * Получает задачу из Task Manager, назначает крипу, исполняет, ловит ошибки.
- * Пока поддерживает только тип BUILD, минимально.
- */
 
 /**
- * Берёт первую pending-задачу нужного типа и назначает крипу.
- * @param {Creep} creep
- * @returns {Object|null} задача
+ * Ищет задачу по id среди всех типов в Memory.tasks.
+ * @param {string} taskId
  */
 function findTaskById(taskId) {
   for (const type of Object.keys(Memory.tasks)) {
@@ -121,12 +115,6 @@ function assignTask(creep) {
   return current;
 }
 
-/**
- * Исполнение задачи BUILD: ищет реальный constructionSite в своей комнате.
- * Тестовая задача (target: null) пока просто держит крипа в ожидании.
- * @param {Creep} creep
- * @param {Object} task
- */
 function executeBuild(creep, task) {
   const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
   if (sites.length === 0) {
@@ -162,6 +150,14 @@ function executeBuild(creep, task) {
   }
 }
 
+/**
+ * Обслуживание Factory: подвозит энергию, вывозит готовые BATTERY.
+ * Фазы хранятся в creep.memory.factoryPhase:
+ *   "toFactory"  — везёт энергию к Factory
+ *   "toStorage"  — везёт BATTERY (или пусто) обратно в Storage
+ * @param {Creep} creep
+ * @param {Object} task
+ */
 function executeFactorySupply(creep, task) {
   const factory = Game.getObjectById(task.data.factoryId);
   const storage = creep.room.storage;
@@ -178,6 +174,7 @@ function executeFactorySupply(creep, task) {
   if (creep.memory.factoryPhase === "toFactory") {
     if (creep.store[RESOURCE_ENERGY] === 0) {
       if (storage.store[RESOURCE_ENERGY] === 0) {
+        // Заправиться нечем — считаем этап снабжения энергией пройденным.
         creep.memory.factoryPhase = "toStorage";
       } else if (
         creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
@@ -224,8 +221,42 @@ function executeFactorySupply(creep, task) {
 }
 
 /**
- * @param {Object} roomState
+ * Подвозит ресурс из Storage в Terminal (задача TERMINAL_SUPPLY).
+ * Простой однонаправленный цикл: забрать нужное количество ресурса
+ * из Storage → отвезти в Terminal → сдать → закрыть задачу.
+ * @param {Creep} creep
+ * @param {Object} task
  */
+function executeTerminalSupply(creep, task) {
+  const storage = creep.room.storage;
+  const terminal = creep.room.terminal;
+  const { resourceType, amount } = task.data;
+
+  if (!storage || !terminal) {
+    task.status = "done";
+    return;
+  }
+
+  if (creep.store[resourceType] === 0) {
+    if (storage.store[resourceType] === 0) {
+      task.status = "done";
+      return;
+    }
+    const toTake = Math.min(amount, creep.store.getFreeCapacity());
+    if (creep.withdraw(storage, resourceType, toTake) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(storage);
+    }
+    return;
+  }
+
+  if (creep.transfer(terminal, resourceType) === ERR_NOT_IN_RANGE) {
+    creep.moveTo(terminal);
+    return;
+  }
+
+  task.status = "done";
+}
+
 // Реестр исполнителей задач (раздел 12 ТЗ №5): Worker Runner не должен
 // содержать список типов и порядок приоритетов — только знать, куда
 // передать управление по task.type. Добавление нового типа задачи не
@@ -233,8 +264,12 @@ function executeFactorySupply(creep, task) {
 const TASK_EXECUTORS = {
   BUILD: executeBuild,
   FACTORY_SUPPLY: executeFactorySupply,
+  TERMINAL_SUPPLY: executeTerminalSupply,
 };
 
+/**
+ * @param {Object} roomState
+ */
 function run(roomState) {
   const workers = roomState.creeps.filter(c => c.memory.role === "worker");
 
