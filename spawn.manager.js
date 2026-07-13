@@ -12,10 +12,13 @@ const QUOTA = {
   miner: 2,
   towerSupplier: 1,
   repairer: 1,
-  builder: 1,
-  upgrader: 1,
-  worker: 1,
+  builder: 0,
+  upgrader: 0,
+  worker: 0,
+  mineralMiner: 1,
 };
+
+const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
 
 const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
 
@@ -52,6 +55,14 @@ function run(roomState) {
     if (
       role === "upgrader" &&
       roomState.room.controller.ticksToDowngrade > 100000
+    )
+      continue;
+
+    if (
+      role === "mineralMiner" &&
+      (!roomState.mineral ||
+        !roomState.mineral.extractor ||
+        roomState.mineral.amount < MINERAL_MIN_AMOUNT_TO_SPAWN)
     )
       continue;
 

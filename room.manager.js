@@ -4,6 +4,7 @@
  * Создаёт и хранит объект состояния (roomState) для каждой комнаты.
  */
 const { getRoomRole } = require("roomRoles");
+const mineralManager = require("mineral.manager");
 
 // Группировка структур по типу — таблица вместо switch/case, как и в
 // остальном проекте: добавление нового типа не требует правки самого цикла.
@@ -90,6 +91,7 @@ module.exports = {
       labs: grouped.labs,
       factory:
         structures.find(s => s.structureType === STRUCTURE_FACTORY) || null,
+      mineral: mineralManager.buildMineralState(room),
     };
   },
 

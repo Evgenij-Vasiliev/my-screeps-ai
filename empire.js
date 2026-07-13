@@ -13,8 +13,10 @@ const roleMiner = require("role.miner");
 const roleTower = require("role.tower");
 const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
+const roleMineralMiner = require("role.mineralMiner");
 const linkManager = require("linkManager");
 const factoryManager = require("factory.manager");
+const marketManager = require("market.manager");
 const spawnManager = require("spawn.manager");
 const taskManager = require("task.manager");
 const workerRunner = require("worker.runner");
@@ -27,6 +29,7 @@ const ROLES = {
   miner: roleMiner,
   towerSupplier: roleTowerSupplier,
   linkWorker: roleLinkWorker,
+  mineralMiner: roleMineralMiner,
 };
 
 function runCreepLogic(roomState) {
@@ -73,4 +76,5 @@ module.exports.run = function () {
     runLinkLogic(roomState);
     factoryManager.run(roomState);
   }
+  marketManager.run();
 };
