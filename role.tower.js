@@ -1,3 +1,5 @@
+const { TOWER } = require("./constants");
+
 module.exports = {
   run: function (tower) {
     if (!tower) return;
@@ -9,11 +11,12 @@ module.exports = {
       return;
     }
 
-    if (tower.store[RESOURCE_ENERGY] <= 700) return;
-    if (Game.time % 10 !== 0) return;
+    if (tower.store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) return;
+    if (Game.time % TOWER.REPAIR_INTERVAL !== 0) return;
 
     // Ремонт стен и валов с пошаговым увеличением прочности
-    const wallThreshold = tower.room.memory.wallThreshold || 1000;
+    const wallThreshold =
+      tower.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
     const wallsAndRamparts = tower.room.find(FIND_STRUCTURES, {
       filter: structure =>
         (structure.structureType === STRUCTURE_WALL ||
@@ -26,7 +29,8 @@ module.exports = {
       tower.repair(wallsAndRamparts[0]);
       return;
     } else {
-      tower.room.memory.wallThreshold = wallThreshold + 1000;
+      tower.room.memory.wallThreshold =
+        wallThreshold + TOWER.WALL_THRESHOLD_STEP;
     }
 
     // Ремонт самого повреждённого здания (кроме стен и валов)

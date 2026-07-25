@@ -2,11 +2,14 @@
  * ЛОГИКА ХАРВЕСТЕРА (Harvester Role)
  * Основная задача: сбор энергии и заправка ключевых зданий комнаты.
  *
- * ТЗ №2: harvester — единственная роль с правом прямой добычи из источника.
- * Основной режим — получение энергии из Storage. Аварийный режим (прямая
- * добыча, как раньше) включается, если Storage отсутствует или пуст, и
- * автоматически отключается, как только в Storage снова появляется энергия
- * (условие проверяется заново каждый тик — отдельного флага не требуется).
+ * ТЗ №2: harvester получает энергию из Storage.
+ * Аварийный режим (прямая добыча при пустом/отсутствующем Storage)
+ * вынесен в отдельный модуль и здесь не обрабатывается.
+ *
+ * Harvester — единственная роль, которая наполняет Storage, поэтому забор
+ * энергии из Storage у неё выполняется с ignoreReserve = true: harvester не
+ * должен блокироваться минимальным резервом (STORAGE.ENERGY_MIN), иначе при
+ * просадке ниже резерва storage никогда не наполнится обратно.
  */
 const energySource = require("energySource");
 
@@ -32,34 +35,13 @@ module.exports = {
     }
 
     /**
-     * 3. РЕЖИМ СБОРА
+     * 3. РЕЖИМ СБОРА (Storage-only)
      */
     if (!creep.memory.working) {
-      const storage = creep.room.storage;
-      const emergency = !storage || storage.store[RESOURCE_ENERGY] === 0;
-
-      if (!emergency) {
-        // ОСНОВНОЙ РЕЖИМ (ТЗ №2): энергия берётся из Storage
-        // creep.say("📥storage");
-        energySource.withdrawFromStorage(creep);
-        return;
-      }
-
-      // АВАРИЙНЫЙ РЕЖИМ: Storage отсутствует/пуст — старая модель добычи
-      // creep.say("⚠️source");
-      const sources = creep.room.find(FIND_SOURCES);
-      const targetSource =
-        creep.memory.sourceIndex !== undefined
-          ? sources[creep.memory.sourceIndex]
-          : creep.pos.findClosestByRange(FIND_SOURCES);
-
-      if (targetSource) {
-        if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(targetSource, {
-            visualizePathStyle: { stroke: "#ffaa00" },
-          });
-        }
-      }
+      // ignoreReserve = true — harvester сам наполняет резерв, поэтому
+      // не должен на него оглядываться.
+      // creep.say("📥storage");
+      energySource.withdrawFromStorage(creep, true);
       return;
     }
 

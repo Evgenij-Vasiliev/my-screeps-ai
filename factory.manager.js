@@ -1,33 +1,16 @@
-const CONFIG = {
-  START_ENERGY: 100000,
-  STOP_ENERGY: 50000,
-};
-
 function run(roomState) {
-  const { storage, factory, roomName } = roomState;
+  const { factory, roomName } = roomState;
 
-  if (!storage || !factory) return;
-
-  if (factory.memory === undefined) {
-    factory.memory = {};
-  }
-
-  const producing = factory.room.memory.factoryProducing || false;
+  if (!factory) return;
 
   if (factory.cooldown > 0) return;
 
-  if (!producing && storage.store[RESOURCE_ENERGY] >= CONFIG.START_ENERGY) {
-    factory.room.memory.factoryProducing = true;
-    console.log(`[Factory] ${roomName} : Production started`);
-  }
+  if (factory.store[RESOURCE_ENERGY] > 0) {
+    const result = factory.produce(RESOURCE_BATTERY);
 
-  if (producing && storage.store[RESOURCE_ENERGY] <= CONFIG.STOP_ENERGY) {
-    factory.room.memory.factoryProducing = false;
-    console.log(`[Factory] ${roomName} : Production stopped`);
-  }
-
-  if (factory.room.memory.factoryProducing) {
-    factory.produce(RESOURCE_BATTERY);
+    // if (result !== OK) {
+    //   console.log(`[Factory] ${roomName} : produce() вернул ошибку ${result}`);
+    // }
   }
 }
 

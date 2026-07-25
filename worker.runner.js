@@ -1,289 +1,58 @@
-const taskManager = require("task.manager");
+const taskExecutors = require("taskExecutors");
+const energySource = require("energySource");
 
-// Защита от частого переключения задач (раздел 10 ТЗ №5).
-const CONFIG = {
-  // Новая задача должна быть выше текущей минимум на столько,
-  // чтобы переключение вообще рассматривалось.
-  PRIORITY_SWITCH_MARGIN: 10,
-  // Если текущая задача "висит" в работе дольше этого числа тиков,
-  // считаем её просроченной и разрешаем переключение при любом
-  // более высоком приоритете.
-  TASK_STALE_TICKS: 100,
-};
+module.exports = {
+  run: function (creep) {
+    const taskChain = [
+      "fillSpawnsExtensions",
+      "fillTerminals",
+      "operateFactory",
+      "repairStructures",
+      "buildStructures",
+      "fillTowers",
+      "upgradeController",
+    ];
 
-/**
- * Ищет задачу по id среди всех типов в Memory.tasks.
- * @param {string} taskId
- */
-function findTaskById(taskId) {
-  for (const type of Object.keys(Memory.tasks)) {
-    const found = Memory.tasks[type].find(t => t.id === taskId);
-    if (found) return found;
-  }
-  return null;
-}
+    if (creep.memory.taskIndex === undefined) {
+      creep.memory.taskIndex = 0;
+    }
 
-/**
- * Возвращает текущую активную задачу воркера, если она ещё жива.
- * Умеет восстановить связь, если taskId в памяти крипа был потерян,
- * но задача в Memory всё ещё числится назначенной на этого крипа.
- * @param {Creep} creep
- */
-function getCurrentTask(creep) {
-  if (creep.memory.taskId) {
-    const task = findTaskById(creep.memory.taskId);
-    if (task && task.status !== "done") return task;
-    creep.memory.taskId = null;
-  }
+    const currentTaskName = taskChain[creep.memory.taskIndex];
 
-  const roomTasks = taskManager.getRoomTasks(creep.room.name);
-  const reclaimed = roomTasks.find(t => t.assigned === creep.name);
-  if (reclaimed) {
-    creep.memory.taskId = reclaimed.id;
-    return reclaimed;
-  }
-
-  return null;
-}
-
-/**
- * Находит лучшую доступную задачу комнаты по приоритету, среди задач
- * pending или брошенных умершим крипом. Worker не знает про типы задач
- * (раздел 8 ТЗ №5) — сравнивает только task.priority.
- * @param {Creep} creep
- * @param {string|null} excludeTaskId — не рассматривать эту задачу (текущую)
- */
-function findBestAvailableTask(creep, excludeTaskId) {
-  const tasks = taskManager.getRoomTasks(creep.room.name);
-  let best = null;
-
-  for (const task of tasks) {
-    if (task.id === excludeTaskId) continue;
-    const available = task.status === "pending" || !Game.creeps[task.assigned];
-    if (!available) continue;
-
+    // Условие 3: рюкзак пуст — идём за энергией и ЖДЁМ на текущей задаче,
+    // не продвигая taskIndex. Иначе задача, чья очередь пришлась на тик
+    // с пустым рюкзаком, будет пропущена, а taskIndex продолжит листаться
+    // вперёд на каждом тике, пока крип идёт за энергией.
+    // Исключение: operateFactory сам обрабатывает пустой рюкзак —
+    // это её законный шаг 4 (проверка батарейки на фабрике).
     if (
-      !best ||
-      task.priority > best.priority ||
-      (task.priority === best.priority && task.created < best.created)
+      creep.store[RESOURCE_ENERGY] === 0 &&
+      currentTaskName !== "operateFactory"
     ) {
-      best = task;
-    }
-  }
-
-  return best;
-}
-
-function claimTask(creep, task) {
-  task.status = "in_progress";
-  task.assigned = creep.name;
-  task.updated = Game.time;
-  creep.memory.taskId = task.id;
-}
-
-/**
- * Выбирает задачу для воркера: либо продолжает текущую, либо переключается
- * на более приоритетную (раздел 9), с защитой от частого переключения
- * (раздел 10 ТЗ №5).
- * @param {Creep} creep
- */
-function assignTask(creep) {
-  const current = getCurrentTask(creep);
-  const best = findBestAvailableTask(creep, current ? current.id : null);
-
-  if (!current) {
-    if (best) claimTask(creep, best);
-    return best;
-  }
-
-  if (best) {
-    const stale = Game.time - current.updated > CONFIG.TASK_STALE_TICKS;
-    const higherEnough =
-      best.priority >= current.priority + CONFIG.PRIORITY_SWITCH_MARGIN;
-
-    if (higherEnough || (stale && best.priority > current.priority)) {
-      current.status = "pending";
-      current.assigned = null;
-      console.log(
-        `[Task] ${creep.name} switched ${current.type} -> ${best.type}`,
-      );
-      claimTask(creep, best);
-      return best;
-    }
-  }
-
-  return current;
-}
-
-function executeBuild(creep, task) {
-  const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
-  if (sites.length === 0) {
-    task.status = "done"; // все стройки в комнате завершены
-    return;
-  }
-
-  // Переключатель режима: working=false — идём заправляться,
-  // working=true — идём строить. Без этого крип дёргается туда-сюда
-  // при частичном заполнении энергии.
-  if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
-    creep.memory.working = true;
-  } else if (
-    creep.memory.working === true &&
-    creep.store[RESOURCE_ENERGY] === 0
-  ) {
-    creep.memory.working = false;
-  }
-
-  if (!creep.memory.working) {
-    const storage = creep.room.storage;
-    if (!storage || storage.store[RESOURCE_ENERGY] === 0) return; // нечем заправиться
-
-    if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage);
-    }
-    return;
-  }
-
-  const site = sites[0];
-  if (creep.build(site) === ERR_NOT_IN_RANGE) {
-    creep.moveTo(site);
-  }
-}
-
-/**
- * Обслуживание Factory: подвозит энергию, вывозит готовые BATTERY.
- * Фазы хранятся в creep.memory.factoryPhase:
- *   "toFactory"  — везёт энергию к Factory
- *   "toStorage"  — везёт BATTERY (или пусто) обратно в Storage
- * @param {Creep} creep
- * @param {Object} task
- */
-function executeFactorySupply(creep, task) {
-  const factory = Game.getObjectById(task.data.factoryId);
-  const storage = creep.room.storage;
-
-  if (!factory || !storage) {
-    task.status = "done";
-    return;
-  }
-
-  if (!creep.memory.factoryPhase) {
-    creep.memory.factoryPhase = "toFactory";
-  }
-
-  if (creep.memory.factoryPhase === "toFactory") {
-    if (creep.store[RESOURCE_ENERGY] === 0) {
-      if (storage.store[RESOURCE_ENERGY] === 0) {
-        // Заправиться нечем — считаем этап снабжения энергией пройденным.
-        creep.memory.factoryPhase = "toStorage";
-      } else if (
-        creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-      ) {
-        creep.moveTo(storage);
-        return;
-      } else {
-        return;
-      }
-    }
-
-    if (creep.store[RESOURCE_ENERGY] > 0) {
-      if (creep.transfer(factory, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(factory);
-        return;
-      }
-      creep.memory.factoryPhase = "toStorage";
-      return;
-    }
-  }
-
-  if (creep.memory.factoryPhase === "toStorage") {
-    if (
-      creep.store[RESOURCE_BATTERY] === 0 &&
-      factory.store[RESOURCE_BATTERY] > 0
-    ) {
-      if (creep.withdraw(factory, RESOURCE_BATTERY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(factory);
-        return;
-      }
+      creep.say("⚡energy");
+      energySource.withdrawFromStorage(creep);
       return;
     }
 
-    if (creep.store[RESOURCE_BATTERY] > 0) {
-      if (creep.transfer(storage, RESOURCE_BATTERY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage);
-        return;
+    const taskName = currentTaskName;
+    const sayLabels = {
+      fillSpawnsExtensions: "spawn",
+      fillTerminals: "terminal",
+      operateFactory: "factory",
+      repairStructures: "repair",
+      buildStructures: "build",
+      fillTowers: "tower",
+      upgradeController: "upgrade",
+    };
+    creep.say(sayLabels[taskName] || taskName);
+
+    if (typeof taskExecutors[taskName] === "function") {
+      const isBusy = taskExecutors[taskName](creep);
+
+      if (!isBusy) {
+        creep.memory.taskIndex =
+          (creep.memory.taskIndex + 1) % taskChain.length;
       }
     }
-
-    task.status = "done";
-    creep.memory.factoryPhase = null;
-  }
-}
-
-/**
- * Подвозит ресурс из Storage в Terminal (задача TERMINAL_SUPPLY).
- * Простой однонаправленный цикл: забрать нужное количество ресурса
- * из Storage → отвезти в Terminal → сдать → закрыть задачу.
- * @param {Creep} creep
- * @param {Object} task
- */
-function executeTerminalSupply(creep, task) {
-  const storage = creep.room.storage;
-  const terminal = creep.room.terminal;
-  const { resourceType, amount } = task.data;
-
-  if (!storage || !terminal) {
-    task.status = "done";
-    return;
-  }
-
-  if (creep.store[resourceType] === 0) {
-    if (storage.store[resourceType] === 0) {
-      task.status = "done";
-      return;
-    }
-    const toTake = Math.min(amount, creep.store.getFreeCapacity());
-    if (creep.withdraw(storage, resourceType, toTake) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage);
-    }
-    return;
-  }
-
-  if (creep.transfer(terminal, resourceType) === ERR_NOT_IN_RANGE) {
-    creep.moveTo(terminal);
-    return;
-  }
-
-  task.status = "done";
-}
-
-// Реестр исполнителей задач (раздел 12 ТЗ №5): Worker Runner не должен
-// содержать список типов и порядок приоритетов — только знать, куда
-// передать управление по task.type. Добавление нового типа задачи не
-// требует изменения run().
-const TASK_EXECUTORS = {
-  BUILD: executeBuild,
-  FACTORY_SUPPLY: executeFactorySupply,
-  TERMINAL_SUPPLY: executeTerminalSupply,
+  },
 };
-
-/**
- * @param {Object} roomState
- */
-function run(roomState) {
-  const workers = roomState.creeps.filter(c => c.memory.role === "worker");
-
-  for (const creep of workers) {
-    try {
-      const task = assignTask(creep);
-      if (!task) continue;
-
-      const executor = TASK_EXECUTORS[task.type];
-      if (executor) executor(creep, task);
-    } catch (e) {
-      // Ошибка одного worker'а не должна ломать остальных.
-    }
-  }
-}
-
-module.exports.run = run;

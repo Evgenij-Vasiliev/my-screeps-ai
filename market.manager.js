@@ -3,10 +3,9 @@
  * Автоматическая продажа избыточных ресурсов через Market.
  */
 
-const taskManager = require("task.manager");
-const TERMINAL_SUPPLY = taskManager.TERMINAL_SUPPLY;
+const { TERMINAL_SUPPLY } = require("./constants");
 
-// Единый источник порогов терминала — TERMINAL_SUPPLY из task.manager.js.
+// Единый источник порогов терминала — TERMINAL_SUPPLY из constants.js.
 // Продаём всё, что превышает эти же значения, которые Task System
 // использует как цель для довоза. Дублирования порогов больше нет.
 const CONFIG = {
@@ -55,7 +54,7 @@ function isGroupEnabled(group) {
 function getReserve(group) {
   const map = {
     ENERGY: TERMINAL_SUPPLY.ENERGY_MIN,
-    BATTERY: TERMINAL_SUPPLY.MINERAL_MAX,
+    BATTERY: TERMINAL_SUPPLY.BATTERY_MAX,
     MINERALS: TERMINAL_SUPPLY.MINERAL_MAX,
     COMPOUNDS: TERMINAL_SUPPLY.COMPOUND_MAX,
   };
@@ -70,11 +69,6 @@ function getEmpireTerminals() {
     .filter(room => room.terminal && room.terminal.my)
     .map(room => room.terminal);
 }
-
-/**
- * Находит ресурсы в терминале, превышающие свой резерв (раздел 8 ТЗ №6).
- * @param {StructureTerminal} terminal
- */
 
 /**
  * Ищет лучший подходящий BUY Order для ресурса.
