@@ -1,24 +1,84 @@
 /**
  * МЕНЕДЖЕР КОМНАТ (Room Manager)
- * Единая точка входа для работы с любым количеством комнат игрока.
- * Создаёт и хранит объект состояния (roomState) для каждой комнаты.
+ * Единая точка входа уровня комнаты. Строит roomState для каждой комнаты
+ * и запускает для неё все комнатные подсистемы: спавн, задачи воркеров,
+ * логику крипов, башни, линки, фабрику.
+ *
+ * Уровень империи (empire.js) знает только про очистку памяти,
+ * вызов Room Manager'а и глобальный рынок — вся комнатная логика здесь.
  */
 const { getRoomRole } = require("roomRoles");
 const mineralManager = require("mineral.manager");
+const taskManager = require("task.manager");
+const spawnManager = require("spawn.manager");
+const factoryManager = require("factory.manager");
+const linkManager = require("linkManager");
+const roleTower = require("role.tower");
 
-// Группировка структур по типу — таблица вместо switch/case, как и в
-// остальном проекте: добавление нового типа не требует правки самого цикла.
+const roleHarvester = require("role.harvester");
+const roleUpgrader = require("role.upgrader");
+const roleBuilder = require("role.builder");
+const roleRepairer = require("role.repairer");
+const roleMiner = require("role.miner");
+const roleTowerSupplier = require("role.towerSupplier");
+const roleLinkWorker = require("role.linkWorker");
+const roleMineralMiner = require("role.mineralMiner");
+
+const ROLES = {
+  harvester: roleHarvester,
+  upgrader: roleUpgrader,
+  builder: roleBuilder,
+  repairer: roleRepairer,
+  miner: roleMiner,
+  towerSupplier: roleTowerSupplier,
+  linkWorker: roleLinkWorker,
+  mineralMiner: roleMineralMiner,
+};
+
 const STRUCTURE_BUCKETS = {
   [STRUCTURE_SPAWN]: "spawns",
   [STRUCTURE_TOWER]: "towers",
   [STRUCTURE_LINK]: "links",
   [STRUCTURE_LAB]: "labs",
+  [STRUCTURE_FACTORY]: "factories",
 };
+
+function runCreepLogic(roomState) {
+  for (const creep of roomState.creeps) {
+    if (!creep) continue;
+    const roleModule = ROLES[creep.memory.role];
+    if (!roleModule) continue;
+    try {
+      roleModule.run(creep);
+    } catch (e) {
+      console.log(
+        `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
+      );
+    }
+  }
+}
+
+function runTowerLogic(roomState) {
+  for (const tower of roomState.towers) {
+    roleTower.run(tower);
+  }
+}
+
+function runLinkLogic(roomState) {
+  try {
+    linkManager.run(roomState);
+  } catch (e) {
+    console.log(
+      `[RoomManager] Ошибка linkManager в комнате ${roomState.roomName}: ${
+        e.stack || e
+      }`,
+    );
+  }
+}
 
 module.exports = {
   /**
    * Возвращает массив всех комнат, принадлежащих игроку.
-   * Автоматически обнаруживает новые комнаты без изменения кода.
    * @returns {Room[]}
    */
   getOwnedRooms: function () {
@@ -29,33 +89,19 @@ module.exports = {
 
   /**
    * Строит объект состояния для одной комнаты.
-   * Все дальнейшие модули работают через этот объект — не через Game.rooms напрямую.
-   *
-   * Структура roomState:
-   * {
-   *   room        — ссылка на объект Room
-   *   roomName    — имя комнаты (строка)
-   *   role        — специализация комнаты (константа из ROOM_ROLES)
-   *   spawn       — первый доступный спавн комнаты (или null)
-   *   spawns      — все спавны комнаты
-   *   controller  — контроллер комнаты
-   *   storage     — хранилище (Storage) или null
-   *   terminal    — терминал или null
-   *   towers      — массив башен
-   *   creeps      — все крипы, приписанные к этой комнате
-   *   sources     — источники энергии (подготовлено для расширения)
-   *   containers  — контейнеры (подготовлено для расширения)
-   *   links       — линки (подготовлено для расширения)
-   *   labs        — лаборатории (подготовлено для расширения)
-   * }
-   *
    * @param {Room} room
    * @returns {Object} roomState
    */
   buildRoomState: function (room) {
     const structures = room.find(FIND_MY_STRUCTURES);
 
-    const grouped = { spawns: [], towers: [], links: [], labs: [] };
+    const grouped = {
+      spawns: [],
+      towers: [],
+      links: [],
+      labs: [],
+      factories: [],
+    };
     for (const s of structures) {
       const bucket = STRUCTURE_BUCKETS[s.structureType];
       if (bucket) grouped[bucket].push(s);
@@ -77,8 +123,8 @@ module.exports = {
     return {
       room,
       roomName: room.name,
-      role: getRoomRole(room), // специализация из памяти комнаты
-      spawn: grouped.spawns[0] || null, // основной спавн (для спавн-утилиты)
+      role: getRoomRole(room),
+      spawn: grouped.spawns[0] || null,
       spawns: grouped.spawns,
       controller: room.controller,
       storage: room.storage || null,
@@ -89,19 +135,45 @@ module.exports = {
       containers,
       links: grouped.links,
       labs: grouped.labs,
-      factory:
-        structures.find(s => s.structureType === STRUCTURE_FACTORY) || null,
+      factory: grouped.factories[0] || null,
       mineral: mineralManager.buildMineralState(room),
     };
   },
 
   /**
-   * Главный метод цикла.
    * Возвращает массив roomState для всех собственных комнат.
-   * Вызывается один раз за тик из main.js.
    * @returns {Object[]} массив roomState
    */
   buildAllRoomStates: function () {
     return this.getOwnedRooms().map(room => this.buildRoomState(room));
+  },
+
+  /**
+   * Запускает все комнатные подсистемы для одной комнаты:
+   * спавн, задачи воркеров, крипы, башни, линки, фабрика.
+   * @param {Object} roomState
+   */
+  runRoom: function (roomState) {
+    spawnManager.run(roomState);
+    taskManager.run(roomState);
+    runCreepLogic(roomState);
+    runTowerLogic(roomState);
+    runLinkLogic(roomState);
+    factoryManager.run(roomState);
+  },
+
+  /**
+   * Главный метод уровня комнат: строит состояния и запускает
+   * логику для каждой собственной комнаты.
+   * @returns {Object[]} массив roomState
+   */
+  run: function () {
+    const roomStates = this.buildAllRoomStates();
+
+    for (const roomState of roomStates) {
+      this.runRoom(roomState);
+    }
+
+    return roomStates;
   },
 };

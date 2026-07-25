@@ -28,7 +28,13 @@ module.exports = {
       if (!sender) continue; // линк уничтожен
       if (sender.store[RESOURCE_ENERGY] === 0) continue; // пустой
       if (sender.cooldown > 0) continue; // кулдаун
-      sender.transferEnergy(storageLink);
+
+      const result = sender.transferEnergy(storageLink);
+      if (result !== OK) {
+        console.log(
+          `[LinkManager] ${roomState.roomName} : transferEnergy(${senderId}) вернул ошибку ${result}`,
+        );
+      }
     }
   },
 };

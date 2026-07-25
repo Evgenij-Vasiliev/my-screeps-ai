@@ -4,6 +4,8 @@
  * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
+const { PRESPAWN_THRESHOLD, CREEP_BODIES } = require("./constants");
+
 const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
   const body = [];
 
@@ -15,11 +17,9 @@ const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
   return body;
 };
 
-const PRESPAWN_THRESHOLD = { miner: 50 };
-
 const factory = {
   blueprints: {
-    miner: (spawn, threshold = 50) => {
+    miner: (spawn, threshold = PRESPAWN_THRESHOLD.miner) => {
       const roomMemory = Memory.rooms[spawn.room.name] || {};
       const spots = roomMemory.minerSpots || [];
 
@@ -50,7 +50,7 @@ const factory = {
       }
 
       return {
-        body: prepareBody({ work: 5, carry: 1, move: 2 }),
+        body: prepareBody(CREEP_BODIES.miner),
         memory: {
           homeRoom: spawn.room.name,
           spot: assignedSpot,
@@ -59,45 +59,46 @@ const factory = {
     },
 
     towerSupplier: () => ({
-      body: prepareBody({ carry: 4, move: 2 }),
+      body: prepareBody(CREEP_BODIES.towerSupplier),
       memory: {},
     }),
 
     linkWorker: () => ({
-      body: prepareBody({ carry: 4, move: 2 }),
+      body: prepareBody(CREEP_BODIES.linkWorker),
       memory: {},
     }),
 
     harvester: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+      body: prepareBody(CREEP_BODIES.harvester),
       memory: {
         state: "harvesting",
       },
     }),
 
     upgrader: () => ({
-      body: prepareBody({ work: 3, carry: 2, move: 3 }),
+      body: prepareBody(CREEP_BODIES.upgrader),
       memory: {},
     }),
 
     builder: () => ({
-      body: prepareBody({ work: 3, carry: 2, move: 3 }),
+      body: prepareBody(CREEP_BODIES.builder),
       memory: {},
     }),
 
     repairer: () => ({
-      body: prepareBody({ work: 3, carry: 2, move: 3 }),
+      body: prepareBody(CREEP_BODIES.repairer),
       memory: {},
     }),
 
     worker: () => ({
-      body: prepareBody({ work: 1, carry: 12, move: 12 }),
+      body: prepareBody(CREEP_BODIES.worker),
       memory: {
         working: false,
       },
     }),
+
     mineralMiner: () => ({
-      body: prepareBody({ work: 5, carry: 5, move: 5 }),
+      body: prepareBody(CREEP_BODIES.mineralMiner),
       memory: {
         working: false,
       },

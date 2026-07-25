@@ -18,9 +18,23 @@ module.exports = {
     const link = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
       filter: s => s.structureType === STRUCTURE_LINK,
     })[0];
-    if (source) creep.harvest(source);
+
+    if (source) {
+      const harvestResult = creep.harvest(source);
+      if (harvestResult !== OK) {
+        console.log(
+          `[Miner] ${creep.name} : harvest() вернул ошибку ${harvestResult}`,
+        );
+      }
+    }
+
     if (link && creep.store[RESOURCE_ENERGY] > 0) {
-      creep.transfer(link, RESOURCE_ENERGY);
+      const transferResult = creep.transfer(link, RESOURCE_ENERGY);
+      if (transferResult !== OK) {
+        console.log(
+          `[Miner] ${creep.name} : transfer() вернул ошибку ${transferResult}`,
+        );
+      }
     }
   },
 };

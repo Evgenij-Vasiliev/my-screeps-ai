@@ -1,3 +1,12 @@
+function toMineralState(mineral, extractorId) {
+  return {
+    id: mineral.id,
+    mineralType: mineral.mineralType,
+    amount: mineral.mineralAmount,
+    extractor: extractorId || null,
+  };
+}
+
 function rebuildMineralState(room) {
   const roomName = room.name;
   const minerals = room.find(FIND_MINERALS);
@@ -16,19 +25,15 @@ function rebuildMineralState(room) {
   const extractor = structures.find(
     s => s.structureType === STRUCTURE_EXTRACTOR,
   );
+  const extractorId = extractor ? extractor.id : null;
 
   Memory.rooms[roomName].mineral = {
     id: mineral.id,
     mineralType: mineral.mineralType,
-    extractorId: extractor ? extractor.id : null,
+    extractorId,
   };
 
-  return {
-    id: mineral.id,
-    mineralType: mineral.mineralType,
-    amount: mineral.mineralAmount,
-    extractor: extractor ? extractor.id : null,
-  };
+  return toMineralState(mineral, extractorId);
 }
 
 function buildMineralState(room) {
@@ -59,20 +64,10 @@ function buildMineralState(room) {
     if (!extractor) {
       return rebuildMineralState(room);
     }
-    return {
-      id: mineral.id,
-      mineralType: mineral.mineralType,
-      amount: mineral.mineralAmount,
-      extractor: extractor.id,
-    };
+    return toMineralState(mineral, extractor.id);
   }
 
-  return {
-    id: mineral.id,
-    mineralType: mineral.mineralType,
-    amount: mineral.mineralAmount,
-    extractor: null,
-  };
+  return toMineralState(mineral, null);
 }
 
 module.exports = { buildMineralState };

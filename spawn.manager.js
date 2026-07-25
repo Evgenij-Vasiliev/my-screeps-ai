@@ -5,22 +5,11 @@
  * вызывает creep.factory для реального спавна.
  */
 const creepFactory = require("creep.factory");
-
-const QUOTA = {
-  harvester: 1,
-  linkWorker: 1,
-  miner: 2,
-  towerSupplier: 1,
-  repairer: 1,
-  builder: 0,
-  upgrader: 0,
-  worker: 0,
-  mineralMiner: 1,
-};
-
-const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
-
-const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
+const {
+  SPAWN_QUOTA,
+  MINERAL_MIN_AMOUNT_TO_SPAWN,
+  PRESPAWN_THRESHOLD,
+} = require("./constants");
 
 function countRole(creeps, role) {
   return creeps.filter(c => {
@@ -51,7 +40,7 @@ function run(roomState) {
     return;
   }
 
-  for (const role in QUOTA) {
+  for (const role in SPAWN_QUOTA) {
     if (
       role === "upgrader" &&
       roomState.room.controller.ticksToDowngrade > 100000
@@ -66,7 +55,7 @@ function run(roomState) {
     )
       continue;
 
-    if (countRole(creeps, role) < QUOTA[role]) {
+    if (countRole(creeps, role) < SPAWN_QUOTA[role]) {
       const result = creepFactory.run(
         spawn,
         role,

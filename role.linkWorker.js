@@ -16,15 +16,28 @@ module.exports = {
     const storageLink =
       config && config.storage ? Game.getObjectById(config.storage) : null;
     if (!storageLink) return;
+
     if (creep.store[RESOURCE_ENERGY] === 0) {
       if (storageLink.store[RESOURCE_ENERGY] === 0) return;
-      if (creep.withdraw(storageLink, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+
+      const result = creep.withdraw(storageLink, RESOURCE_ENERGY);
+      if (result === ERR_NOT_IN_RANGE) {
         creep.moveTo(storageLink, { reusePath: 5 });
+      } else if (result !== OK) {
+        console.log(
+          `[LinkWorker] ${creep.room.name} : withdraw() вернул ошибку ${result}`,
+        );
       }
       return;
     }
-    if (creep.transfer(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+
+    const result = creep.transfer(storage, RESOURCE_ENERGY);
+    if (result === ERR_NOT_IN_RANGE) {
       creep.moveTo(storage, { reusePath: 5 });
+    } else if (result !== OK) {
+      console.log(
+        `[LinkWorker] ${creep.room.name} : transfer() вернул ошибку ${result}`,
+      );
     }
   },
 };

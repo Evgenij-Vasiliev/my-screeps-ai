@@ -9,11 +9,7 @@ const roleMineralMiner = {
       creep.memory.working = false;
     }
 
-    if (
-      creep.memory.working &&
-      creep.store[RESOURCE_ENERGY] === 0 &&
-      _.sum(creep.store) === 0
-    ) {
+    if (creep.memory.working && _.sum(creep.store) === 0) {
       creep.memory.working = false;
     }
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
@@ -27,8 +23,13 @@ const roleMineralMiner = {
       const resourceType = Object.keys(creep.store)[0];
       if (!resourceType) return;
 
-      if (creep.transfer(storage, resourceType) === ERR_NOT_IN_RANGE) {
+      const transferResult = creep.transfer(storage, resourceType);
+      if (transferResult === ERR_NOT_IN_RANGE) {
         creep.moveTo(storage, { visualize: false });
+      } else if (transferResult !== OK) {
+        console.log(
+          `[Mineral] ${creep.name} : transfer() вернул ошибку ${transferResult}`,
+        );
       }
       return;
     }
@@ -42,8 +43,13 @@ const roleMineralMiner = {
       .find(s => s.structureType === STRUCTURE_EXTRACTOR);
     if (!extractor) return;
 
-    if (creep.harvest(mineral) === ERR_NOT_IN_RANGE) {
+    const harvestResult = creep.harvest(mineral);
+    if (harvestResult === ERR_NOT_IN_RANGE) {
       creep.moveTo(mineral, { visualize: false });
+    } else if (harvestResult !== OK) {
+      // console.log(
+      //   `[Mineral] ${creep.name} : harvest() вернул ошибку ${harvestResult}`,
+      // );
     }
   },
 };
