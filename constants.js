@@ -24,7 +24,7 @@ const TOWER = {
 const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
 
 const SPAWN_QUOTA = {
-  harvester: 1,
+  harvester: 0,
   linkWorker: 1,
   miner: 2,
   towerSupplier: 0,
@@ -57,6 +57,12 @@ const CACHE = {
   REFRESH_INTERVAL: 20,
 };
 
+const CPU = {
+  REPORT_INTERVAL: 10,
+  AVERAGE_WINDOW: 100,
+  BUCKET_CRITICAL: 500,
+};
+
 module.exports = {
   STORAGE,
   TERMINAL_SUPPLY,
@@ -67,4 +73,5 @@ module.exports = {
   MINERAL_MIN_AMOUNT_TO_SPAWN,
   CONTROLLER,
   CACHE,
+  CPU,
 };

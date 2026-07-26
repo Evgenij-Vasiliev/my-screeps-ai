@@ -18,8 +18,10 @@ function moveIfNotInRange(creep, target, result, moveOpts) {
 
 /**
  * Тип Б: используется там, где успешное действие (OK) означает
- * "крип продолжает делать то же самое" (ремонт/стройка/апгрейд) —
- * тик считается занятым (return true).
+ * "крип продолжает делать то же самое" (стройка) — тик считается
+ * занятым (return true). Условия завершения задачи: цель не найдена
+ * (стройка закончена/строек нет) или энергия в рюкзаке кончилась —
+ * оба случая проверяются ДО вызова build() и возвращают false раньше.
  */
 function moveOrContinue(creep, target, result, moveOpts) {
   if (result === ERR_NOT_IN_RANGE) {
@@ -61,7 +63,12 @@ const taskExecutors = {
 
     if (!cache.repairIds || Game.time % CACHE.REFRESH_INTERVAL === 0) {
       cache.repairIds = room
-        .find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax })
+        .find(FIND_STRUCTURES, {
+          filter: s =>
+            s.hits < s.hitsMax &&
+            s.structureType !== STRUCTURE_WALL &&
+            s.structureType !== STRUCTURE_RAMPART,
+        })
         .map(s => s.id);
       cache.buildIds = room.find(FIND_MY_CONSTRUCTION_SITES).map(c => c.id);
     }

@@ -5,8 +5,11 @@
  */
 const roomManager = require("room.manager");
 const marketManager = require("market.manager");
+const cpuMonitor = require("cpuMonitor");
 
 module.exports.run = function () {
+  cpuMonitor.startTick();
+
   // 1. Очистка памяти умерших крипов
   for (const name in Memory.creeps) {
     if (!Game.creeps[name]) delete Memory.creeps[name];
@@ -16,5 +19,7 @@ module.exports.run = function () {
   roomManager.run();
 
   // 3. Рынок империального уровня
-  marketManager.run();
+  cpuMonitor.trackRole("marketManager", () => marketManager.run());
+
+  cpuMonitor.endTick();
 };
