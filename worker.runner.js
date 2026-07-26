@@ -19,10 +19,12 @@ module.exports = {
 
     const currentTaskName = taskChain[creep.memory.taskIndex];
 
-    // Условие 3: рюкзак пуст — идём за энергией и ЖДЁМ на текущей задаче,
-    // не продвигая taskIndex. Иначе задача, чья очередь пришлась на тик
-    // с пустым рюкзаком, будет пропущена, а taskIndex продолжит листаться
-    // вперёд на каждом тике, пока крип идёт за энергией.
+    // Условие 3 (энергия кончилась): продвигаем taskIndex РОВНО ОДИН РАЗ —
+    // в момент перехода в состояние дозаправки (флаг _energyDepleted).
+    // Пока крип идёт за энергией несколько тиков подряд, taskIndex больше
+    // не двигается (иначе задачи пропускались бы одна за другой на каждом
+    // тике ожидания). Как только энергия появится — крип продолжит СЛЕДУЮЩУЮ
+    // задачу в цепочке, а не ту же самую, на которой энергия закончилась.
     // Исключение: operateFactory сам обрабатывает пустой рюкзак —
     // это её законный шаг 4 (проверка батарейки на фабрике).
     if (
@@ -31,8 +33,18 @@ module.exports = {
     ) {
       creep.say("⚡energy");
       energySource.withdrawFromStorage(creep);
+
+      if (!creep.memory._energyDepleted) {
+        creep.memory._energyDepleted = true;
+        creep.memory.taskIndex =
+          (creep.memory.taskIndex + 1) % taskChain.length;
+      }
       return;
     }
+
+    // Энергия есть — сбрасываем флаг, готовим к следующему возможному
+    // истощению энергии на будущей задаче.
+    creep.memory._energyDepleted = false;
 
     const taskName = currentTaskName;
     const sayLabels = {

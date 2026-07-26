@@ -1,11 +1,18 @@
 const { TOWER } = require("./constants");
 
 module.exports = {
-  run: function (tower) {
+  /**
+   * @param {StructureTower} tower
+   * @param {Object} roomData — общие для всех башен комнаты данные,
+   *   собраны один раз в roomManager.runTowerLogic (оптимизация CPU:
+   *   без этого каждая башня заново искала бы то же самое).
+   *   { hostiles, woundedCreep, wallsAndRamparts, damagedStructure }
+   */
+  run: function (tower, roomData) {
     if (!tower) return;
 
     // Атака вражеских крипов
-    const closestHostile = tower.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+    const closestHostile = tower.pos.findClosestByRange(roomData.hostiles);
     if (closestHostile) {
       tower.attack(closestHostile);
       return;
@@ -14,47 +21,21 @@ module.exports = {
     if (tower.store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) return;
     if (Game.time % TOWER.REPAIR_INTERVAL !== 0) return;
 
-    // Ремонт стен и валов с пошаговым увеличением прочности
-    const wallThreshold =
-      tower.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
-    const wallsAndRamparts = tower.room.find(FIND_STRUCTURES, {
-      filter: structure =>
-        (structure.structureType === STRUCTURE_WALL ||
-          structure.structureType === STRUCTURE_RAMPART) &&
-        structure.hits < wallThreshold,
-    });
-
-    if (wallsAndRamparts.length > 0) {
-      wallsAndRamparts.sort((a, b) => a.hits - b.hits);
-      tower.repair(wallsAndRamparts[0]);
+    // Ремонт стен и валов (список уже отсортирован по возрастанию hits)
+    if (roomData.wallsAndRamparts && roomData.wallsAndRamparts.length > 0) {
+      tower.repair(roomData.wallsAndRamparts[0]);
       return;
-    } else {
-      tower.room.memory.wallThreshold =
-        wallThreshold + TOWER.WALL_THRESHOLD_STEP;
     }
 
     // Ремонт самого повреждённого здания (кроме стен и валов)
-    const damagedStructure = tower.room
-      .find(FIND_STRUCTURES, {
-        filter: structure =>
-          structure.hits < structure.hitsMax &&
-          structure.structureType !== STRUCTURE_WALL &&
-          structure.structureType !== STRUCTURE_RAMPART,
-      })
-      .sort((a, b) => a.hits - b.hits)[0];
-
-    if (damagedStructure) {
-      tower.repair(damagedStructure);
+    if (roomData.damagedStructure) {
+      tower.repair(roomData.damagedStructure);
       return;
     }
 
     // Лечение раненых союзников
-    const woundedCreep = tower.room.find(FIND_MY_CREEPS, {
-      filter: creep => creep.hits < creep.hitsMax,
-    })[0];
-
-    if (woundedCreep) {
-      tower.heal(woundedCreep);
+    if (roomData.woundedCreep) {
+      tower.heal(roomData.woundedCreep);
     }
   },
 };

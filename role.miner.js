@@ -3,6 +3,10 @@
  *
  * Слот назначается при спавне в creep.factory.js.
  * Майнер просто идёт на своё место и работает — ничего не ищет.
+ *
+ * Оптимизация CPU: источник и линк рядом с рабочим местом статичны
+ * (спот не меняется всю жизнь крипа), поэтому их ID ищутся один раз
+ * и кэшируются в memory — дальше только Game.getObjectById() (O(1)).
  */
 module.exports = {
   run: function (creep) {
@@ -13,11 +17,25 @@ module.exports = {
       creep.moveTo(spot.x, spot.y, { reusePath: 20 });
       return;
     }
-    // Стоим на месте: копаем и передаём в линк
-    const source = creep.pos.findInRange(FIND_SOURCES, 1)[0];
-    const link = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
-      filter: s => s.structureType === STRUCTURE_LINK,
-    })[0];
+
+    // Кэшируем source/link один раз — далее только Game.getObjectById()
+    if (!creep.memory.sourceId) {
+      const source = creep.pos.findInRange(FIND_SOURCES, 1)[0];
+      creep.memory.sourceId = source ? source.id : null;
+    }
+    if (creep.memory.linkId === undefined) {
+      const link = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
+        filter: s => s.structureType === STRUCTURE_LINK,
+      })[0];
+      creep.memory.linkId = link ? link.id : null;
+    }
+
+    const source = creep.memory.sourceId
+      ? Game.getObjectById(creep.memory.sourceId)
+      : null;
+    const link = creep.memory.linkId
+      ? Game.getObjectById(creep.memory.linkId)
+      : null;
 
     if (source) {
       const harvestResult = creep.harvest(source);
