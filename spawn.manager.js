@@ -35,10 +35,10 @@ function run(roomState) {
 
   const creeps = roomState.creeps;
 
-  if (countRole(creeps, "harvester") === 0) {
-    creepFactory.run(spawn, "harvester", roomState.roomName);
-    return;
-  }
+  // if (countRole(creeps, "harvester") === 0) {
+  //   creepFactory.run(spawn, "harvester", roomState.roomName);
+  //   return;
+  // }
 
   for (const role in SPAWN_QUOTA) {
     if (

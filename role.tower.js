@@ -3,16 +3,16 @@ const { TOWER } = require("./constants");
 module.exports = {
   /**
    * @param {StructureTower} tower
-   * @param {Object} roomData — общие для всех башен комнаты данные,
-   *   собраны один раз в roomManager.runTowerLogic (оптимизация CPU:
-   *   без этого каждая башня заново искала бы то же самое).
+   * @param {Object} roomData
    *   { hostiles, woundedCreep, wallsAndRamparts, damagedStructure }
    */
   run: function (tower, roomData) {
     if (!tower) return;
 
+    const hostiles = roomData.hostiles;
+
     // Атака вражеских крипов
-    const closestHostile = tower.pos.findClosestByRange(roomData.hostiles);
+    const closestHostile = tower.pos.findClosestByRange(hostiles);
     if (closestHostile) {
       tower.attack(closestHostile);
       return;
@@ -21,19 +21,21 @@ module.exports = {
     if (tower.store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) return;
     if (Game.time % TOWER.REPAIR_INTERVAL !== 0) return;
 
-    // Ремонт стен и валов (список уже отсортирован по возрастанию hits)
-    if (roomData.wallsAndRamparts && roomData.wallsAndRamparts.length > 0) {
-      tower.repair(roomData.wallsAndRamparts[0]);
+    const wallsAndRamparts = roomData.wallsAndRamparts;
+
+    // Ремонт стен и валов
+    if (wallsAndRamparts && wallsAndRamparts.length > 0) {
+      tower.repair(wallsAndRamparts[0]);
       return;
     }
 
-    // Ремонт самого повреждённого здания (кроме стен и валов)
+    // Ремонт повреждённых зданий
     if (roomData.damagedStructure) {
       tower.repair(roomData.damagedStructure);
       return;
     }
 
-    // Лечение раненых союзников
+    // Лечение союзников
     if (roomData.woundedCreep) {
       tower.heal(roomData.woundedCreep);
     }

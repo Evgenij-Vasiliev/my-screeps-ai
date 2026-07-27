@@ -27,7 +27,7 @@ const SPAWN_QUOTA = {
   harvester: 0,
   linkWorker: 1,
   miner: 2,
-  towerSupplier: 0,
+  towerSupplier: 1,
   repairer: 0,
   builder: 0,
   upgrader: 0,
@@ -35,7 +35,7 @@ const SPAWN_QUOTA = {
   mineralMiner: 1,
 };
 
-const MINERAL_MIN_AMOUNT_TO_SPAWN = 1;
+const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
 
 const CREEP_BODIES = {
   miner: { work: 5, carry: 1, move: 2 },
