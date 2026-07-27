@@ -3,22 +3,22 @@ const energySource = require("energySource");
 
 const TASK_CHAIN = [
   "fillSpawnsExtensions",
-  // "fillTerminals",
-  // "operateFactory",
-  // "repairStructures",
-  // "buildStructures",
-  // "fillTowers",
-  // "upgradeController",
+  "fillTerminals",
+  "operateFactory",
+  "repairStructures",
+  "buildStructures",
+  "fillTowers",
+  "upgradeController",
 ];
 
 const SAY_LABELS = {
   fillSpawnsExtensions: "spawn",
-  // fillTerminals: "terminal",
-  // operateFactory: "factory",
-  // repairStructures: "repair",
-  // buildStructures: "build",
+  fillTerminals: "terminal",
+  operateFactory: "factory",
+  repairStructures: "repair",
+  buildStructures: "build",
   fillTowers: "tower",
-  // upgradeController: "upgrade",
+  upgradeController: "upgrade",
 };
 
 module.exports = {

@@ -192,15 +192,32 @@ const taskExecutors = {
   repairStructures: function (creep) {
     this.updateCache(creep.room);
     const cache = global.roomCache[creep.room.name];
-    if (!cache || !cache.repairIds || cache.repairIds.length === 0)
+
+    if (!cache || !cache.repairIds || cache.repairIds.length === 0) {
+      creep.memory.task = null;
+      return false; // условие 2: невозможно
+    }
+
+    // Назначаем цель один раз — дальше держимся именно за неё
+    if (!creep.memory.task || creep.memory.task.name !== "repairStructures") {
+      const target = cache.repairIds
+        .map(id => Game.getObjectById(id))
+        .find(structure => structure && structure.hits < structure.hitsMax);
+
+      if (!target) return false; // условие 2: целей нет
+
+      creep.memory.task = { name: "repairStructures", target: target.id };
+    }
+
+    const target = Game.getObjectById(creep.memory.task.target);
+
+    // Условие 1: именно ЭТА цель отремонтирована или исчезла — задача выполнена
+    if (!target || target.hits >= target.hitsMax) {
+      creep.memory.task = null;
       return false;
+    }
 
-    const target = cache.repairIds
-      .map(id => Game.getObjectById(id))
-      .find(structure => structure && structure.hits < structure.hitsMax);
-
-    if (!target) return false;
-
+    // Условие 3: рюкзак пуст
     if (creep.store[RESOURCE_ENERGY] === 0) return false;
 
     const result = creep.repair(target);
@@ -213,13 +230,32 @@ const taskExecutors = {
   buildStructures: function (creep) {
     this.updateCache(creep.room);
     const cache = global.roomCache[creep.room.name];
-    if (!cache || !cache.buildIds || cache.buildIds.length === 0) return false;
 
-    const target = cache.buildIds
-      .map(id => Game.getObjectById(id))
-      .find(site => site !== null);
-    if (!target) return false;
+    if (!cache || !cache.buildIds || cache.buildIds.length === 0) {
+      creep.memory.task = null;
+      return false; // условие 2: невозможно
+    }
 
+    // Назначаем цель один раз — дальше держимся именно за неё
+    if (!creep.memory.task || creep.memory.task.name !== "buildStructures") {
+      const target = cache.buildIds
+        .map(id => Game.getObjectById(id))
+        .find(site => site !== null);
+
+      if (!target) return false; // условие 2: целей нет
+
+      creep.memory.task = { name: "buildStructures", target: target.id };
+    }
+
+    const target = Game.getObjectById(creep.memory.task.target);
+
+    // Условие 1: именно ЭТА стройка завершена (сайт исчез — стал структурой)
+    if (!target) {
+      creep.memory.task = null;
+      return false;
+    }
+
+    // Условие 3: рюкзак пуст
     if (creep.store[RESOURCE_ENERGY] === 0) return false;
 
     const result = creep.build(target);
