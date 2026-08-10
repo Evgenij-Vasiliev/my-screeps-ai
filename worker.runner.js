@@ -1,4 +1,4 @@
-const taskExecutors = require("taskExecutors");
+const taskExecutors = require("task.executors");
 const energySource = require("energySource");
 
 const TASK_CHAIN = [

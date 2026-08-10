@@ -6,6 +6,7 @@
 const roomManager = require("room.manager");
 const marketManager = require("market.manager");
 const cpuMonitor = require("cpuMonitor");
+const terminalNetwork = require("terminalNetwork");
 
 module.exports.run = function () {
   cpuMonitor.startTick();
@@ -18,7 +19,10 @@ module.exports.run = function () {
   // 2. Уровень комнат — вся комнатная логика внутри roomManager
   roomManager.run();
 
-  // 3. Рынок империального уровня
+  // 3. TerminalNetwork — межкомнатная балансировка ресурсов
+  cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+
+  // 4. Рынок империального уровня
   cpuMonitor.trackRole("marketManager", () => marketManager.run());
 
   cpuMonitor.endTick();

@@ -23,6 +23,7 @@ const roleMiner = require("role.miner");
 const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
 const roleMineralMiner = require("role.mineralMiner");
+const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER } = require("./constants");
 
