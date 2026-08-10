@@ -20,7 +20,7 @@ module.exports.run = function () {
   roomManager.run();
 
   // 3. TerminalNetwork — межкомнатная балансировка ресурсов
-  cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+  // cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
 
   // 4. Рынок империального уровня
   cpuMonitor.trackRole("marketManager", () => marketManager.run());
