@@ -1,7 +1,10 @@
+"use strict";
+
 /**
- * TASK TYPES (Task System v4)
- * Константы и классы задач. Чистые структуры данных — без логики
- * исполнения и без обращений к Game/Memory.
+ * task.types.js
+ *
+ * Единый источник форматов Task для Task System v4.
+ * Никакой логики выполнения здесь нет — только данные.
  */
 
 const TASK_TYPES = {
@@ -12,29 +15,35 @@ const TASK_TYPES = {
 };
 
 /**
- * Базовый класс задачи. Все конкретные типы задач наследуются от него.
+ * BaseTask — общий каркас любой задачи.
+ * Все остальные классы задач обязаны наследоваться от него.
  */
 class BaseTask {
   /**
-   * @param {number} id — уникальный id задачи (выдаётся TaskManager'ом)
-   * @param {string} type — один из TASK_TYPES
+   * @param {string} type - один из TASK_TYPES
    */
-  constructor(id, type) {
-    this.id = id;
-    this.type = type;
+  constructor(type) {
+    this.id = null; // назначается TaskManager'ом при add()
+    this.type = type; // тип задачи (TASK_TYPES.*)
     this.created = Game.time;
-    this.assignedTo = null;
+    this.assignedTo = null; // creep.name текущего исполнителя
     this.completed = false;
   }
 }
 
 /**
- * Универсальная логистическая задача: перенос ресурса
- * из одного объекта (store-owner) в другой.
+ * TransferTask — универсальная логистическая задача.
+ * Один механизм для энергии, батареек, минералов и т.д.
  */
 class TransferTask extends BaseTask {
-  constructor(id, sourceId, targetId, resourceType, amount) {
-    super(id, TASK_TYPES.TRANSFER);
+  /**
+   * @param {string} sourceId
+   * @param {string} targetId
+   * @param {ResourceConstant} resourceType
+   * @param {number} amount
+   */
+  constructor(sourceId, targetId, resourceType, amount) {
+    super(TASK_TYPES.TRANSFER);
     this.sourceId = sourceId;
     this.targetId = targetId;
     this.resourceType = resourceType;
@@ -43,31 +52,40 @@ class TransferTask extends BaseTask {
 }
 
 /**
- * Задача постройки конкретного construction site.
+ * BuildTask — постройка construction site.
  */
 class BuildTask extends BaseTask {
-  constructor(id, targetId) {
-    super(id, TASK_TYPES.BUILD);
+  /**
+   * @param {string} targetId
+   */
+  constructor(targetId) {
+    super(TASK_TYPES.BUILD);
     this.targetId = targetId;
   }
 }
 
 /**
- * Задача ремонта конкретной структуры.
+ * RepairTask — ремонт структуры.
  */
 class RepairTask extends BaseTask {
-  constructor(id, targetId) {
-    super(id, TASK_TYPES.REPAIR);
+  /**
+   * @param {string} targetId
+   */
+  constructor(targetId) {
+    super(TASK_TYPES.REPAIR);
     this.targetId = targetId;
   }
 }
 
 /**
- * Задача апгрейда контроллера.
+ * UpgradeTask — апгрейд контроллера.
  */
 class UpgradeTask extends BaseTask {
-  constructor(id, targetId) {
-    super(id, TASK_TYPES.UPGRADE);
+  /**
+   * @param {string} targetId
+   */
+  constructor(targetId) {
+    super(TASK_TYPES.UPGRADE);
     this.targetId = targetId;
   }
 }

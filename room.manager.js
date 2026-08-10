@@ -36,6 +36,7 @@ const ROLES = {
   towerSupplier: roleTowerSupplier,
   linkWorker: roleLinkWorker,
   mineralMiner: roleMineralMiner,
+  worker: workerRunner,
 };
 
 const STRUCTURE_BUCKETS = {
@@ -229,7 +230,9 @@ module.exports = {
    */
   runRoom: function (roomState) {
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
-    cpuMonitor.trackRole("worker", () => taskManager.run(roomState));
+    cpuMonitor.trackRole("taskManager", () =>
+      taskManager.run(Game.rooms[roomState.roomName]),
+    );
     runCreepLogic(roomState);
     runTowerLogic(roomState);
     runLinkLogic(roomState);

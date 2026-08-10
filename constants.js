@@ -24,7 +24,7 @@ const TOWER = {
 const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
 
 const SPAWN_QUOTA = {
-  harvester: 0,
+  harvester: 2,
   linkWorker: 1,
   miner: 2,
   towerSupplier: 1,

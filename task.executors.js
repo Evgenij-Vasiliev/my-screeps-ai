@@ -1,34 +1,33 @@
-/**
- * TASK EXECUTORS (Task System v4)
- * Класс-исполнитель. Диспетчер по task.type, каждый executeX()
- * выполняет один шаг работы Worker'а за тик и возвращает статус.
- *
- * Executor НЕ генерирует задачи и НЕ вызывает factory.produce() —
- * это ответственность TaskManager (см. task.manager.js).
- */
-
 const { TASK_TYPES } = require("task.types");
 
 class TaskExecutors {
-  static RESULT = {
-    WORKING: "working",
-    DONE: "done",
-    INVALID: "invalid",
-    NO_ENERGY: "no_energy",
-  };
+  constructor() {
+    this.RESULT = {
+      DONE: "done",
+      INVALID: "invalid",
+      NO_ENERGY: "noEnergy",
+      WORKING: "working",
+    };
+  }
 
   execute(creep, task) {
+    if (!task) return this.RESULT.INVALID;
+
     switch (task.type) {
       case TASK_TYPES.TRANSFER:
         return this.executeTransfer(creep, task);
+
       case TASK_TYPES.BUILD:
         return this.executeBuild(creep, task);
+
       case TASK_TYPES.REPAIR:
         return this.executeRepair(creep, task);
+
       case TASK_TYPES.UPGRADE:
         return this.executeUpgrade(creep, task);
+
       default:
-        return TaskExecutors.RESULT.INVALID;
+        return this.RESULT.INVALID;
     }
   }
 
@@ -36,95 +35,92 @@ class TaskExecutors {
     const source = Game.getObjectById(task.sourceId);
     const target = Game.getObjectById(task.targetId);
 
-    if (!source || !target) {
-      return TaskExecutors.RESULT.INVALID;
-    }
+    if (!source || !target) return this.RESULT.INVALID;
 
-    const carrying = creep.store.getUsedCapacity(task.resourceType) || 0;
+    const carrying = creep.store[task.resourceType] || 0;
 
     if (carrying === 0) {
-      const available = (source.store && source.store[task.resourceType]) || 0;
-      if (available === 0) {
-        return TaskExecutors.RESULT.DONE;
-      }
-      if (creep.pos.getRangeTo(source) > 1) {
+      const result = creep.withdraw(source, task.resourceType, task.amount);
+
+      if (result === ERR_NOT_IN_RANGE) {
         creep.moveTo(source);
-        return TaskExecutors.RESULT.WORKING;
+        return this.RESULT.WORKING;
       }
-      const result = creep.withdraw(source, task.resourceType);
-      if (result !== OK && result !== ERR_FULL) {
-        return TaskExecutors.RESULT.INVALID;
-      }
-      return TaskExecutors.RESULT.WORKING;
+
+      return result === OK ? this.RESULT.WORKING : this.RESULT.INVALID;
     }
 
-    const targetFree = target.store
-      ? target.store.getFreeCapacity(task.resourceType)
-      : 0;
-    if (targetFree === 0) {
-      return TaskExecutors.RESULT.DONE;
-    }
-    if (creep.pos.getRangeTo(target) > 1) {
+    const result = creep.transfer(target, task.resourceType);
+
+    if (result === ERR_NOT_IN_RANGE) {
       creep.moveTo(target);
-      return TaskExecutors.RESULT.WORKING;
+      return this.RESULT.WORKING;
     }
 
-    const transferAmount = Math.min(carrying, task.amount, targetFree);
-    const transferResult = creep.transfer(
-      target,
-      task.resourceType,
-      transferAmount,
-    );
-
-    if (transferResult === OK) {
-      task.amount -= transferAmount;
-      if (task.amount <= 0) {
-        return TaskExecutors.RESULT.DONE;
-      }
+    if (result === OK && creep.store[task.resourceType] === 0) {
+      return this.RESULT.DONE;
     }
-    return TaskExecutors.RESULT.WORKING;
+
+    return result === OK ? this.RESULT.WORKING : this.RESULT.INVALID;
   }
-
   executeBuild(creep, task) {
     const target = Game.getObjectById(task.targetId);
-    if (!target) return TaskExecutors.RESULT.DONE;
-    if (creep.store[RESOURCE_ENERGY] === 0)
-      return TaskExecutors.RESULT.NO_ENERGY;
-    if (creep.pos.getRangeTo(target) > 3) {
-      creep.moveTo(target);
-      return TaskExecutors.RESULT.WORKING;
-    }
-    const result = creep.build(target);
-    if (result !== OK) return TaskExecutors.RESULT.INVALID;
-    return TaskExecutors.RESULT.WORKING;
-  }
 
+    if (!target) return this.RESULT.INVALID;
+
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+      return this.RESULT.NO_ENERGY;
+    }
+
+    const result = creep.build(target);
+
+    if (result === ERR_NOT_IN_RANGE) {
+      creep.moveTo(target);
+      return this.RESULT.WORKING;
+    }
+
+    return result === OK ? this.RESULT.WORKING : this.RESULT.INVALID;
+  }
   executeRepair(creep, task) {
     const target = Game.getObjectById(task.targetId);
-    if (!target) return TaskExecutors.RESULT.INVALID;
-    if (target.hits >= target.hitsMax) return TaskExecutors.RESULT.DONE;
-    if (creep.store[RESOURCE_ENERGY] === 0)
-      return TaskExecutors.RESULT.NO_ENERGY;
-    if (creep.pos.getRangeTo(target) > 3) {
-      creep.moveTo(target);
-      return TaskExecutors.RESULT.WORKING;
-    }
-    creep.repair(target);
-    return TaskExecutors.RESULT.WORKING;
-  }
 
-  executeUpgrade(creep, task) {
-    const controller = Game.getObjectById(task.targetId);
-    if (!controller) return TaskExecutors.RESULT.INVALID;
-    if (creep.store[RESOURCE_ENERGY] === 0)
-      return TaskExecutors.RESULT.NO_ENERGY;
-    if (creep.pos.getRangeTo(controller) > 3) {
-      creep.moveTo(controller);
-      return TaskExecutors.RESULT.WORKING;
+    if (!target) return this.RESULT.INVALID;
+
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+      return this.RESULT.NO_ENERGY;
     }
-    creep.upgradeController(controller);
-    return TaskExecutors.RESULT.WORKING;
+
+    if (target.hits >= target.hitsMax) {
+      return this.RESULT.DONE;
+    }
+
+    const result = creep.repair(target);
+
+    if (result === ERR_NOT_IN_RANGE) {
+      creep.moveTo(target);
+      return this.RESULT.WORKING;
+    }
+
+    return result === OK ? this.RESULT.WORKING : this.RESULT.INVALID;
+  }
+  executeUpgrade(creep, task) {
+    const target = Game.getObjectById(task.targetId);
+
+    if (!target) return this.RESULT.INVALID;
+
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+      return this.RESULT.NO_ENERGY;
+    }
+
+    const result = creep.upgradeController(target);
+
+    if (result === ERR_NOT_IN_RANGE) {
+      creep.moveTo(target);
+      return this.RESULT.WORKING;
+    }
+
+    return result === OK ? this.RESULT.WORKING : this.RESULT.INVALID;
   }
 }
 
-module.exports = TaskExecutors;
+module.exports = new TaskExecutors();
