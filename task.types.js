@@ -7,12 +7,7 @@
  * Никакой логики выполнения здесь нет — только данные.
  */
 
-const TASK_TYPES = {
-  TRANSFER: "transfer",
-  BUILD: "build",
-  REPAIR: "repair",
-  UPGRADE: "upgrade",
-};
+const { TASK_TYPES } = require("constants");
 
 /**
  * BaseTask — общий каркас любой задачи.
@@ -40,14 +35,12 @@ class TransferTask extends BaseTask {
    * @param {string} sourceId
    * @param {string} targetId
    * @param {ResourceConstant} resourceType
-   * @param {number} amount
    */
-  constructor(sourceId, targetId, resourceType, amount) {
+  constructor(sourceId, targetId, resourceType) {
     super(TASK_TYPES.TRANSFER);
     this.sourceId = sourceId;
     this.targetId = targetId;
     this.resourceType = resourceType;
-    this.amount = amount;
   }
 }
 
@@ -90,11 +83,23 @@ class UpgradeTask extends BaseTask {
   }
 }
 
+class OperateFactoryTask extends BaseTask {
+  /**
+   * @param {string} factoryId
+   * @param {string} storageId
+   */
+  constructor(factoryId, storageId) {
+    super(TASK_TYPES.OPERATE_FACTORY);
+    this.factoryId = factoryId;
+    this.storageId = storageId;
+  }
+}
+
 module.exports = {
-  TASK_TYPES,
   BaseTask,
   TransferTask,
   BuildTask,
   RepairTask,
   UpgradeTask,
+  OperateFactoryTask,
 };
