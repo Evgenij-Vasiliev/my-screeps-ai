@@ -1,12 +1,13 @@
 "use strict";
 
 const {
-  TASK_TYPES,
   TransferTask,
   BuildTask,
   RepairTask,
   UpgradeTask,
 } = require("task.types");
+
+const { STORAGE, TASK_TYPES, TERMINAL_SUPPLY } = require("constants");
 
 /**
  * task.manager.js
@@ -135,6 +136,18 @@ class TaskManager {
     return null;
   }
 
+  _releaseDeadWorkers() {
+    if (!Memory.taskSystem || !Memory.taskSystem.queue) {
+      return;
+    }
+
+    for (const task of Memory.taskSystem.queue) {
+      if (!task.completed && task.assignedTo && !Game.creeps[task.assignedTo]) {
+        task.assignedTo = null;
+      }
+    }
+  }
+
   /**
    * Главный генератор задач комнаты.
    * Вызывается один раз за тик для каждой своей комнаты.
@@ -142,9 +155,10 @@ class TaskManager {
    */
   run(room) {
     this.ensureMemory();
+    this._releaseDeadWorkers();
 
-    this.generateFillSpawnsExtensions(room);
-    // this.generateFillTerminals(room);
+    // this.generateFillSpawnsExtensions(room);
+    this.generateFillTerminals(room);
     // this.generateOperateFactory(room); // логистика фабрики (Storage <-> Factory)
     // this.runFactoryProduction(room); // действие фабрики (не Task, не Worker)
     // this.generateRepair(room);
@@ -215,13 +229,7 @@ class TaskManager {
         continue;
       }
 
-      const task = new TransferTask(
-        room.storage.id,
-        target.id,
-        RESOURCE_ENERGY,
-        target.store.getFreeCapacity(RESOURCE_ENERGY),
-      );
-      this.add(task);
+      this.add(new TransferTask(room.storage.id, target.id, RESOURCE_ENERGY));
     }
   }
 
@@ -248,13 +256,7 @@ class TaskManager {
         continue;
       }
 
-      const task = new TransferTask(
-        room.storage.id,
-        tower.id,
-        RESOURCE_ENERGY,
-        tower.store.getFreeCapacity(RESOURCE_ENERGY),
-      );
-      this.add(task);
+      this.add(new TransferTask(room.storage.id, tower.id, RESOURCE_ENERGY));
     }
   }
 
@@ -346,11 +348,16 @@ class TaskManager {
     const terminal = room.terminal;
     const storage = room.storage;
 
-    // Вход: Storage -> Terminal, если энергии в терминале не хватает.
+    const terminalReserve =
+      STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
+    const terminalEnergy = terminal.store[RESOURCE_ENERGY];
+    const storageEnergy = storage.store[RESOURCE_ENERGY];
+
     if (
-      terminal.store[RESOURCE_ENERGY] < this.TERMINAL_ENERGY_REFILL_THRESHOLD
+      terminalEnergy < TERMINAL_SUPPLY.ENERGY_TARGET &&
+      storageEnergy > terminalReserve
     ) {
-      const alreadyQueuedIn = this._hasQueuedTask(
+      const alreadyQueuedEnergy = this._hasQueuedTask(
         task =>
           task.type === TASK_TYPES.TRANSFER &&
           task.sourceId === storage.id &&
@@ -358,41 +365,55 @@ class TaskManager {
           task.resourceType === RESOURCE_ENERGY,
       );
 
-      if (!alreadyQueuedIn) {
-        const amount =
-          this.TERMINAL_ENERGY_REFILL_THRESHOLD -
-          terminal.store[RESOURCE_ENERGY];
-        this.add(
-          new TransferTask(storage.id, terminal.id, RESOURCE_ENERGY, amount),
-        );
+      if (!alreadyQueuedEnergy) {
+        this.add(new TransferTask(storage.id, terminal.id, RESOURCE_ENERGY));
       }
     }
 
-    // Выход: Terminal -> Storage, для неэнергетических ресурсов сверх лимита.
-    for (const resourceType in terminal.store) {
+    for (const resourceType in storage.store) {
       if (resourceType === RESOURCE_ENERGY) {
         continue;
       }
 
-      const amountInTerminal = terminal.store[resourceType];
-      if (amountInTerminal <= this.TERMINAL_RESOURCE_LOCAL_LIMIT) {
+      const amountInStorage = storage.store[resourceType];
+      if (amountInStorage <= 0) {
+        continue;
+      }
+
+      const maxInTerminal = this._resourceMaxForTerminal(resourceType);
+      const amountInTerminal = terminal.store[resourceType] || 0;
+
+      if (amountInTerminal >= maxInTerminal) {
         continue;
       }
 
       const alreadyQueuedOut = this._hasQueuedTask(
         task =>
           task.type === TASK_TYPES.TRANSFER &&
-          task.sourceId === terminal.id &&
-          task.targetId === storage.id &&
+          task.sourceId === storage.id &&
+          task.targetId === terminal.id &&
           task.resourceType === resourceType,
       );
       if (alreadyQueuedOut) {
         continue;
       }
 
-      const excess = amountInTerminal - this.TERMINAL_RESOURCE_LOCAL_LIMIT;
-      this.add(new TransferTask(terminal.id, storage.id, resourceType, excess));
+      this.add(new TransferTask(storage.id, terminal.id, resourceType));
     }
+  }
+
+  /**
+   * Возвращает лимит терминала для конкретного типа ресурса.
+   * RESOURCE_BATTERY -> BATTERY_MAX, всё остальное (минералы, компаунды) -> MINERAL_MAX
+   * (значения намеренно равны в constants.js).
+   * @param {ResourceConstant} resourceType
+   * @returns {number}
+   */
+  _resourceMaxForTerminal(resourceType) {
+    if (resourceType === RESOURCE_BATTERY) {
+      return TERMINAL_SUPPLY.BATTERY_MAX;
+    }
+    return TERMINAL_SUPPLY.MINERAL_MAX;
   }
 
   // ---------------------------------------------------------------
@@ -407,56 +428,19 @@ class TaskManager {
     const factory = room.factory;
     const storage = room.storage;
 
-    // Вход: Storage -> Factory, если фабрике не хватает энергии для производства.
-    const factoryEnergy = factory.store[RESOURCE_ENERGY] || 0;
-    const factoryEnergyFree = factory.store.getFreeCapacity(RESOURCE_ENERGY);
-
-    if (factoryEnergy < 5000 && factoryEnergyFree > 0) {
-      const alreadyQueuedIn = this._hasQueuedTask(
-        task =>
-          task.type === TASK_TYPES.TRANSFER &&
-          task.sourceId === storage.id &&
-          task.targetId === factory.id &&
-          task.resourceType === RESOURCE_ENERGY,
-      );
-
-      if (!alreadyQueuedIn) {
-        this.add(
-          new TransferTask(
-            storage.id,
-            factory.id,
-            RESOURCE_ENERGY,
-            factoryEnergyFree,
-          ),
-        );
-      }
+    if (storage.store[RESOURCE_ENERGY] <= STORAGE.ENERGY_MIN) {
+      return;
     }
 
-    // Производство батареек — НЕ логистическая задача Worker'а.
-    // Вызывается напрямую в runFactoryProduction(room), см. ниже.
+    const alreadyQueued = this._hasQueuedTask(
+      task => task.type === TASK_TYPES.OPERATE_FACTORY,
+    );
 
-    // Выход: Factory -> Storage, если есть готовые батарейки.
-    const batteryAmount = factory.store[RESOURCE_BATTERY] || 0;
-    if (batteryAmount > 0) {
-      const alreadyQueuedOut = this._hasQueuedTask(
-        task =>
-          task.type === TASK_TYPES.TRANSFER &&
-          task.sourceId === factory.id &&
-          task.targetId === storage.id &&
-          task.resourceType === RESOURCE_BATTERY,
-      );
-
-      if (!alreadyQueuedOut) {
-        this.add(
-          new TransferTask(
-            factory.id,
-            storage.id,
-            RESOURCE_BATTERY,
-            batteryAmount,
-          ),
-        );
-      }
+    if (alreadyQueued) {
+      return;
     }
+
+    this.add(new OperateFactoryTask(factory.id, storage.id));
   }
 }
 

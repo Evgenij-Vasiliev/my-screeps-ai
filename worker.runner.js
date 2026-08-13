@@ -7,9 +7,9 @@ const taskExecutors = require("task.executors");
  * worker.runner.js
  *
  * Цикл одного Worker (creep) за тик:
- *   1. энергия
- *   2. текущая задача (продолжить)
- *   3. новая задача (если текущей нет)
+ *   1. текущая задача (продолжить)
+ *   2. новая задача (если текущей нет)
+ *   3. энергия (если задача её требует)
  *   4. выполнить
  *   5. обработать результат
  *
@@ -22,30 +22,10 @@ class WorkerRunner {
    * @param {Creep} creep
    */
   run(creep) {
-    // Шаг 1 — энергия.
-    // Если своей энергии нет вообще, worker не может выполнять большинство
-    // задач (build/repair/upgrade/доставку). Пытаемся получить энергию из
-    // room.storage, при отсутствии storage — аварийный fallback (харвест
-    // ближайшего активного источника).
-    //
-    // Исключение: если creep уже выполняет TransferTask (например, сам
-    // идёт забирать ресурс из source задачи с пустым carry) — это его
-    // штатное состояние, Шаг 1 не должен вмешиваться.
-    if (
-      creep.store[RESOURCE_ENERGY] === 0 &&
-      !this._creepDoingTransferTask(creep)
-    ) {
-      const handled = this._ensureEnergy(creep);
-      if (handled) {
-        // Тик потрачен на перемещение/сбор энергии — задачи не трогаем.
-        return;
-      }
-    }
-
-    // Шаг 2 — текущая задача.
+    // Шаг 1 — текущая задача.
     let task = this._getAssignedTask(creep);
 
-    // Шаг 3 — если текущей задачи нет, взять следующую.
+    // Шаг 2 — если текущей задачи нет, взять следующую.
     if (!task) {
       task = taskManager.getNext(creep);
       if (task) {
@@ -56,6 +36,26 @@ class WorkerRunner {
     if (!task) {
       // Очередь пуста — Worker простаивает этот тик.
       return;
+    }
+
+    // Шаг 3 — энергия.
+    // Если своей энергии нет вообще, worker не может выполнять большинство
+    // задач (build/repair/upgrade). Пытаемся получить энергию из
+    // room.storage, при отсутствии storage — аварийный fallback (харвест
+    // ближайшего активного источника).
+    //
+    // Исключение: transfer и operateFactory сами управляют своим ресурсным
+    // состоянием (withdraw нужного ресурса из source/factory) — Шаг 3
+    // не должен вмешиваться.
+    if (
+      creep.store[RESOURCE_ENERGY] === 0 &&
+      !this._creepDoingTransferTask(creep)
+    ) {
+      const handled = this._ensureEnergy(creep);
+      if (handled) {
+        // Тик потрачен на перемещение/сбор энергии — задачу не выполняем.
+        return;
+      }
     }
 
     // Шаг 4 — выполнить.
@@ -99,13 +99,17 @@ class WorkerRunner {
   }
 
   /**
-   * true, если у creep'а сейчас назначена TransferTask.
+   * true, если у creep'а сейчас назначена задача, которая сама управляет
+   * своим ресурсным состоянием (transfer/operateFactory), и Шаг 3
+   * не должен вмешиваться в её промежуточные "пустые" моменты.
    * @param {Creep} creep
    * @returns {boolean}
    */
   _creepDoingTransferTask(creep) {
     const task = this._getAssignedTask(creep);
-    return !!task && task.type === "transfer";
+    return (
+      !!task && (task.type === "transfer" || task.type === "operateFactory")
+    );
   }
 
   /**
