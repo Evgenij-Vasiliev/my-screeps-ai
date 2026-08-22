@@ -33,14 +33,14 @@ const TOWER = {
 const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
 
 const SPAWN_QUOTA = {
-  harvester: 1,
+  harvester: 0,
   linkWorker: 1,
   miner: 2,
   towerSupplier: 1,
-  repairer: 1,
-  builder: 1,
+  repairer: 0,
+  builder: 0,
   upgrader: 0,
-  worker: 1,
+  worker: 2,
   mineralMiner: 1,
 };
 
@@ -50,11 +50,11 @@ const CREEP_BODIES = {
   miner: { work: 5, carry: 1, move: 2 },
   towerSupplier: { carry: 4, move: 2 },
   linkWorker: { carry: 4, move: 2 },
-  harvester: { work: 0, carry: 10, move: 10 },
+  harvester: { work: 0, carry: 1, move: 1 },
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
   repairer: { work: 3, carry: 2, move: 3 },
-  worker: { work: 0, carry: 30, move: 20 },
+  worker: { work: 0, carry: 3, move: 2 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
 };
 

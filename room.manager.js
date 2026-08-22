@@ -10,6 +10,7 @@
 const { getRoomRole } = require("roomRoles");
 const mineralManager = require("mineral.manager");
 const taskManager = require("task.manager");
+const taskGenerators = require("task.generators");
 const spawnManager = require("spawn.manager");
 const factoryManager = require("factory.manager");
 const linkManager = require("linkManager");
@@ -231,7 +232,9 @@ module.exports = {
   runRoom: function (roomState) {
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
     cpuMonitor.trackRole("taskManager", () =>
-      taskManager.run(Game.rooms[roomState.roomName]),
+      taskGenerators.generateFillSpawnsExtensions(
+        Game.rooms[roomState.roomName],
+      ),
     );
     runCreepLogic(roomState);
     runTowerLogic(roomState);

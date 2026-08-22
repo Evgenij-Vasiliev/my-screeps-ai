@@ -1,144 +1,89 @@
-"use strict";
-
 const taskManager = require("task.manager");
 const taskExecutors = require("task.executors");
 
-/**
- * worker.runner.js
- *
- * Цикл одного Worker (creep) за тик:
- *   1. текущая задача (продолжить)
- *   2. новая задача (если текущей нет)
- *   3. энергия (если задача её требует)
- *   4. выполнить
- *   5. обработать результат
- *
- * Результаты execute(): 'done' | 'invalid' | 'noEnergy' | 'inProgress'.
- * Любой из трёх первых -> задача завершается и освобождается на следующий тик.
- */
+const TASK_CHAIN = taskManager.TASK_CHAIN;
 
-class WorkerRunner {
-  /**
-   * @param {Creep} creep
-   */
-  run(creep) {
-    // Шаг 1 — текущая задача.
-    let task = this._getAssignedTask(creep);
+function run(creep) {
+  if (typeof creep.memory.taskIndex !== "number") {
+    creep.memory.taskIndex = 0;
+  }
 
-    // Шаг 2 — если текущей задачи нет, взять следующую.
-    if (!task) {
-      task = taskManager.getNext(creep);
-      if (task) {
-        creep.memory.taskId = task.id;
-      }
-    }
+  const roomName = creep.room.name;
+
+  if (!creep.memory.task) {
+    const taskType = TASK_CHAIN[creep.memory.taskIndex];
+    const task = taskManager.getNextTask(roomName, taskType);
 
     if (!task) {
-      // Очередь пуста — Worker простаивает этот тик.
+      // Очередь текущего taskType пуста (или все Task зарезервированы) —
+      // переходим ровно на следующий тип.
+      creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
       return;
     }
 
-    // Шаг 3 — энергия.
-    // Если своей энергии нет вообще, worker не может выполнять большинство
-    // задач (build/repair/upgrade). Пытаемся получить энергию из
-    // room.storage, при отсутствии storage — аварийный fallback (харвест
-    // ближайшего активного источника).
-    //
-    // Исключение: transfer и operateFactory сами управляют своим ресурсным
-    // состоянием (withdraw нужного ресурса из source/factory) — Шаг 3
-    // не должен вмешиваться.
-    if (
-      creep.store[RESOURCE_ENERGY] === 0 &&
-      !this._creepDoingTransferTask(creep)
-    ) {
-      const handled = this._ensureEnergy(creep);
-      if (handled) {
-        // Тик потрачен на перемещение/сбор энергии — задачу не выполняем.
-        return;
-      }
-    }
-
-    // Шаг 4 — выполнить.
-    const result = taskExecutors.execute(creep, task);
-
-    // Шаг 5 — обработать результат.
-    if (result === "done" || result === "invalid" || result === "noEnergy") {
-      taskManager.complete(task.id);
-      creep.memory.taskId = null;
-    }
-    // result === 'inProgress' -> ничего не делаем, продолжаем на следующем тике.
-  }
-
-  /**
-   * Возвращает задачу, уже назначенную этому creep'у (по Memory.creeps[name].taskId),
-   * либо null, если такой задачи нет или она пропала из очереди.
-   * @param {Creep} creep
-   * @returns {object|null}
-   */
-  _getAssignedTask(creep) {
-    const taskId = creep.memory.taskId;
-    if (!taskId) {
-      return null;
-    }
-
-    if (!Memory.taskSystem || !Memory.taskSystem.queue) {
-      creep.memory.taskId = null;
-      return null;
-    }
-
-    const task = Memory.taskSystem.queue.find(
-      t => t.id === taskId && !t.completed,
+    const reserved = taskManager.reserveTask(
+      roomName,
+      taskType,
+      task,
+      creep.name,
     );
-    if (!task) {
-      // Задача была завершена/удалена другим путём — освобождаем creep'а.
-      creep.memory.taskId = null;
-      return null;
+
+    if (!reserved) {
+      // Защитный случай: не удалось зарезервировать (например, Task уже
+      // не в очереди). В этом тике ничего не берём.
+      return;
     }
 
-    return task;
+    // Task остаётся в FIFO — только ссылка сохраняется в памяти Worker.
+    creep.memory.task = task;
   }
 
-  /**
-   * true, если у creep'а сейчас назначена задача, которая сама управляет
-   * своим ресурсным состоянием (transfer/operateFactory), и Шаг 3
-   * не должен вмешиваться в её промежуточные "пустые" моменты.
-   * @param {Creep} creep
-   * @returns {boolean}
-   */
-  _creepDoingTransferTask(creep) {
-    const task = this._getAssignedTask(creep);
-    return (
-      !!task && (task.type === "transfer" || task.type === "operateFactory")
-    );
+  // Категория определяется через taskIndex (позицию в TASK_CHAIN),
+  // а не через task.type — это разные понятия.
+  const currentTaskType = TASK_CHAIN[creep.memory.taskIndex];
+  const executor = taskExecutors.executors[currentTaskType];
+
+  if (!executor) {
+    // Executor для этой категории ещё не реализован.
+    // Task остаётся полученной, ждём соответствующий Executor.
+    return;
   }
 
-  /**
-   * Аварийное/базовое пополнение энергии Worker'а вне логики задач.
-   * @param {Creep} creep
-   * @returns {boolean} true, если в этот тик было совершено действие (move/withdraw/harvest)
-   */
-  _ensureEnergy(creep) {
-    const room = creep.room;
+  const result = executor(creep, creep.memory.task);
 
-    if (room.storage && room.storage.store[RESOURCE_ENERGY] > 0) {
-      if (creep.withdraw(room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(room.storage);
-      }
-      return true;
+  if (result === "CONTINUE") {
+    return;
+  }
+
+  if (result === "DONE" || result === "SKIP") {
+    const removed =
+      result === "DONE"
+        ? taskManager.completeTask(roomName, currentTaskType, creep.memory.task)
+        : taskManager.removeTask(roomName, currentTaskType, creep.memory.task);
+
+    if (!removed) {
+      // Task не найдена в FIFO по taskId (аномалия — например, уже была
+      // удалена откуда-то ещё). Не считаем это молча успехом: явно
+      // логируем, но всё равно освобождаем Worker от "фантомной" Task,
+      // иначе он будет пытаться завершить несуществующую запись вечно.
+      console.log(
+        "[worker.runner] " +
+          creep.name +
+          ": не удалось " +
+          (result === "DONE" ? "completeTask" : "removeTask") +
+          " для taskId=" +
+          (creep.memory.task && creep.memory.task.taskId) +
+          " (" +
+          currentTaskType +
+          ") — Task не найдена в FIFO.",
+      );
     }
-
-    // Аварийный fallback: storage нет или он пуст — харвестим ближайший источник.
-    const source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
-    if (source) {
-      if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(source);
-      }
-      return true;
-    }
-
-    // Ни storage, ни активных источников — ничего не поделать этот тик.
-    return false;
   }
+
+  creep.memory.task = null;
+  creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
 }
 
-module.exports = new WorkerRunner();
+module.exports = {
+  run,
+};
