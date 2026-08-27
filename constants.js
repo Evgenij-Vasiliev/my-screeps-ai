@@ -30,6 +30,11 @@ const TOWER = {
   SUPPLY_THRESHOLD: 1000,
 };
 
+const POWER_SPAWN = {
+  POWER_MIN: 10,
+  ENERGY_MIN: 500,
+};
+
 const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
 
 const SPAWN_QUOTA = {
@@ -37,10 +42,10 @@ const SPAWN_QUOTA = {
   linkWorker: 1,
   miner: 2,
   towerSupplier: 1,
-  repairer: 0,
+  repairer: 1,
   builder: 0,
   upgrader: 0,
-  worker: 2,
+  worker: 3,
   mineralMiner: 1,
 };
 
@@ -79,6 +84,7 @@ module.exports = {
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
   TOWER,
+  POWER_SPAWN,
   SPAWN_QUOTA,
   MINERAL_MIN_AMOUNT_TO_SPAWN,
   CONTROLLER,
