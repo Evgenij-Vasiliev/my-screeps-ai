@@ -1,7 +1,9 @@
 const TASK_CHAIN = [
   "fillSpawnsExtensions",
-  "fillPowerSpawn",
-  "fillTerminals",
+  "fillPowerSpawnPower",
+  "fillPowerSpawnEnergy",
+  "fillTerminalEnergy",
+  "fillTerminalResources",
   "operateFactory",
   "repairStructures",
   "buildStructures",
@@ -79,7 +81,7 @@ function getNextTask(roomName, taskType) {
   const queue = Memory.rooms[roomName].tasks[taskType];
 
   for (let i = 0; i < queue.length; i++) {
-    if (!queue[i].reservedBy) {
+    if (!queue[i].reservedBy || !Game.creeps[queue[i].reservedBy]) {
       return queue[i];
     }
   }

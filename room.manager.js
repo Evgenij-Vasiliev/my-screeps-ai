@@ -13,6 +13,7 @@ const taskManager = require("task.manager");
 const taskGenerators = require("task.generators");
 const spawnManager = require("spawn.manager");
 const factoryManager = require("factory.manager");
+const powerSpawnManager = require("powerSpawn.manager");
 const linkManager = require("linkManager");
 const roleTower = require("role.tower");
 
@@ -46,6 +47,7 @@ const STRUCTURE_BUCKETS = {
   [STRUCTURE_LINK]: "links",
   [STRUCTURE_LAB]: "labs",
   [STRUCTURE_FACTORY]: "factories",
+  [STRUCTURE_POWER_SPAWN]: "powerSpawns",
 };
 
 function runCreepLogic(roomState) {
@@ -151,6 +153,7 @@ module.exports = {
       links: [],
       labs: [],
       factories: [],
+      powerSpawns: [],
     };
     for (const s of structures) {
       const bucket = STRUCTURE_BUCKETS[s.structureType];
@@ -190,6 +193,7 @@ module.exports = {
       links: grouped.links,
       labs: grouped.labs,
       factory: grouped.factories[0] || null,
+      powerSpawn: grouped.powerSpawns[0] || null,
       mineral: mineralManager.buildMineralState(room),
     };
   },
@@ -231,15 +235,19 @@ module.exports = {
    */
   runRoom: function (roomState) {
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
-    cpuMonitor.trackRole("taskManager", () =>
-      taskGenerators.generateFillSpawnsExtensions(
-        Game.rooms[roomState.roomName],
-      ),
-    );
+    cpuMonitor.trackRole("taskManager", () => {
+      const room = Game.rooms[roomState.roomName];
+      taskGenerators.generateFillSpawnsExtensions(room);
+      taskGenerators.generateFillPowerSpawnPower(room);
+      taskGenerators.generateFillPowerSpawnEnergy(room);
+    });
     runCreepLogic(roomState);
     runTowerLogic(roomState);
     runLinkLogic(roomState);
     cpuMonitor.trackRole("factoryManager", () => factoryManager.run(roomState));
+    cpuMonitor.trackRole("powerSpawnManager", () =>
+      powerSpawnManager.run(roomState),
+    );
   },
 
   /**
