@@ -264,6 +264,77 @@ function executeCollectFactoryBattery(creep, task) {
   }
 }
 
+function executeFillTowers(creep, task) {
+  if (!isValidTask(task)) {
+    return "SKIP";
+  }
+
+  const source = Game.getObjectById(task.sourceId);
+  const target = Game.getObjectById(task.targetId);
+
+  if (!source || !target) {
+    return "SKIP";
+  }
+
+  if (creep.memory.working === undefined) {
+    creep.memory.working = false;
+  }
+
+  if (!creep.memory.working && creep.store[RESOURCE_ENERGY] > 0) {
+    creep.memory.working = true;
+  } else if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  if (!creep.memory.working) {
+    if (isTargetFull(target)) {
+      delete creep.memory.working;
+      return "DONE";
+    }
+
+    const withdrawn = energySource.withdrawFromStorage(creep);
+    if (!withdrawn) {
+      delete creep.memory.working;
+      return "SKIP";
+    }
+
+    return "CONTINUE";
+  }
+
+  if (isTargetFull(target)) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  const result = creep.transfer(target, RESOURCE_ENERGY);
+
+  switch (result) {
+    case OK:
+      return "CONTINUE";
+
+    case ERR_NOT_IN_RANGE:
+      creep.moveTo(target, { reusePath: 15 });
+      return "CONTINUE";
+
+    case ERR_FULL:
+      delete creep.memory.working;
+      return "DONE";
+
+    case ERR_INVALID_TARGET:
+      delete creep.memory.working;
+      return "SKIP";
+
+    case ERR_NOT_ENOUGH_RESOURCES:
+      delete creep.memory.working;
+      return "SKIP";
+
+    default:
+      delete creep.memory.working;
+      return "SKIP";
+  }
+}
+
 function executeFillTerminalEnergy(creep, task) {
   if (!isValidTask(task) || task.resourceType !== RESOURCE_ENERGY) {
     return "SKIP";
@@ -552,5 +623,6 @@ module.exports = {
     fillPowerSpawnEnergy: executeFillPowerSpawnEnergy,
     fillFactoryEnergy: executeFillFactoryEnergy,
     collectFactoryBattery: executeCollectFactoryBattery,
+    fillTowers: executeFillTowers,
   },
 };

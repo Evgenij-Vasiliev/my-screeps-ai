@@ -49,11 +49,20 @@ function ensureStructureCache(room) {
     Memory.rooms[room.name] = {};
   }
 
-  if (Memory.rooms[room.name].structureCache) {
-    return; // кэш уже построен — find не вызываем
+  const existing = Memory.rooms[room.name].structureCache;
+
+  if (
+    existing &&
+    Array.isArray(existing.extensionIds) &&
+    Array.isArray(existing.roadIds)
+  ) {
+    return; // кэш уже полный, ничего не делаем
   }
 
   const structures = room.find(FIND_MY_STRUCTURES);
+  const roads = room.find(FIND_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_ROAD,
+  });
   const sources = room.find(FIND_SOURCES);
 
   const cache = {
@@ -62,8 +71,12 @@ function ensureStructureCache(room) {
     linkIds: [],
     labIds: [],
     extensionIds: [],
+    roadIds: roads.map(r => r.id),
     factoryId: null,
     powerSpawnId: null,
+    observerId: null,
+    extractorId: null,
+    nukerId: null,
     storageId: room.storage ? room.storage.id : null,
     terminalId: room.terminal ? room.terminal.id : null,
     sourceIds: sources.map(s => s.id),
@@ -91,6 +104,15 @@ function ensureStructureCache(room) {
         break;
       case STRUCTURE_POWER_SPAWN:
         cache.powerSpawnId = s.id;
+        break;
+      case STRUCTURE_OBSERVER:
+        cache.observerId = s.id;
+        break;
+      case STRUCTURE_EXTRACTOR:
+        cache.extractorId = s.id;
+        break;
+      case STRUCTURE_NUKER:
+        cache.nukerId = s.id;
         break;
     }
   }
@@ -205,11 +227,21 @@ module.exports = {
       extensions: cache.extensionIds
         .map(id => Game.getObjectById(id))
         .filter(Boolean),
+      roads: cache.roadIds.map(id => Game.getObjectById(id)).filter(Boolean),
       factories: cache.factoryId
         ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
         : [],
       powerSpawns: cache.powerSpawnId
         ? [Game.getObjectById(cache.powerSpawnId)].filter(Boolean)
+        : [],
+      observers: cache.observerId
+        ? [Game.getObjectById(cache.observerId)].filter(Boolean)
+        : [],
+      extractors: cache.extractorId
+        ? [Game.getObjectById(cache.extractorId)].filter(Boolean)
+        : [],
+      nukers: cache.nukerId
+        ? [Game.getObjectById(cache.nukerId)].filter(Boolean)
         : [],
     };
 
@@ -238,12 +270,16 @@ module.exports = {
       terminal: cache.terminalId ? Game.getObjectById(cache.terminalId) : null,
       towers: grouped.towers,
       extensions: grouped.extensions,
+      roads: grouped.roads,
       creeps,
       sources,
       links: grouped.links,
       labs: grouped.labs,
       factory: grouped.factories[0] || null,
       powerSpawn: grouped.powerSpawns[0] || null,
+      observer: grouped.observers[0] || null,
+      extractor: grouped.extractors[0] || null,
+      nuker: grouped.nukers[0] || null,
       mineral: mineralManager.buildMineralState(room),
     };
   },
@@ -293,6 +329,8 @@ module.exports = {
       taskGenerators.generateCollectFactoryBattery(roomState);
       taskGenerators.generateFillTerminalEnergy(roomState);
       taskGenerators.generateFillTerminalResources(roomState);
+      taskGenerators.generateFillTowers(roomState);
+      taskGenerators.generateRepairStructures(roomState);
     });
     runCreepLogic(roomState);
     runTowerLogic(roomState);
