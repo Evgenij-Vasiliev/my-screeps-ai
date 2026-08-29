@@ -611,6 +611,76 @@ function executeFillPowerSpawnEnergy(creep, task) {
   return "SKIP";
 }
 
+function isValidRepairTask(task) {
+  return !!task && task.type === "repair" && !!task.targetId;
+}
+
+function executeRepairStructures(creep, task) {
+  if (!isValidRepairTask(task)) {
+    return "SKIP";
+  }
+
+  const target = Game.getObjectById(task.targetId);
+
+  if (!target) {
+    return "SKIP";
+  }
+
+  if (creep.memory.working === undefined) {
+    creep.memory.working = false;
+  }
+
+  if (!creep.memory.working && creep.store[RESOURCE_ENERGY] > 0) {
+    creep.memory.working = true;
+  } else if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  if (!creep.memory.working) {
+    if (target.hits >= target.hitsMax) {
+      delete creep.memory.working;
+      return "DONE";
+    }
+
+    const withdrawn = energySource.withdrawFromStorage(creep);
+    if (!withdrawn) {
+      delete creep.memory.working;
+      return "SKIP";
+    }
+
+    return "CONTINUE";
+  }
+
+  if (target.hits >= target.hitsMax) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  const result = creep.repair(target);
+
+  switch (result) {
+    case OK:
+      return target.hits >= target.hitsMax ? "DONE" : "CONTINUE";
+
+    case ERR_NOT_IN_RANGE:
+      creep.moveTo(target, { reusePath: 15 });
+      return "CONTINUE";
+
+    case ERR_INVALID_TARGET:
+      delete creep.memory.working;
+      return "SKIP";
+
+    case ERR_NOT_ENOUGH_RESOURCES:
+      delete creep.memory.working;
+      return "SKIP";
+
+    default:
+      delete creep.memory.working;
+      return "SKIP";
+  }
+}
+
 module.exports = {
   executeFillSpawnsExtensions,
   executeFillPowerSpawnPower,
