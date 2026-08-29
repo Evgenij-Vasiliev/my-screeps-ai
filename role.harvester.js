@@ -3,8 +3,8 @@
  * Основная задача: сбор энергии и заправка ключевых зданий комнаты.
  *
  * ТЗ №2: harvester получает энергию из Storage.
- * Аварийный режим (прямая добыча при пустом/отсутствующем Storage)
- * вынесен в отдельный модуль и здесь не обрабатывается.
+ * Обновление: если в Storage энергии нет — пробует Terminal.
+ * Если и там пусто — добывает энергию напрямую из источника (Source).
  *
  * Harvester — единственная роль, которая наполняет Storage, поэтому забор
  * энергии из Storage у неё выполняется с ignoreReserve = true: harvester не
@@ -35,13 +35,41 @@ module.exports = {
     }
 
     /**
-     * 3. РЕЖИМ СБОРА (Storage-only)
+     * 3. РЕЖИМ СБОРА (Storage → Terminal → Source)
      */
     if (!creep.memory.working) {
-      // ignoreReserve = true — harvester сам наполняет резерв, поэтому
-      // не должен на него оглядываться.
-      // creep.say("📥storage");
-      energySource.withdrawFromStorage(creep, true);
+      // Приоритет 1: Storage. ignoreReserve = true — harvester сам
+      // наполняет резерв, поэтому не должен на него оглядываться.
+      const withdrewFromStorage = energySource.withdrawFromStorage(creep, true);
+
+      if (withdrewFromStorage) {
+        // creep.say("📥storage");
+        return;
+      }
+
+      // Приоритет 2: Terminal.
+      const terminal = creep.room.terminal;
+
+      if (terminal && terminal.store[RESOURCE_ENERGY] > 0) {
+        // creep.say("📥terminal");
+        if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(terminal, { reusePath: 15 });
+        }
+        return;
+      }
+
+      // Приоритет 3: прямая добыча из источника (Source).
+      const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
+
+      if (source) {
+        // creep.say("⛏️source");
+        if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(source, { reusePath: 15 });
+        }
+      } else {
+        // creep.say("😴idle");
+      }
+
       return;
     }
 

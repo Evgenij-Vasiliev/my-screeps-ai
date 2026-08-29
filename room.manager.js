@@ -41,14 +41,62 @@ const ROLES = {
   worker: workerRunner,
 };
 
-const STRUCTURE_BUCKETS = {
-  [STRUCTURE_SPAWN]: "spawns",
-  [STRUCTURE_TOWER]: "towers",
-  [STRUCTURE_LINK]: "links",
-  [STRUCTURE_LAB]: "labs",
-  [STRUCTURE_FACTORY]: "factories",
-  [STRUCTURE_POWER_SPAWN]: "powerSpawns",
-};
+function ensureStructureCache(room) {
+  if (!Memory.rooms) {
+    Memory.rooms = {};
+  }
+  if (!Memory.rooms[room.name]) {
+    Memory.rooms[room.name] = {};
+  }
+
+  if (Memory.rooms[room.name].structureCache) {
+    return; // кэш уже построен — find не вызываем
+  }
+
+  const structures = room.find(FIND_MY_STRUCTURES);
+  const sources = room.find(FIND_SOURCES);
+
+  const cache = {
+    spawnIds: [],
+    towerIds: [],
+    linkIds: [],
+    labIds: [],
+    extensionIds: [],
+    factoryId: null,
+    powerSpawnId: null,
+    storageId: room.storage ? room.storage.id : null,
+    terminalId: room.terminal ? room.terminal.id : null,
+    sourceIds: sources.map(s => s.id),
+  };
+
+  for (const s of structures) {
+    switch (s.structureType) {
+      case STRUCTURE_SPAWN:
+        cache.spawnIds.push(s.id);
+        break;
+      case STRUCTURE_TOWER:
+        cache.towerIds.push(s.id);
+        break;
+      case STRUCTURE_LINK:
+        cache.linkIds.push(s.id);
+        break;
+      case STRUCTURE_LAB:
+        cache.labIds.push(s.id);
+        break;
+      case STRUCTURE_EXTENSION:
+        cache.extensionIds.push(s.id);
+        break;
+      case STRUCTURE_FACTORY:
+        cache.factoryId = s.id;
+        break;
+      case STRUCTURE_POWER_SPAWN:
+        cache.powerSpawnId = s.id;
+        break;
+    }
+  }
+
+  Memory.rooms[room.name].structureCache = cache;
+}
 
 function runCreepLogic(roomState) {
   for (const creep of roomState.creeps) {
@@ -145,28 +193,30 @@ module.exports = {
    * @returns {Object} roomState
    */
   buildRoomState: function (room, precomputedCreeps) {
-    const structures = room.find(FIND_MY_STRUCTURES);
+    ensureStructureCache(room);
+
+    const cache = Memory.rooms[room.name].structureCache;
 
     const grouped = {
-      spawns: [],
-      towers: [],
-      links: [],
-      labs: [],
-      factories: [],
-      powerSpawns: [],
+      spawns: cache.spawnIds.map(id => Game.getObjectById(id)).filter(Boolean),
+      towers: cache.towerIds.map(id => Game.getObjectById(id)).filter(Boolean),
+      links: cache.linkIds.map(id => Game.getObjectById(id)).filter(Boolean),
+      labs: cache.labIds.map(id => Game.getObjectById(id)).filter(Boolean),
+      extensions: cache.extensionIds
+        .map(id => Game.getObjectById(id))
+        .filter(Boolean),
+      factories: cache.factoryId
+        ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
+        : [],
+      powerSpawns: cache.powerSpawnId
+        ? [Game.getObjectById(cache.powerSpawnId)].filter(Boolean)
+        : [],
     };
-    for (const s of structures) {
-      const bucket = STRUCTURE_BUCKETS[s.structureType];
-      if (bucket) grouped[bucket].push(s);
-    }
 
-    // Контейнеры — не owned-структуры, ищем отдельно
-    const containers = room.find(FIND_STRUCTURES, {
-      filter: s => s.structureType === STRUCTURE_CONTAINER,
-    });
-
-    // Источники энергии
-    const sources = room.find(FIND_SOURCES);
+    // Источники энергии — статичны, резолвятся из кэша
+    const sources = cache.sourceIds
+      .map(id => Game.getObjectById(id))
+      .filter(Boolean);
 
     // Крипы, приписанные к данной комнате — если список уже собран заранее
     // (buildAllRoomStates группирует всех крипов за один проход, а не за N),
@@ -184,12 +234,12 @@ module.exports = {
       spawn: grouped.spawns[0] || null,
       spawns: grouped.spawns,
       controller: room.controller,
-      storage: room.storage || null,
-      terminal: room.terminal || null,
+      storage: cache.storageId ? Game.getObjectById(cache.storageId) : null,
+      terminal: cache.terminalId ? Game.getObjectById(cache.terminalId) : null,
       towers: grouped.towers,
+      extensions: grouped.extensions,
       creeps,
       sources,
-      containers,
       links: grouped.links,
       labs: grouped.labs,
       factory: grouped.factories[0] || null,
@@ -236,10 +286,13 @@ module.exports = {
   runRoom: function (roomState) {
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
     cpuMonitor.trackRole("taskManager", () => {
-      const room = Game.rooms[roomState.roomName];
-      taskGenerators.generateFillSpawnsExtensions(room);
-      taskGenerators.generateFillPowerSpawnPower(room);
-      taskGenerators.generateFillPowerSpawnEnergy(room);
+      taskGenerators.generateFillSpawnsExtensions(roomState);
+      taskGenerators.generateFillPowerSpawnPower(roomState);
+      taskGenerators.generateFillPowerSpawnEnergy(roomState);
+      taskGenerators.generateFillFactoryEnergy(roomState);
+      taskGenerators.generateCollectFactoryBattery(roomState);
+      taskGenerators.generateFillTerminalEnergy(roomState);
+      taskGenerators.generateFillTerminalResources(roomState);
     });
     runCreepLogic(roomState);
     runTowerLogic(roomState);

@@ -83,23 +83,10 @@ class UpgradeTask extends BaseTask {
   }
 }
 
-class OperateFactoryTask extends BaseTask {
-  /**
-   * @param {string} factoryId
-   * @param {string} storageId
-   */
-  constructor(factoryId, storageId) {
-    super(TASK_TYPES.OPERATE_FACTORY);
-    this.factoryId = factoryId;
-    this.storageId = storageId;
-  }
-}
-
 module.exports = {
   BaseTask,
   TransferTask,
   BuildTask,
   RepairTask,
   UpgradeTask,
-  OperateFactoryTask,
 };
