@@ -1,6 +1,10 @@
 const taskManager = require("task.manager");
-const { POWER_SPAWN } = require("./constants");
-
+const {
+  POWER_SPAWN,
+  STORAGE,
+  FACTORY,
+  TERMINAL_SUPPLY,
+} = require("./constants");
 const TASK_TYPE = "fillSpawnsExtensions";
 
 function isDuplicateTask(roomName, candidate) {
@@ -34,27 +38,14 @@ function needsEnergy(target) {
   return target.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
 }
 
-function collectSpawnsAndExtensions(room) {
-  const spawns = room.find(FIND_MY_SPAWNS);
-  const extensions = room.find(FIND_STRUCTURES, {
-    filter: structure => structure.structureType === STRUCTURE_EXTENSION,
-  });
+function generateFillSpawnsExtensions(roomState) {
+  const { storage, spawns, extensions } = roomState;
 
-  return spawns.concat(extensions);
-}
-
-function findPowerSpawn(room) {
-  return room.find(FIND_MY_STRUCTURES, {
-    filter: structure => structure.structureType === STRUCTURE_POWER_SPAWN,
-  })[0];
-}
-
-function generateFillSpawnsExtensions(room) {
-  if (!room.storage) {
+  if (!storage) {
     return;
   }
 
-  const targets = collectSpawnsAndExtensions(room);
+  const targets = spawns.concat(extensions);
 
   for (const target of targets) {
     if (!needsEnergy(target)) {
@@ -63,18 +54,19 @@ function generateFillSpawnsExtensions(room) {
 
     const candidate = {
       type: "transfer",
-      sourceId: room.storage.id,
+      sourceId: storage.id,
       targetId: target.id,
       resourceType: RESOURCE_ENERGY,
     };
 
-    if (isDuplicateTask(room.name, candidate)) {
+    if (isDuplicateTask(roomState.roomName, candidate)) {
       continue;
     }
 
-    taskManager.addTask(room.name, TASK_TYPE, candidate);
+    taskManager.addTask(roomState.roomName, TASK_TYPE, candidate);
   }
 }
+
 function isDuplicatePowerSpawnPowerTask(roomName, candidate) {
   const tasks =
     (Memory.rooms &&
@@ -108,8 +100,9 @@ function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
   );
 }
 
-function generateFillPowerSpawnPower(room) {
-  const powerSpawn = findPowerSpawn(room);
+function generateFillPowerSpawnPower(roomState) {
+  const { powerSpawn, storage, terminal, roomName } = roomState;
+
   if (!powerSpawn) {
     return;
   }
@@ -123,8 +116,8 @@ function generateFillPowerSpawnPower(room) {
     return;
   }
 
-  const storagePower = room.storage ? room.storage.store[RESOURCE_POWER] : 0;
-  const terminalPower = room.terminal ? room.terminal.store[RESOURCE_POWER] : 0;
+  const storagePower = storage ? storage.store[RESOURCE_POWER] : 0;
+  const terminalPower = terminal ? terminal.store[RESOURCE_POWER] : 0;
 
   if (storagePower + terminalPower < needed) {
     return;
@@ -136,19 +129,20 @@ function generateFillPowerSpawnPower(room) {
     resourceType: RESOURCE_POWER,
   };
 
-  if (isDuplicatePowerSpawnPowerTask(room.name, candidate)) {
+  if (isDuplicatePowerSpawnPowerTask(roomName, candidate)) {
     return;
   }
 
-  taskManager.addTask(room.name, "fillPowerSpawnPower", candidate);
+  taskManager.addTask(roomName, "fillPowerSpawnPower", candidate);
 }
 
-function generateFillPowerSpawnEnergy(room) {
-  if (!room.storage) {
+function generateFillPowerSpawnEnergy(roomState) {
+  const { powerSpawn, storage, roomName } = roomState;
+
+  if (!storage) {
     return;
   }
 
-  const powerSpawn = findPowerSpawn(room);
   if (!powerSpawn) {
     return;
   }
@@ -162,26 +156,231 @@ function generateFillPowerSpawnEnergy(room) {
     return;
   }
 
-  if (room.storage.store[RESOURCE_ENERGY] < needed) {
+  if (storage.store[RESOURCE_ENERGY] < needed) {
     return;
   }
 
   const candidate = {
     type: "transfer",
-    sourceId: room.storage.id,
+    sourceId: storage.id,
     targetId: powerSpawn.id,
     resourceType: RESOURCE_ENERGY,
   };
 
-  if (isDuplicatePowerSpawnEnergyTask(room.name, candidate)) {
+  if (isDuplicatePowerSpawnEnergyTask(roomName, candidate)) {
     return;
   }
 
-  taskManager.addTask(room.name, "fillPowerSpawnEnergy", candidate);
+  taskManager.addTask(roomName, "fillPowerSpawnEnergy", candidate);
+}
+
+function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.fillFactoryEnergy) ||
+    [];
+
+  return tasks.some(
+    task =>
+      task.type === candidate.type &&
+      task.sourceId === candidate.sourceId &&
+      task.targetId === candidate.targetId &&
+      task.resourceType === candidate.resourceType,
+  );
+}
+
+function generateFillFactoryEnergy(roomState) {
+  const { factory, storage, roomName } = roomState;
+
+  if (!storage) {
+    return;
+  }
+
+  if (!factory) {
+    return;
+  }
+
+  if (factory.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+    return;
+  }
+
+  const reserveThreshold =
+    STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
+  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) {
+    return;
+  }
+
+  const candidate = {
+    type: "transfer",
+    sourceId: storage.id,
+    targetId: factory.id,
+    resourceType: RESOURCE_ENERGY,
+  };
+
+  if (isDuplicateFillFactoryEnergyTask(roomName, candidate)) {
+    return;
+  }
+
+  taskManager.addTask(roomName, "fillFactoryEnergy", candidate);
+}
+
+function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.collectFactoryBattery) ||
+    [];
+
+  return tasks.some(
+    task =>
+      task.type === candidate.type &&
+      task.sourceId === candidate.sourceId &&
+      task.targetId === candidate.targetId &&
+      task.resourceType === candidate.resourceType,
+  );
+}
+
+function generateCollectFactoryBattery(roomState) {
+  const { factory, storage, roomName } = roomState;
+
+  if (!storage) {
+    return;
+  }
+
+  if (!factory) {
+    return;
+  }
+
+  if (factory.store[RESOURCE_BATTERY] === 0) {
+    return;
+  }
+
+  const candidate = {
+    type: "transfer",
+    sourceId: factory.id,
+    targetId: storage.id,
+    resourceType: RESOURCE_BATTERY,
+  };
+
+  if (isDuplicateCollectFactoryBatteryTask(roomName, candidate)) {
+    return;
+  }
+
+  taskManager.addTask(roomName, "collectFactoryBattery", candidate);
+}
+
+function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.fillTerminalEnergy) ||
+    [];
+
+  return tasks.some(
+    task =>
+      task.type === candidate.type &&
+      task.sourceId === candidate.sourceId &&
+      task.targetId === candidate.targetId &&
+      task.resourceType === candidate.resourceType,
+  );
+}
+
+function generateFillTerminalEnergy(roomState) {
+  const { storage, terminal, roomName } = roomState;
+
+  if (!storage || !terminal) {
+    return;
+  }
+
+  if (terminal.store[RESOURCE_ENERGY] >= TERMINAL_SUPPLY.ENERGY_MIN) {
+    return;
+  }
+
+  const reserveThreshold =
+    STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
+  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) {
+    return;
+  }
+
+  const candidate = {
+    type: "transfer",
+    sourceId: storage.id,
+    targetId: terminal.id,
+    resourceType: RESOURCE_ENERGY,
+  };
+
+  if (isDuplicateFillTerminalEnergyTask(roomName, candidate)) {
+    return;
+  }
+
+  taskManager.addTask(roomName, "fillTerminalEnergy", candidate);
+}
+
+function isDuplicateFillTerminalResourceTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.fillTerminalResources) ||
+    [];
+
+  return tasks.some(
+    task =>
+      task.type === candidate.type &&
+      task.sourceId === candidate.sourceId &&
+      task.targetId === candidate.targetId &&
+      task.resourceType === candidate.resourceType,
+  );
+}
+
+function generateFillTerminalResources(roomState) {
+  const { storage, terminal, roomName } = roomState;
+
+  if (!storage || !terminal) {
+    return;
+  }
+
+  const RESOURCE_TERMINAL_MAX = 10000;
+
+  for (const resourceType in storage.store) {
+    if (resourceType === RESOURCE_ENERGY || resourceType === RESOURCE_POWER) {
+      continue;
+    }
+
+    if (storage.store[resourceType] === 0) {
+      continue;
+    }
+
+    const currentInTerminal = terminal.store[resourceType] || 0;
+    if (currentInTerminal >= RESOURCE_TERMINAL_MAX) {
+      continue;
+    }
+
+    const candidate = {
+      type: "transfer",
+      sourceId: storage.id,
+      targetId: terminal.id,
+      resourceType,
+    };
+
+    if (isDuplicateFillTerminalResourceTask(roomName, candidate)) {
+      continue;
+    }
+
+    taskManager.addTask(roomName, "fillTerminalResources", candidate);
+  }
 }
 
 module.exports = {
   generateFillSpawnsExtensions,
   generateFillPowerSpawnPower,
   generateFillPowerSpawnEnergy,
+  generateFillFactoryEnergy,
+  generateCollectFactoryBattery,
+  generateFillTerminalEnergy,
+  generateFillTerminalResources,
 };

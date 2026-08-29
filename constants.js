@@ -10,7 +10,6 @@ const TASK_TYPES = {
   BUILD: "build",
   REPAIR: "repair",
   UPGRADE: "upgrade",
-  OPERATE_FACTORY: "factory",
 };
 
 const TERMINAL_SUPPLY = {
@@ -20,6 +19,10 @@ const TERMINAL_SUPPLY = {
   BATTERY_MAX: 10000,
   COMPOUND_MAX: 10000,
   STORAGE_RESERVE_MULTIPLIER: 1.3, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня терминал не забирает энергию из хранилища
+};
+
+const FACTORY = {
+  ENERGY_RESERVE_MULTIPLIER: 1.1, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня фабрика не забирает энергию из хранилища
 };
 
 const TOWER = {
@@ -41,11 +44,11 @@ const SPAWN_QUOTA = {
   harvester: 0,
   linkWorker: 1,
   miner: 2,
-  towerSupplier: 1,
+  towerSupplier: 0,
   repairer: 1,
   builder: 0,
   upgrader: 0,
-  worker: 3,
+  worker: 2,
   mineralMiner: 1,
 };
 
@@ -55,7 +58,7 @@ const CREEP_BODIES = {
   miner: { work: 5, carry: 1, move: 2 },
   towerSupplier: { carry: 4, move: 2 },
   linkWorker: { carry: 4, move: 2 },
-  harvester: { work: 0, carry: 1, move: 1 },
+  harvester: { work: 1, carry: 1, move: 1 },
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
   repairer: { work: 3, carry: 2, move: 3 },
@@ -81,6 +84,7 @@ module.exports = {
   STORAGE,
   TASK_TYPES,
   TERMINAL_SUPPLY,
+  FACTORY,
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
   TOWER,

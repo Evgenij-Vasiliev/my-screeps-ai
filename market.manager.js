@@ -16,6 +16,10 @@ const CONFIG = {
 
   MAX_DEALS_PER_TICK: 3,
   MIN_PRICE_RATIO: 0.8,
+
+  ENABLE_POWER_BUY: true,
+  POWER_TARGET: 100000,
+  POWER_MAX_PRICE_RATIO: 1.2,
 };
 
 const BASE_MINERALS = [
@@ -34,6 +38,22 @@ const COMPOUNDS = RESOURCES_ALL.filter(
     r !== RESOURCE_BATTERY &&
     !BASE_MINERALS.includes(r),
 );
+
+function findAffordableBuyOrders(resourceType, maxPriceRatio = 1.2) {
+  const orders = Game.market.getAllOrders({
+    type: ORDER_SELL,
+    resourceType,
+  });
+
+  if (orders.length === 0) return [];
+
+  const minPrice = Math.min(...orders.map(o => o.price));
+  const maxAcceptable = minPrice * maxPriceRatio;
+
+  return orders
+    .filter(o => o.price <= maxAcceptable)
+    .sort((a, b) => a.price - b.price);
+}
 
 /**
  * Определяет группу ресурса (раздел 9 ТЗ №6): ENERGY / BATTERY /
@@ -122,6 +142,44 @@ function trySellResource(terminal, resourceType, surplus) {
   return result === OK;
 }
 
+function tryBuyPower(terminal) {
+  const currentPower = terminal.store[RESOURCE_POWER] || 0;
+
+  if (currentPower >= CONFIG.POWER_TARGET) {
+    return false;
+  }
+
+  const needed = CONFIG.POWER_TARGET - currentPower;
+
+  const orders = findAffordableBuyOrders(
+    RESOURCE_POWER,
+    CONFIG.POWER_MAX_PRICE_RATIO,
+  );
+  if (orders.length === 0) {
+    return false;
+  }
+
+  const order = orders[0];
+  const amount = Math.min(needed, order.amount);
+
+  if (amount <= 0) {
+    return false;
+  }
+
+  const energyForDeal = Game.market.calcTransactionCost(
+    amount,
+    terminal.room.name,
+    order.roomName,
+  );
+
+  if (terminal.store[RESOURCE_ENERGY] < energyForDeal) {
+    return false;
+  }
+
+  const result = Game.market.deal(order.id, amount, terminal.room.name);
+  return result === OK;
+}
+
 function run() {
   if (!Game.market) return;
 
@@ -146,6 +204,16 @@ function run() {
         if (trySellResource(terminal, resourceType, surplus)) {
           dealsCount++;
         }
+      }
+    }
+  }
+
+  if (CONFIG.ENABLE_POWER_BUY) {
+    for (const terminal of terminals) {
+      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+
+      if (tryBuyPower(terminal)) {
+        dealsCount++;
       }
     }
   }
