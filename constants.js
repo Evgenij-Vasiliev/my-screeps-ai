@@ -30,7 +30,7 @@ const TOWER = {
   REPAIR_INTERVAL: 10,
   WALL_THRESHOLD_DEFAULT: 1000,
   WALL_THRESHOLD_STEP: 1000,
-  SUPPLY_THRESHOLD: 1000,
+  SUPPLY_THRESHOLD: 750,
 };
 
 const POWER_SPAWN = {
@@ -45,7 +45,7 @@ const SPAWN_QUOTA = {
   linkWorker: 1,
   miner: 2,
   towerSupplier: 0,
-  repairer: 1,
+  repairer: 0,
   builder: 0,
   upgrader: 0,
   worker: 2,

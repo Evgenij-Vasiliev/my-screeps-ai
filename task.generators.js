@@ -4,6 +4,7 @@ const {
   STORAGE,
   FACTORY,
   TERMINAL_SUPPLY,
+  TOWER,
 } = require("./constants");
 const TASK_TYPE = "fillSpawnsExtensions";
 
@@ -375,6 +376,122 @@ function generateFillTerminalResources(roomState) {
   }
 }
 
+function isDuplicateFillTowersTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.fillTowers) ||
+    [];
+
+  return tasks.some(
+    task =>
+      task.type === candidate.type &&
+      task.targetId === candidate.targetId &&
+      task.sourceId === candidate.sourceId &&
+      task.resourceType === candidate.resourceType,
+  );
+}
+
+function generateFillTowers(roomState) {
+  const { storage, towers, roomName } = roomState;
+
+  if (!storage) {
+    return;
+  }
+
+  for (const tower of towers) {
+    if (tower.store[RESOURCE_ENERGY] >= TOWER.SUPPLY_THRESHOLD) {
+      continue;
+    }
+
+    const candidate = {
+      type: "transfer",
+      sourceId: storage.id,
+      targetId: tower.id,
+      resourceType: RESOURCE_ENERGY,
+    };
+
+    if (isDuplicateFillTowersTask(roomName, candidate)) {
+      continue;
+    }
+
+    taskManager.addTask(roomName, "fillTowers", candidate);
+  }
+}
+
+const REPAIR_THRESHOLD_RATIO = 0.5;
+
+function isDuplicateRepairTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.repairStructures) ||
+    [];
+
+  return tasks.some(task => task.targetId === candidate.targetId);
+}
+
+function collectRepairCandidates(roomState) {
+  const {
+    spawns,
+    towers,
+    extensions,
+    links,
+    labs,
+    roads,
+    factory,
+    powerSpawn,
+    storage,
+    terminal,
+    observer,
+    extractor,
+    nuker,
+  } = roomState;
+
+  const all = []
+    .concat(spawns)
+    .concat(towers)
+    .concat(extensions)
+    .concat(links)
+    .concat(labs)
+    .concat(roads);
+
+  if (factory) all.push(factory);
+  if (powerSpawn) all.push(powerSpawn);
+  if (storage) all.push(storage);
+  if (terminal) all.push(terminal);
+  if (observer) all.push(observer);
+  if (extractor) all.push(extractor);
+  if (nuker) all.push(nuker);
+
+  return all;
+}
+
+function generateRepairStructures(roomState) {
+  const { roomName } = roomState;
+
+  const candidates = collectRepairCandidates(roomState);
+
+  for (const structure of candidates) {
+    if (structure.hits >= structure.hitsMax * REPAIR_THRESHOLD_RATIO) {
+      continue;
+    }
+
+    const candidate = {
+      type: "repair",
+      targetId: structure.id,
+    };
+
+    if (isDuplicateRepairTask(roomName, candidate)) {
+      continue;
+    }
+
+    taskManager.addTask(roomName, "repairStructures", candidate);
+  }
+}
+
 module.exports = {
   generateFillSpawnsExtensions,
   generateFillPowerSpawnPower,
@@ -383,4 +500,6 @@ module.exports = {
   generateCollectFactoryBattery,
   generateFillTerminalEnergy,
   generateFillTerminalResources,
+  generateFillTowers,
+  generateRepairStructures,
 };
