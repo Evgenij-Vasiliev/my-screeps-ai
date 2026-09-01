@@ -9,13 +9,24 @@ module.exports = {
   run: function (tower, roomData) {
     if (!tower) return;
 
-    const hostiles = roomData.hostiles;
+    if (!Memory.towerState) Memory.towerState = {};
+    if (!Memory.towerState[tower.id]) Memory.towerState[tower.id] = {};
+    const state = Memory.towerState[tower.id];
 
-    // Атака вражеских крипов
-    const closestHostile = tower.pos.findClosestByRange(hostiles);
-    if (closestHostile) {
-      tower.attack(closestHostile);
-      return;
+    const hostiles = roomData.hostiles;
+    const hasHostiles = hostiles && hostiles.length > 0;
+
+    state.underAttack = hasHostiles;
+
+    const shouldCheckAttack =
+      state.underAttack || Game.time % TOWER.HOSTILE_CHECK_INTERVAL === 0;
+
+    if (hasHostiles && shouldCheckAttack) {
+      const closestHostile = tower.pos.findClosestByRange(hostiles);
+      if (closestHostile) {
+        tower.attack(closestHostile);
+        return;
+      }
     }
 
     if (tower.store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) return;

@@ -47,13 +47,12 @@ function run(roomState) {
     )
       continue;
 
-    if (
-      role === "mineralMiner" &&
-      (!roomState.mineral ||
-        !roomState.mineral.extractor ||
-        roomState.mineral.amount < MINERAL_MIN_AMOUNT_TO_SPAWN)
-    )
-      continue;
+    if (role === "mineralMiner") {
+      if (!roomState.mineral || !roomState.mineral.extractorId) continue;
+      const mineralObj = Game.getObjectById(roomState.mineral.id);
+      if (!mineralObj || mineralObj.mineralAmount < MINERAL_MIN_AMOUNT_TO_SPAWN)
+        continue;
+    }
 
     if (countRole(creeps, role) < SPAWN_QUOTA[role]) {
       const result = creepFactory.run(

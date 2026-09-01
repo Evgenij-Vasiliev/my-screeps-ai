@@ -27,10 +27,25 @@ const FACTORY = {
 
 const TOWER = {
   REPAIR_ENERGY_MIN: 700,
-  REPAIR_INTERVAL: 10,
+  REPAIR_INTERVAL: 15,
   WALL_THRESHOLD_DEFAULT: 1000,
   WALL_THRESHOLD_STEP: 1000,
   SUPPLY_THRESHOLD: 750,
+  HOSTILE_CHECK_INTERVAL: 100,
+};
+
+const TASK_CONFIG = {
+  fillSpawnsExtensions: true,
+  fillPowerSpawnPower: false,
+  fillPowerSpawnEnergy: false,
+  fillTerminalEnergy: true,
+  fillTerminalResources: false,
+  fillFactoryEnergy: false,
+  collectFactoryBattery: false,
+  repairStructures: true,
+  buildStructures: true,
+  fillTowers: true,
+  upgradeController: true,
 };
 
 const POWER_SPAWN = {
@@ -38,7 +53,7 @@ const POWER_SPAWN = {
   ENERGY_MIN: 500,
 };
 
-const PRESPAWN_THRESHOLD = { miner: 50, linkWorker: 30 };
+const PRESPAWN_THRESHOLD = { miner: 100, linkWorker: 30 };
 
 const SPAWN_QUOTA = {
   harvester: 0,
@@ -55,19 +70,20 @@ const SPAWN_QUOTA = {
 const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
 
 const CREEP_BODIES = {
-  miner: { work: 5, carry: 1, move: 2 },
+  miner: { work: 5, carry: 10, move: 4 },
   towerSupplier: { carry: 4, move: 2 },
   linkWorker: { carry: 4, move: 2 },
   harvester: { work: 1, carry: 1, move: 1 },
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
   repairer: { work: 3, carry: 2, move: 3 },
-  worker: { work: 0, carry: 3, move: 2 },
+  worker: { work: 5, carry: 5, move: 10 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
 };
 
 const CONTROLLER = {
-  DOWNGRADE_THRESHOLD: 190000,
+  DOWNGRADE_MAX: 150000,
+  DOWNGRADE_MIN: 50000,
 };
 
 const CACHE = {
@@ -88,6 +104,7 @@ module.exports = {
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
   TOWER,
+  TASK_CONFIG,
   POWER_SPAWN,
   SPAWN_QUOTA,
   MINERAL_MIN_AMOUNT_TO_SPAWN,

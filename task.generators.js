@@ -5,7 +5,10 @@ const {
   FACTORY,
   TERMINAL_SUPPLY,
   TOWER,
+  TASK_CONFIG,
+  CONTROLLER,
 } = require("./constants");
+
 const TASK_TYPE = "fillSpawnsExtensions";
 
 function isDuplicateTask(roomName, candidate) {
@@ -40,6 +43,7 @@ function needsEnergy(target) {
 }
 
 function generateFillSpawnsExtensions(roomState) {
+  if (!TASK_CONFIG.fillSpawnsExtensions) return;
   const { storage, spawns, extensions } = roomState;
 
   if (!storage) {
@@ -102,6 +106,7 @@ function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
 }
 
 function generateFillPowerSpawnPower(roomState) {
+  if (!TASK_CONFIG.fillPowerSpawnPower) return;
   const { powerSpawn, storage, terminal, roomName } = roomState;
 
   if (!powerSpawn) {
@@ -138,6 +143,7 @@ function generateFillPowerSpawnPower(roomState) {
 }
 
 function generateFillPowerSpawnEnergy(roomState) {
+  if (!TASK_CONFIG.fillPowerSpawnEnergy) return;
   const { powerSpawn, storage, roomName } = roomState;
 
   if (!storage) {
@@ -193,6 +199,7 @@ function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
 }
 
 function generateFillFactoryEnergy(roomState) {
+  if (!TASK_CONFIG.fillFactoryEnergy) return;
   const { factory, storage, roomName } = roomState;
 
   if (!storage) {
@@ -245,6 +252,7 @@ function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
 }
 
 function generateCollectFactoryBattery(roomState) {
+  if (!TASK_CONFIG.collectFactoryBattery) return;
   const { factory, storage, roomName } = roomState;
 
   if (!storage) {
@@ -291,6 +299,7 @@ function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
 }
 
 function generateFillTerminalEnergy(roomState) {
+  if (!TASK_CONFIG.fillTerminalEnergy) return;
   const { storage, terminal, roomName } = roomState;
 
   if (!storage || !terminal) {
@@ -339,6 +348,7 @@ function isDuplicateFillTerminalResourceTask(roomName, candidate) {
 }
 
 function generateFillTerminalResources(roomState) {
+  if (!TASK_CONFIG.fillTerminalResources) return;
   const { storage, terminal, roomName } = roomState;
 
   if (!storage || !terminal) {
@@ -394,6 +404,7 @@ function isDuplicateFillTowersTask(roomName, candidate) {
 }
 
 function generateFillTowers(roomState) {
+  if (!TASK_CONFIG.fillTowers) return;
   const { storage, towers, roomName } = roomState;
 
   if (!storage) {
@@ -433,48 +444,12 @@ function isDuplicateRepairTask(roomName, candidate) {
   return tasks.some(task => task.targetId === candidate.targetId);
 }
 
-function collectRepairCandidates(roomState) {
-  const {
-    spawns,
-    towers,
-    extensions,
-    links,
-    labs,
-    roads,
-    factory,
-    powerSpawn,
-    storage,
-    terminal,
-    observer,
-    extractor,
-    nuker,
-  } = roomState;
-
-  const all = []
-    .concat(spawns)
-    .concat(towers)
-    .concat(extensions)
-    .concat(links)
-    .concat(labs)
-    .concat(roads);
-
-  if (factory) all.push(factory);
-  if (powerSpawn) all.push(powerSpawn);
-  if (storage) all.push(storage);
-  if (terminal) all.push(terminal);
-  if (observer) all.push(observer);
-  if (extractor) all.push(extractor);
-  if (nuker) all.push(nuker);
-
-  return all;
-}
-
 function generateRepairStructures(roomState) {
-  const { roomName } = roomState;
+  if (!TASK_CONFIG.repairStructures) return;
 
-  const candidates = collectRepairCandidates(roomState);
+  const { roomName, damagedStructures } = roomState;
 
-  for (const structure of candidates) {
+  for (const structure of damagedStructures) {
     if (structure.hits >= structure.hitsMax * REPAIR_THRESHOLD_RATIO) {
       continue;
     }
@@ -491,6 +466,73 @@ function generateRepairStructures(roomState) {
     taskManager.addTask(roomName, "repairStructures", candidate);
   }
 }
+function isDuplicateBuildTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.buildStructures) ||
+    [];
+
+  return tasks.some(task => task.targetId === candidate.targetId);
+}
+
+function generateBuildStructures(roomState) {
+  if (!TASK_CONFIG.buildStructures) return;
+
+  const { room, roomName } = roomState;
+
+  const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
+
+  for (const site of sites) {
+    const candidate = {
+      type: "build",
+      targetId: site.id,
+    };
+
+    if (isDuplicateBuildTask(roomName, candidate)) {
+      continue;
+    }
+
+    taskManager.addTask(roomName, "buildStructures", candidate);
+  }
+}
+
+function isDuplicateUpgradeTask(roomName, candidate) {
+  const tasks =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].tasks &&
+      Memory.rooms[roomName].tasks.upgradeController) ||
+    [];
+
+  return tasks.some(task => task.targetId === candidate.targetId);
+}
+
+function generateUpgradeController(roomState) {
+  if (!TASK_CONFIG.upgradeController) return;
+
+  const { controller, storage, roomName } = roomState;
+
+  if (!controller || !storage) {
+    return;
+  }
+
+  if (controller.ticksToDowngrade >= CONTROLLER.DOWNGRADE_MIN) {
+    return;
+  }
+
+  const candidate = {
+    type: "upgrade",
+    targetId: controller.id,
+  };
+
+  if (isDuplicateUpgradeTask(roomName, candidate)) {
+    return;
+  }
+
+  taskManager.addTask(roomName, "upgradeController", candidate);
+}
 
 module.exports = {
   generateFillSpawnsExtensions,
@@ -502,4 +544,6 @@ module.exports = {
   generateFillTerminalResources,
   generateFillTowers,
   generateRepairStructures,
+  generateBuildStructures,
+  generateUpgradeController,
 };

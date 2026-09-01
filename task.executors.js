@@ -1,4 +1,5 @@
 const energySource = require("energySource");
+const { STORAGE, TERMINAL_SUPPLY, CONTROLLER } = require("./constants");
 
 function withdrawPower(creep) {
   const storage = creep.room.storage;
@@ -348,6 +349,12 @@ function executeFillTerminalEnergy(creep, task) {
   }
 
   if (creep.store[RESOURCE_ENERGY] === 0) {
+    const reserveThreshold =
+      STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
+    if (source.store[RESOURCE_ENERGY] <= reserveThreshold) {
+      return "SKIP";
+    }
+
     const withdrawn = energySource.withdrawFromStorage(creep);
 
     if (!withdrawn) {
@@ -681,6 +688,138 @@ function executeRepairStructures(creep, task) {
   }
 }
 
+function isValidBuildTask(task) {
+  return !!task && task.type === "build" && !!task.targetId;
+}
+
+function executeBuildStructures(creep, task) {
+  if (!isValidBuildTask(task)) {
+    return "SKIP";
+  }
+
+  const target = Game.getObjectById(task.targetId);
+
+  if (!target) {
+    // Стройплощадка исчезла — значит либо достроена, либо снесена.
+    // В любом случае задача больше не актуальна.
+    return "DONE";
+  }
+
+  if (creep.memory.working === undefined) {
+    creep.memory.working = false;
+  }
+
+  if (!creep.memory.working && creep.store[RESOURCE_ENERGY] > 0) {
+    creep.memory.working = true;
+  } else if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  if (!creep.memory.working) {
+    const withdrawn = energySource.withdrawFromStorage(creep);
+    if (!withdrawn) {
+      delete creep.memory.working;
+      return "SKIP";
+    }
+
+    return "CONTINUE";
+  }
+
+  const result = creep.build(target);
+
+  switch (result) {
+    case OK:
+      return "CONTINUE";
+
+    case ERR_NOT_IN_RANGE:
+      creep.moveTo(target, { reusePath: 15 });
+      return "CONTINUE";
+
+    case ERR_INVALID_TARGET:
+      delete creep.memory.working;
+      return "DONE"; // стройплощадка, вероятно, уже достроена
+
+    case ERR_NOT_ENOUGH_RESOURCES:
+      delete creep.memory.working;
+      return "SKIP";
+
+    default:
+      delete creep.memory.working;
+      return "SKIP";
+  }
+}
+
+function isValidUpgradeTask(task) {
+  return !!task && task.type === "upgrade" && !!task.targetId;
+}
+
+function executeUpgradeController(creep, task) {
+  if (!isValidUpgradeTask(task)) {
+    return "SKIP";
+  }
+
+  const target = Game.getObjectById(task.targetId);
+
+  if (!target) {
+    return "SKIP";
+  }
+
+  if (creep.memory.working === undefined) {
+    creep.memory.working = false;
+  }
+
+  if (!creep.memory.working && creep.store[RESOURCE_ENERGY] > 0) {
+    creep.memory.working = true;
+  } else if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  if (!creep.memory.working) {
+    if (target.ticksToDowngrade >= CONTROLLER.DOWNGRADE_MAX) {
+      delete creep.memory.working;
+      return "DONE";
+    }
+
+    const withdrawn = energySource.withdrawFromStorage(creep);
+    if (!withdrawn) {
+      delete creep.memory.working;
+      return "SKIP";
+    }
+
+    return "CONTINUE";
+  }
+
+  if (target.ticksToDowngrade >= CONTROLLER.DOWNGRADE_MAX) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  const result = creep.upgradeController(target);
+
+  switch (result) {
+    case OK:
+      return "CONTINUE";
+
+    case ERR_NOT_IN_RANGE:
+      creep.moveTo(target, { reusePath: 15 });
+      return "CONTINUE";
+
+    case ERR_INVALID_TARGET:
+      delete creep.memory.working;
+      return "SKIP";
+
+    case ERR_NOT_ENOUGH_RESOURCES:
+      delete creep.memory.working;
+      return "SKIP";
+
+    default:
+      delete creep.memory.working;
+      return "SKIP";
+  }
+}
+
 module.exports = {
   executeFillSpawnsExtensions,
   executeFillPowerSpawnPower,
@@ -694,5 +833,8 @@ module.exports = {
     fillFactoryEnergy: executeFillFactoryEnergy,
     collectFactoryBattery: executeCollectFactoryBattery,
     fillTowers: executeFillTowers,
+    repairStructures: executeRepairStructures,
+    buildStructures: executeBuildStructures,
+    upgradeController: executeUpgradeController,
   },
 };
