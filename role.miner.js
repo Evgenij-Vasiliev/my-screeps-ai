@@ -47,7 +47,8 @@ module.exports = {
       creep.harvest(source);
     }
 
-    if (link && creep.store[RESOURCE_ENERGY] > 0) {
+    // Сливаем в линк только когда склад полон — реже вызываем transfer()
+    if (link && creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
       creep.transfer(link, RESOURCE_ENERGY);
     }
   },

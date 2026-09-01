@@ -54,7 +54,9 @@ function ensureStructureCache(room) {
   if (
     existing &&
     Array.isArray(existing.extensionIds) &&
-    Array.isArray(existing.roadIds)
+    Array.isArray(existing.roadIds) &&
+    Array.isArray(existing.wallIds) &&
+    Array.isArray(existing.rampartIds)
   ) {
     return; // кэш уже полный, ничего не делаем
   }
@@ -62,6 +64,12 @@ function ensureStructureCache(room) {
   const structures = room.find(FIND_MY_STRUCTURES);
   const roads = room.find(FIND_STRUCTURES, {
     filter: s => s.structureType === STRUCTURE_ROAD,
+  });
+  const walls = room.find(FIND_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_WALL,
+  });
+  const ramparts = room.find(FIND_STRUCTURES, {
+    filter: s => s.structureType === STRUCTURE_RAMPART,
   });
   const sources = room.find(FIND_SOURCES);
 
@@ -72,6 +80,8 @@ function ensureStructureCache(room) {
     labIds: [],
     extensionIds: [],
     roadIds: roads.map(r => r.id),
+    wallIds: walls.map(w => w.id),
+    rampartIds: ramparts.map(r => r.id),
     factoryId: null,
     powerSpawnId: null,
     observerId: null,
@@ -141,41 +151,31 @@ function runTowerLogic(roomState) {
   cpuMonitor.trackRole("towers", () => {
     if (!roomState.towers || roomState.towers.length === 0) return;
 
-    const room = roomState.room;
     const roomData = {
-      hostiles: room.find(FIND_HOSTILE_CREEPS),
+      hostiles: roomState.room.find(FIND_HOSTILE_CREEPS),
     };
 
     if (Game.time % TOWER.REPAIR_INTERVAL === 0) {
-      roomData.woundedCreep = room.find(FIND_MY_CREEPS, {
-        filter: c => c.hits < c.hitsMax,
-      })[0];
+      roomData.woundedCreep = roomState.creeps.find(c => c.hits < c.hitsMax);
 
       const wallThreshold =
-        room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
-      const wallsAndRamparts = room
-        .find(FIND_STRUCTURES, {
-          filter: s =>
-            (s.structureType === STRUCTURE_WALL ||
-              s.structureType === STRUCTURE_RAMPART) &&
-            s.hits < wallThreshold,
-        })
+        roomState.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
+
+      const wallsAndRamparts = []
+        .concat(roomState.walls)
+        .concat(roomState.ramparts)
+        .filter(s => s.hits < wallThreshold)
         .sort((a, b) => a.hits - b.hits);
 
-      // Порог поднимается один раз на комнату за тик, а не за каждую башню
       if (wallsAndRamparts.length === 0) {
-        room.memory.wallThreshold = wallThreshold + TOWER.WALL_THRESHOLD_STEP;
+        roomState.room.memory.wallThreshold =
+          wallThreshold + TOWER.WALL_THRESHOLD_STEP;
       }
       roomData.wallsAndRamparts = wallsAndRamparts;
 
-      roomData.damagedStructure = room
-        .find(FIND_STRUCTURES, {
-          filter: s =>
-            s.hits < s.hitsMax &&
-            s.structureType !== STRUCTURE_WALL &&
-            s.structureType !== STRUCTURE_RAMPART,
-        })
-        .sort((a, b) => a.hits - b.hits)[0];
+      roomData.damagedStructure = roomState.damagedStructures.sort(
+        (a, b) => a.hits - b.hits,
+      )[0];
     }
 
     for (const tower of roomState.towers) {
@@ -228,6 +228,10 @@ module.exports = {
         .map(id => Game.getObjectById(id))
         .filter(Boolean),
       roads: cache.roadIds.map(id => Game.getObjectById(id)).filter(Boolean),
+      walls: cache.wallIds.map(id => Game.getObjectById(id)).filter(Boolean),
+      ramparts: cache.rampartIds
+        .map(id => Game.getObjectById(id))
+        .filter(Boolean),
       factories: cache.factoryId
         ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
         : [],
@@ -244,6 +248,34 @@ module.exports = {
         ? [Game.getObjectById(cache.nukerId)].filter(Boolean)
         : [],
     };
+
+    const allStructuresForRepair = []
+      .concat(grouped.spawns)
+      .concat(grouped.towers)
+      .concat(grouped.extensions)
+      .concat(grouped.links)
+      .concat(grouped.labs)
+      .concat(grouped.roads);
+
+    if (grouped.factories[0]) allStructuresForRepair.push(grouped.factories[0]);
+    if (grouped.powerSpawns[0])
+      allStructuresForRepair.push(grouped.powerSpawns[0]);
+    if (cache.storageId) {
+      const s = Game.getObjectById(cache.storageId);
+      if (s) allStructuresForRepair.push(s);
+    }
+    if (cache.terminalId) {
+      const t = Game.getObjectById(cache.terminalId);
+      if (t) allStructuresForRepair.push(t);
+    }
+    if (grouped.observers[0]) allStructuresForRepair.push(grouped.observers[0]);
+    if (grouped.extractors[0])
+      allStructuresForRepair.push(grouped.extractors[0]);
+    if (grouped.nukers[0]) allStructuresForRepair.push(grouped.nukers[0]);
+
+    const damagedStructures = allStructuresForRepair.filter(
+      s => s.hits < s.hitsMax,
+    );
 
     // Источники энергии — статичны, резолвятся из кэша
     const sources = cache.sourceIds
@@ -271,6 +303,9 @@ module.exports = {
       towers: grouped.towers,
       extensions: grouped.extensions,
       roads: grouped.roads,
+      walls: grouped.walls,
+      ramparts: grouped.ramparts,
+      damagedStructures,
       creeps,
       sources,
       links: grouped.links,
@@ -331,6 +366,8 @@ module.exports = {
       taskGenerators.generateFillTerminalResources(roomState);
       taskGenerators.generateFillTowers(roomState);
       taskGenerators.generateRepairStructures(roomState);
+      taskGenerators.generateBuildStructures(roomState);
+      taskGenerators.generateUpgradeController(roomState);
     });
     runCreepLogic(roomState);
     runTowerLogic(roomState);
