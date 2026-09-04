@@ -30,9 +30,8 @@ function countRole(creeps, role) {
  * @param {Object} roomState
  */
 function run(roomState) {
-  const spawn = roomState.spawn;
-  if (!spawn || spawn.spawning) return;
-
+  const spawn = roomState.spawns.find(s => !s.spawning);
+  if (!spawn) return;
   const creeps = roomState.creeps;
 
   // if (countRole(creeps, "harvester") === 0) {

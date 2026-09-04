@@ -35,7 +35,7 @@ module.exports = {
     }
 
     if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, { reusePath: 15 });
+      creep.moveTo(storage, { reusePath: 50 });
     }
     return true;
   },
