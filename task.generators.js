@@ -306,7 +306,7 @@ function generateFillTerminalEnergy(roomState) {
     return;
   }
 
-  if (terminal.store[RESOURCE_ENERGY] >= TERMINAL_SUPPLY.ENERGY_MIN) {
+  if (terminal.store[RESOURCE_ENERGY] >= TERMINAL_SUPPLY.ENERGY_TARGET) {
     return;
   }
 
@@ -480,9 +480,11 @@ function isDuplicateBuildTask(roomName, candidate) {
 function generateBuildStructures(roomState) {
   if (!TASK_CONFIG.buildStructures) return;
 
-  const { room, roomName } = roomState;
+  const { roomName } = roomState;
 
-  const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
+  const sites = Object.values(Game.constructionSites).filter(
+    site => site.pos.roomName === roomName,
+  );
 
   for (const site of sites) {
     const candidate = {

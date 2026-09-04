@@ -1,17 +1,20 @@
+const scanner = require("scanner");
+
 function toMineralState(mineral, extractorId) {
   return {
     id: mineral.id,
     mineralType: mineral.mineralType,
     amount: mineral.mineralAmount,
-    extractor: extractorId || null,
+    extractorId: extractorId || null,
   };
 }
 
 function rebuildMineralState(room) {
   const roomName = room.name;
-  const minerals = room.find(FIND_MINERALS);
+  const structureCache = scanner.getStructureCache(room);
+  const mineralId = structureCache.mineralId;
 
-  if (minerals.length === 0) {
+  if (!mineralId) {
     if (!room.memory._mineralNoneLogged) {
       console.log(`[Mineral] ${roomName} : no mineral source`);
       room.memory._mineralNoneLogged = true;
@@ -20,7 +23,7 @@ function rebuildMineralState(room) {
     return null;
   }
 
-  const mineral = minerals[0];
+  const mineral = Game.getObjectById(mineralId);
   const structures = mineral.pos.lookFor(LOOK_STRUCTURES);
   const extractor = structures.find(
     s => s.structureType === STRUCTURE_EXTRACTOR,

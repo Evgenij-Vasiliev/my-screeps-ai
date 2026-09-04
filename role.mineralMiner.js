@@ -1,5 +1,5 @@
 const roleMineralMiner = {
-  run: function (creep) {
+  run: function (creep, roomState) {
     if (!creep.memory._started) {
       console.log(`[Mineral] ${creep.memory.homeRoom} : mineralMiner started`);
       creep.memory._started = true;
@@ -25,7 +25,7 @@ const roleMineralMiner = {
 
       const transferResult = creep.transfer(storage, resourceType);
       if (transferResult === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, { visualize: false });
+        creep.moveTo(storage, { reusePath: 50, visualize: false });
       } else if (transferResult !== OK) {
         console.log(
           `[Mineral] ${creep.name} : transfer() вернул ошибку ${transferResult}`,
@@ -34,22 +34,16 @@ const roleMineralMiner = {
       return;
     }
 
-    const minerals = creep.room.find(FIND_MINERALS);
-    if (minerals.length === 0) return;
+    if (!roomState.mineral || !roomState.mineral.id) return;
 
-    const mineral = minerals[0];
-    const extractor = mineral.pos
-      .lookFor(LOOK_STRUCTURES)
-      .find(s => s.structureType === STRUCTURE_EXTRACTOR);
-    if (!extractor) return;
+    const mineral = Game.getObjectById(roomState.mineral.id);
+    if (!mineral || !roomState.mineral.extractorId) return;
 
     const harvestResult = creep.harvest(mineral);
     if (harvestResult === ERR_NOT_IN_RANGE) {
-      creep.moveTo(mineral, { visualize: false });
+      creep.moveTo(mineral, { reusePath: 50, visualize: false });
     } else if (harvestResult !== OK) {
-      // console.log(
-      //   `[Mineral] ${creep.name} : harvest() вернул ошибку ${harvestResult}`,
-      // );
+      // console.log(...)
     }
   },
 };

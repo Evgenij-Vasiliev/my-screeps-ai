@@ -7,6 +7,7 @@
  * Уровень империи (empire.js) знает только про очистку памяти,
  * вызов Room Manager'а и глобальный рынок — вся комнатная логика здесь.
  */
+const scanner = require("scanner");
 const { getRoomRole } = require("roomRoles");
 const mineralManager = require("mineral.manager");
 const taskManager = require("task.manager");
@@ -41,95 +42,6 @@ const ROLES = {
   worker: workerRunner,
 };
 
-function ensureStructureCache(room) {
-  if (!Memory.rooms) {
-    Memory.rooms = {};
-  }
-  if (!Memory.rooms[room.name]) {
-    Memory.rooms[room.name] = {};
-  }
-
-  const existing = Memory.rooms[room.name].structureCache;
-
-  if (
-    existing &&
-    Array.isArray(existing.extensionIds) &&
-    Array.isArray(existing.roadIds) &&
-    Array.isArray(existing.wallIds) &&
-    Array.isArray(existing.rampartIds)
-  ) {
-    return; // кэш уже полный, ничего не делаем
-  }
-
-  const structures = room.find(FIND_MY_STRUCTURES);
-  const roads = room.find(FIND_STRUCTURES, {
-    filter: s => s.structureType === STRUCTURE_ROAD,
-  });
-  const walls = room.find(FIND_STRUCTURES, {
-    filter: s => s.structureType === STRUCTURE_WALL,
-  });
-  const ramparts = room.find(FIND_STRUCTURES, {
-    filter: s => s.structureType === STRUCTURE_RAMPART,
-  });
-  const sources = room.find(FIND_SOURCES);
-
-  const cache = {
-    spawnIds: [],
-    towerIds: [],
-    linkIds: [],
-    labIds: [],
-    extensionIds: [],
-    roadIds: roads.map(r => r.id),
-    wallIds: walls.map(w => w.id),
-    rampartIds: ramparts.map(r => r.id),
-    factoryId: null,
-    powerSpawnId: null,
-    observerId: null,
-    extractorId: null,
-    nukerId: null,
-    storageId: room.storage ? room.storage.id : null,
-    terminalId: room.terminal ? room.terminal.id : null,
-    sourceIds: sources.map(s => s.id),
-  };
-
-  for (const s of structures) {
-    switch (s.structureType) {
-      case STRUCTURE_SPAWN:
-        cache.spawnIds.push(s.id);
-        break;
-      case STRUCTURE_TOWER:
-        cache.towerIds.push(s.id);
-        break;
-      case STRUCTURE_LINK:
-        cache.linkIds.push(s.id);
-        break;
-      case STRUCTURE_LAB:
-        cache.labIds.push(s.id);
-        break;
-      case STRUCTURE_EXTENSION:
-        cache.extensionIds.push(s.id);
-        break;
-      case STRUCTURE_FACTORY:
-        cache.factoryId = s.id;
-        break;
-      case STRUCTURE_POWER_SPAWN:
-        cache.powerSpawnId = s.id;
-        break;
-      case STRUCTURE_OBSERVER:
-        cache.observerId = s.id;
-        break;
-      case STRUCTURE_EXTRACTOR:
-        cache.extractorId = s.id;
-        break;
-      case STRUCTURE_NUKER:
-        cache.nukerId = s.id;
-        break;
-    }
-  }
-
-  Memory.rooms[room.name].structureCache = cache;
-}
-
 function runCreepLogic(roomState) {
   for (const creep of roomState.creeps) {
     if (!creep) continue;
@@ -137,7 +49,7 @@ function runCreepLogic(roomState) {
     if (!roleModule) continue;
     cpuMonitor.trackRole(creep.memory.role, () => {
       try {
-        roleModule.run(creep);
+        roleModule.run(creep, roomState);
       } catch (e) {
         console.log(
           `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
@@ -147,13 +59,47 @@ function runCreepLogic(roomState) {
   }
 }
 
+function detectAttack(roomState) {
+  const roomName = roomState.roomName;
+  const ATTACK_DROP_THRESHOLD = 1500;
+
+  if (!Memory.rooms) Memory.rooms = {};
+  if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
+
+  const wallsAndRamparts = []
+    .concat(roomState.walls)
+    .concat(roomState.ramparts);
+
+  const currentTotalHits = wallsAndRamparts.reduce((sum, s) => sum + s.hits, 0);
+  const previousTotalHits = Memory.rooms[roomName].lastWallHits;
+
+  Memory.rooms[roomName].lastWallHits = currentTotalHits;
+
+  if (previousTotalHits === undefined) {
+    return false;
+  }
+
+  return previousTotalHits - currentTotalHits > ATTACK_DROP_THRESHOLD;
+}
+
 function runTowerLogic(roomState) {
   cpuMonitor.trackRole("towers", () => {
     if (!roomState.towers || roomState.towers.length === 0) return;
 
-    const roomData = {
-      hostiles: roomState.room.find(FIND_HOSTILE_CREEPS),
-    };
+    const roomName = roomState.roomName;
+    const wasUnderAttack =
+      Memory.rooms[roomName] && Memory.rooms[roomName].underAttack;
+    const hitsDropped = detectAttack(roomState);
+
+    const roomData = {};
+
+    if (wasUnderAttack || hitsDropped) {
+      roomData.hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
+    } else {
+      roomData.hostiles = [];
+    }
+
+    Memory.rooms[roomName].underAttack = roomData.hostiles.length > 0;
 
     if (Game.time % TOWER.REPAIR_INTERVAL === 0) {
       roomData.woundedCreep = roomState.creeps.find(c => c.hits < c.hitsMax);
@@ -161,21 +107,47 @@ function runTowerLogic(roomState) {
       const wallThreshold =
         roomState.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
 
+      // Поиск самой повреждённой стены/рампарта одним проходом, без filter+sort
+      let weakestWallOrRampart = null;
+      let foundBelowThreshold = false;
       const wallsAndRamparts = []
         .concat(roomState.walls)
-        .concat(roomState.ramparts)
-        .filter(s => s.hits < wallThreshold)
-        .sort((a, b) => a.hits - b.hits);
+        .concat(roomState.ramparts);
 
-      if (wallsAndRamparts.length === 0) {
+      for (let i = 0; i < wallsAndRamparts.length; i++) {
+        const s = wallsAndRamparts[i];
+        if (s.hits < wallThreshold) {
+          foundBelowThreshold = true;
+          if (
+            weakestWallOrRampart === null ||
+            s.hits < weakestWallOrRampart.hits
+          ) {
+            weakestWallOrRampart = s;
+          }
+        }
+      }
+
+      if (!foundBelowThreshold) {
         roomState.room.memory.wallThreshold =
           wallThreshold + TOWER.WALL_THRESHOLD_STEP;
       }
-      roomData.wallsAndRamparts = wallsAndRamparts;
+      roomData.wallsAndRamparts = weakestWallOrRampart
+        ? [weakestWallOrRampart]
+        : [];
 
-      roomData.damagedStructure = roomState.damagedStructures.sort(
-        (a, b) => a.hits - b.hits,
-      )[0];
+      // Поиск самого повреждённого здания одним проходом, без sort
+      let weakestDamagedStructure = null;
+      const damagedStructures = roomState.damagedStructures;
+      for (let i = 0; i < damagedStructures.length; i++) {
+        const s = damagedStructures[i];
+        if (
+          weakestDamagedStructure === null ||
+          s.hits < weakestDamagedStructure.hits
+        ) {
+          weakestDamagedStructure = s;
+        }
+      }
+      roomData.damagedStructure = weakestDamagedStructure;
     }
 
     for (const tower of roomState.towers) {
@@ -215,9 +187,7 @@ module.exports = {
    * @returns {Object} roomState
    */
   buildRoomState: function (room, precomputedCreeps) {
-    ensureStructureCache(room);
-
-    const cache = Memory.rooms[room.name].structureCache;
+    const cache = scanner.getStructureCache(room);
 
     const grouped = {
       spawns: cache.spawnIds.map(id => Game.getObjectById(id)).filter(Boolean),
