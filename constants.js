@@ -15,9 +15,9 @@ const TASK_TYPES = {
 const TERMINAL_SUPPLY = {
   ENERGY_MIN: 100000,
   ENERGY_TARGET: 150000,
-  MINERAL_MAX: 10000,
-  BATTERY_MAX: 10000,
-  COMPOUND_MAX: 10000,
+  MINERAL_MAX: 0,
+  BATTERY_MAX: 0,
+  COMPOUND_MAX: 0,
   STORAGE_RESERVE_MULTIPLIER: 1.3, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня терминал не забирает энергию из хранилища
 };
 
@@ -39,7 +39,7 @@ const TASK_CONFIG = {
   fillPowerSpawnPower: false,
   fillPowerSpawnEnergy: false,
   fillTerminalEnergy: true,
-  fillTerminalResources: false,
+  fillTerminalResources: true,
   fillFactoryEnergy: false,
   collectFactoryBattery: false,
   repairStructures: true,

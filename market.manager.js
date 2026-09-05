@@ -183,6 +183,8 @@ function tryBuyPower(terminal) {
 function run() {
   if (!Game.market) return;
 
+  const SELL_EXCLUDED = [RESOURCE_POWER];
+
   const terminals = getEmpireTerminals();
   let dealsCount = 0;
 
@@ -195,6 +197,7 @@ function run() {
 
       for (const resourceType in terminal.store) {
         if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+        if (SELL_EXCLUDED.includes(resourceType)) continue;
         if (getResourceGroup(resourceType) !== group) continue;
 
         const reserve = getReserve(group);
