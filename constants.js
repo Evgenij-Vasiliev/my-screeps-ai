@@ -65,6 +65,7 @@ const SPAWN_QUOTA = {
   upgrader: 0,
   worker: 2,
   mineralMiner: 1,
+  attacker: 1,
 };
 
 const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
@@ -79,6 +80,7 @@ const CREEP_BODIES = {
   repairer: { work: 3, carry: 2, move: 3 },
   worker: { work: 5, carry: 5, move: 10 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
+  attacker: { tough: 0, move: 10, heal: 0, ranged_attack: 10 },
 };
 
 const CONTROLLER = {

@@ -18,11 +18,14 @@ module.exports = {
 
     state.underAttack = hasHostiles;
 
-    const shouldCheckAttack =
-      state.underAttack || Game.time % TOWER.HOSTILE_CHECK_INTERVAL === 0;
+    if (hasHostiles) {
+      const healers = hostiles.filter(creep =>
+        creep.body.some(part => part.type === HEAL),
+      );
 
-    if (hasHostiles && shouldCheckAttack) {
-      const closestHostile = tower.pos.findClosestByRange(hostiles);
+      const closestHostile = tower.pos.findClosestByRange(
+        healers.length > 0 ? healers : hostiles,
+      );
       if (closestHostile) {
         tower.attack(closestHostile);
         return;

@@ -6,12 +6,21 @@
 
 const { PRESPAWN_THRESHOLD, CREEP_BODIES } = require("./constants");
 
-const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
+const prepareBody = ({
+  work = 0,
+  carry = 0,
+  move = 0,
+  tough = 0,
+  ranged_attack = 0,
+  heal = 0,
+} = {}) => {
   const body = [];
 
   for (let i = 0; i < tough; i++) body.push(TOUGH);
   for (let i = 0; i < work; i++) body.push(WORK);
   for (let i = 0; i < carry; i++) body.push(CARRY);
+  for (let i = 0; i < ranged_attack; i++) body.push(RANGED_ATTACK);
+  for (let i = 0; i < heal; i++) body.push(HEAL);
   for (let i = 0; i < move; i++) body.push(MOVE);
 
   return body;
@@ -102,6 +111,11 @@ const factory = {
       memory: {
         working: false,
       },
+    }),
+
+    attacker: spawn => ({
+      body: prepareBody(CREEP_BODIES.attacker),
+      memory: { targetRoom: null, homeRoom: spawn.room.name },
     }),
   },
 
