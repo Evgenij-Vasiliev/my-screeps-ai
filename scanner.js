@@ -46,6 +46,7 @@ function ensureStructureCache(room) {
     rampartIds: ramparts.map(r => r.id),
     factoryId: null,
     powerSpawnId: null,
+    invaderCoreId: null,
     observerId: null,
     extractorId: null,
     nukerId: null,
