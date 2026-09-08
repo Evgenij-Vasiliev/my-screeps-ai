@@ -1,9 +1,3 @@
-/**
- * SPAWN MANAGER (ТЗ №3)
- * Отвечает на вопрос: "Кого создать?"
- * Хранит очередь/приоритеты ролей, считает текущее количество крипов,
- * вызывает creep.factory для реального спавна.
- */
 const creepFactory = require("creep.factory");
 const {
   SPAWN_QUOTA,
@@ -11,11 +5,23 @@ const {
   PRESPAWN_THRESHOLD,
 } = require("./constants");
 
-function countRole(creeps, role) {
+function countRole(creeps, role, roomName) {
   return creeps.filter(c => {
     if (c.memory.role !== role) return false;
+
+    // Для reserver/remoteMiner считаем по "родной" комнате,
+    // а не по физическому нахождению — крип может быть далеко.
+    if (
+      role === "reserver" ||
+      role === "remoteMiner" ||
+      role === "remoteHauler"
+    ) {
+      return c.memory.homeRoom === roomName;
+    }
+
     const threshold = PRESPAWN_THRESHOLD[role];
     if (
+      role !== "reserver" &&
       threshold !== undefined &&
       c.ticksToLive !== undefined &&
       c.ticksToLive < threshold
@@ -26,20 +32,16 @@ function countRole(creeps, role) {
   }).length;
 }
 
-/**
- * @param {Object} roomState
- */
 function run(roomState) {
   const spawn = roomState.spawns.find(s => !s.spawning);
   if (!spawn) return;
   const creeps = roomState.creeps;
 
-  // if (countRole(creeps, "harvester") === 0) {
-  //   creepFactory.run(spawn, "harvester", roomState.roomName);
-  //   return;
-  // }
-
   for (const role in SPAWN_QUOTA) {
+    if (role === "reserver" && roomState.roomName !== "E35S37") continue;
+    if (role === "remoteMiner" && roomState.roomName !== "E35S37") continue;
+    if (role === "remoteHauler" && roomState.roomName !== "E35S37") continue;
+    if (role === "attacker" && roomState.roomName === "E35S37") continue;
     if (
       role === "upgrader" &&
       roomState.room.controller.ticksToDowngrade > 100000
@@ -53,7 +55,7 @@ function run(roomState) {
         continue;
     }
 
-    if (countRole(creeps, role) < SPAWN_QUOTA[role]) {
+    if (countRole(creeps, role, roomState.roomName) < SPAWN_QUOTA[role]) {
       const result = creepFactory.run(
         spawn,
         role,

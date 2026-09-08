@@ -13,6 +13,7 @@ const prepareBody = ({
   tough = 0,
   ranged_attack = 0,
   heal = 0,
+  claim = 0,
 } = {}) => {
   const body = [];
 
@@ -21,6 +22,7 @@ const prepareBody = ({
   for (let i = 0; i < carry; i++) body.push(CARRY);
   for (let i = 0; i < ranged_attack; i++) body.push(RANGED_ATTACK);
   for (let i = 0; i < heal; i++) body.push(HEAL);
+  for (let i = 0; i < claim; i++) body.push(CLAIM);
   for (let i = 0; i < move; i++) body.push(MOVE);
 
   return body;
@@ -116,6 +118,42 @@ const factory = {
     attacker: spawn => ({
       body: prepareBody(CREEP_BODIES.attacker),
       memory: { targetRoom: null, homeRoom: spawn.room.name },
+    }),
+
+    // reserver: (spawn, roleData) => ({
+    //   body: prepareBody(CREEP_BODIES.reserver),
+    //   memory: {
+    //     working: false,
+    //     memory: { working: false, targetRoom: null },
+    //     //targetRoom: roleData.targetRoom || null,
+    //   },
+    // }),
+
+    reserver: spawn => ({
+      body: prepareBody(CREEP_BODIES.reserver),
+      memory: {
+        homeRoom: spawn.room.name,
+        working: false,
+        targetRoom: null,
+      },
+    }),
+
+    remoteMiner: spawn => ({
+      body: prepareBody(CREEP_BODIES.remoteMiner),
+      memory: {
+        homeRoom: spawn.room.name,
+        working: false,
+        targetRoom: null,
+      },
+    }),
+
+    remoteHauler: spawn => ({
+      body: prepareBody(CREEP_BODIES.remoteHauler),
+      memory: {
+        homeRoom: spawn.room.name,
+        working: false,
+        targetRoom: null,
+      },
     }),
   },
 

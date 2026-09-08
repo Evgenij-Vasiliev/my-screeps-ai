@@ -1,6 +1,9 @@
 // Единый модуль констант для всей логики комнат.
 // Сюда переносим все "магические числа" по мере рефакторинга файлов.
 
+const remoteHauler = require("./remote.hauler");
+const remoteMiner = require("./remote.miner");
+
 const STORAGE = {
   ENERGY_MIN: 150000, // не опускаться ниже — резерв комнаты
 };
@@ -39,7 +42,7 @@ const TASK_CONFIG = {
   fillPowerSpawnPower: false,
   fillPowerSpawnEnergy: false,
   fillTerminalEnergy: true,
-  fillTerminalResources: true,
+  fillTerminalResources: false,
   fillFactoryEnergy: false,
   collectFactoryBattery: false,
   repairStructures: true,
@@ -53,7 +56,11 @@ const POWER_SPAWN = {
   ENERGY_MIN: 500,
 };
 
-const PRESPAWN_THRESHOLD = { miner: 100, linkWorker: 30 };
+const PRESPAWN_THRESHOLD = {
+  miner: 100,
+  remoteMiner: 150,
+  linkWorker: 30,
+};
 
 const SPAWN_QUOTA = {
   harvester: 0,
@@ -66,6 +73,9 @@ const SPAWN_QUOTA = {
   worker: 2,
   mineralMiner: 1,
   attacker: 1,
+  reserver: 2,
+  remoteMiner: 2,
+  remoteHauler: 2,
 };
 
 const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
@@ -81,6 +91,9 @@ const CREEP_BODIES = {
   worker: { work: 5, carry: 5, move: 10 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
   attacker: { tough: 0, move: 10, heal: 0, ranged_attack: 10 },
+  reserver: { claim: 2, move: 4 },
+  remoteMiner: { work: 5, carry: 1, move: 6 },
+  remoteHauler: { carry: 20, move: 20 },
 };
 
 const CONTROLLER = {
