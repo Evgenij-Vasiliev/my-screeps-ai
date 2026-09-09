@@ -78,7 +78,11 @@ const SPAWN_QUOTA = {
   remoteHauler: 2,
 };
 
-const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
+const ROOM_SPAWN_QUOTA_OVERRIDES = {
+  E35S37: { harvester: 2 },
+};
+
+const MINERAL_MIN_AMOUNT_TO_SPAWN = 500;
 
 const CREEP_BODIES = {
   miner: { work: 5, carry: 12, move: 5 },
@@ -88,7 +92,7 @@ const CREEP_BODIES = {
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
   repairer: { work: 3, carry: 2, move: 3 },
-  worker: { work: 5, carry: 5, move: 10 },
+  worker: { work: 8, carry: 8, move: 16 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
   attacker: { tough: 0, move: 10, heal: 0, ranged_attack: 10 },
   reserver: { claim: 2, move: 4 },
@@ -122,6 +126,7 @@ module.exports = {
   TASK_CONFIG,
   POWER_SPAWN,
   SPAWN_QUOTA,
+  ROOM_SPAWN_QUOTA_OVERRIDES,
   MINERAL_MIN_AMOUNT_TO_SPAWN,
   CONTROLLER,
   CACHE,

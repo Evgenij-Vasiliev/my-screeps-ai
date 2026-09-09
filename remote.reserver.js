@@ -78,14 +78,6 @@ module.exports = {
       return;
     }
 
-    // Показываем остаток резервации каждые 20 тиков
-    if (Game.time % 20 === 0) {
-      const ticks = controller.reservation
-        ? controller.reservation.ticksToEnd
-        : 0;
-      creep.say(`🔒 ${ticks}т`);
-    }
-
     // Резервируем контроллер
     const result = creep.reserveController(controller);
 

@@ -38,16 +38,21 @@ module.exports = {
     // ── 2. САМОЗАЩИТА В ПУТИ ─────────────────────────────────────────────
     // Включается только если мы ЕЩЕ НЕ в целевой комнате (на автостраде или точке сбора)
     if (creep.room.name !== targetRoom) {
-      const attacker = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS, {
-        filter: c => c.pos.getRangeTo(creep) <= 4,
-      });
+      const cache = Memory.rooms[creep.room.name];
+      const cachedIds =
+        cache && cache.defenseCache && cache.defenseCache.hostileCreepIds;
 
-      if (attacker) {
-        this.attackTarget(creep, attacker, [attacker]);
-        return;
+      if (cachedIds && cachedIds.length > 0) {
+        const attacker = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS, {
+          filter: c => c.pos.getRangeTo(creep) <= 4,
+        });
+
+        if (attacker) {
+          this.attackTarget(creep, attacker, [attacker]);
+          return;
+        }
       }
     }
-
     // ── 3. РУЧНОЕ УПРАВЛЕНИЕ ──────────────────────────────────────────────
     if (Memory.rallyOverride) {
       this.respondToAlert(creep, Memory.rallyOverride);

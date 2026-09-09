@@ -9,7 +9,7 @@ const { TERMINAL_SUPPLY } = require("./constants");
 // Продаём всё, что превышает эти же значения, которые Task System
 // использует как цель для довоза. Дублирования порогов больше нет.
 const CONFIG = {
-  ENABLE_ENERGY: true,
+  ENABLE_ENERGY: false,
   ENABLE_BATTERY: true,
   ENABLE_MINERALS: true,
   ENABLE_COMPOUNDS: true,

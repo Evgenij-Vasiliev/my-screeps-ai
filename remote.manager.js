@@ -14,66 +14,65 @@ const roleRemoteHauler = require("remote.hauler");
 
 const REMOTE_ROOMS = ["E35S38", "E36S37"];
 
+function assignTargetRoom(creeps) {
+  const usedRooms = {};
+  for (const creep of creeps) {
+    if (creep.memory.targetRoom) usedRooms[creep.memory.targetRoom] = true;
+  }
+
+  for (const creep of creeps) {
+    if (!creep.memory.targetRoom) {
+      const targetRoom = REMOTE_ROOMS.find(room => !usedRooms[room]);
+      if (targetRoom) {
+        creep.memory.targetRoom = targetRoom;
+        usedRooms[targetRoom] = true;
+      }
+    }
+  }
+}
+
 module.exports = {
   run: function () {
-    const reservers = Object.values(Game.creeps).filter(
-      creep => creep.memory.role === "reserver",
-    );
+    const creepNames = Object.keys(Game.creeps);
 
-    for (const creep of reservers) {
-      if (!creep.memory.targetRoom) {
-        const usedRooms = reservers
-          .map(c => c.memory.targetRoom)
-          .filter(Boolean);
+    if (
+      !Memory.remoteRoleCache ||
+      Memory.remoteRoleCacheCount !== creepNames.length
+    ) {
+      const reservers = [];
+      const remoteMiners = [];
+      const remoteHaulers = [];
 
-        const targetRoom = REMOTE_ROOMS.find(room => !usedRooms.includes(room));
-
-        if (targetRoom) {
-          creep.memory.targetRoom = targetRoom;
-        }
+      for (const name of creepNames) {
+        const role = Game.creeps[name].memory.role;
+        if (role === "reserver") reservers.push(name);
+        else if (role === "remoteMiner") remoteMiners.push(name);
+        else if (role === "remoteHauler") remoteHaulers.push(name);
       }
 
-      roleReserver.run(creep);
+      Memory.remoteRoleCache = { reservers, remoteMiners, remoteHaulers };
+      Memory.remoteRoleCacheCount = creepNames.length;
     }
 
-    const remoteMiners = Object.values(Game.creeps).filter(
-      creep => creep.memory.role === "remoteMiner",
-    );
+    const cache = Memory.remoteRoleCache;
 
-    for (const creep of remoteMiners) {
-      if (!creep.memory.targetRoom) {
-        const usedRooms = remoteMiners
-          .map(c => c.memory.targetRoom)
-          .filter(Boolean);
+    const reservers = cache.reservers
+      .map(name => Game.creeps[name])
+      .filter(Boolean);
+    const remoteMiners = cache.remoteMiners
+      .map(name => Game.creeps[name])
+      .filter(Boolean);
+    const remoteHaulers = cache.remoteHaulers
+      .map(name => Game.creeps[name])
+      .filter(Boolean);
 
-        const targetRoom = REMOTE_ROOMS.find(room => !usedRooms.includes(room));
+    assignTargetRoom(reservers);
+    for (const creep of reservers) roleReserver.run(creep);
 
-        if (targetRoom) {
-          creep.memory.targetRoom = targetRoom;
-        }
-      }
+    assignTargetRoom(remoteMiners);
+    for (const creep of remoteMiners) roleRemoteMiner.run(creep);
 
-      roleRemoteMiner.run(creep);
-    }
-
-    const remoteHaulers = Object.values(Game.creeps).filter(
-      creep => creep.memory.role === "remoteHauler",
-    );
-
-    for (const creep of remoteHaulers) {
-      if (!creep.memory.targetRoom) {
-        const usedRooms = remoteHaulers
-          .map(c => c.memory.targetRoom)
-          .filter(Boolean);
-
-        const targetRoom = REMOTE_ROOMS.find(room => !usedRooms.includes(room));
-
-        if (targetRoom) {
-          creep.memory.targetRoom = targetRoom;
-        }
-      }
-
-      roleRemoteHauler.run(creep);
-    }
+    assignTargetRoom(remoteHaulers);
+    for (const creep of remoteHaulers) roleRemoteHauler.run(creep);
   },
 };

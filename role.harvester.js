@@ -32,15 +32,29 @@ module.exports = {
       }
 
       let source = null;
-      let minRange = Infinity;
-      for (let i = 0; i < roomState.sources.length; i++) {
-        const s = roomState.sources[i];
-        if (s.energy > 0) {
-          const range = creep.pos.getRangeTo(s);
-          if (range < minRange) {
-            minRange = range;
-            source = s;
+
+      if (creep.memory.sourceId) {
+        source = Game.getObjectById(creep.memory.sourceId);
+        if (!source || source.energy === 0) {
+          source = null;
+          delete creep.memory.sourceId;
+        }
+      }
+
+      if (!source) {
+        let minRange = Infinity;
+        for (let i = 0; i < roomState.sources.length; i++) {
+          const s = roomState.sources[i];
+          if (s.energy > 0) {
+            const range = creep.pos.getRangeTo(s);
+            if (range < minRange) {
+              minRange = range;
+              source = s;
+            }
           }
+        }
+        if (source) {
+          creep.memory.sourceId = source.id;
         }
       }
 
@@ -49,28 +63,24 @@ module.exports = {
           creep.moveTo(source, { reusePath: 15 });
         }
       }
-
       return;
     }
 
     let target = null;
-    let minRange = Infinity;
 
-    for (let i = 0; i < roomState.extensions.length; i++) {
-      const s = roomState.extensions[i];
-      if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-        const range = creep.pos.getRangeTo(s);
-        if (range < minRange) {
-          minRange = range;
-          target = s;
-        }
+    if (creep.memory.targetId) {
+      target = Game.getObjectById(creep.memory.targetId);
+      if (!target || target.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+        target = null;
+        delete creep.memory.targetId;
       }
     }
 
     if (!target) {
-      minRange = Infinity;
-      for (let i = 0; i < roomState.spawns.length; i++) {
-        const s = roomState.spawns[i];
+      let minRange = Infinity;
+
+      for (let i = 0; i < roomState.extensions.length; i++) {
+        const s = roomState.extensions[i];
         if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
           const range = creep.pos.getRangeTo(s);
           if (range < minRange) {
@@ -78,6 +88,24 @@ module.exports = {
             target = s;
           }
         }
+      }
+
+      if (!target) {
+        minRange = Infinity;
+        for (let i = 0; i < roomState.spawns.length; i++) {
+          const s = roomState.spawns[i];
+          if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            const range = creep.pos.getRangeTo(s);
+            if (range < minRange) {
+              minRange = range;
+              target = s;
+            }
+          }
+        }
+      }
+
+      if (target) {
+        creep.memory.targetId = target.id;
       }
     }
 

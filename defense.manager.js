@@ -39,18 +39,23 @@ module.exports = {
       return aRisk - bRisk;
     });
 
+    let threatFound = false;
+
     for (const room of sorted) {
       // Ищем опасных врагов (с деталями атаки или лечения)
       const cache = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
 
       if (!cache.defenseCache) cache.defenseCache = {};
-      // Обновляем Core только раз в 25 тиков
+      // Обновляем Core и список вражеских крипов раз в 25 тиков
       if (Game.time % 25 === 0) {
         const core = room.find(FIND_HOSTILE_STRUCTURES, {
           filter: s => s.structureType === STRUCTURE_INVADER_CORE,
         });
 
         cache.defenseCache.invaderCoreId = core.length ? core[0].id : null;
+
+        const hostileCreeps = room.find(FIND_HOSTILE_CREEPS);
+        cache.defenseCache.hostileCreepIds = hostileCreeps.map(c => c.id);
       }
       const hostileCreepIds =
         cache &&
@@ -74,6 +79,7 @@ module.exports = {
 
       if (hostiles.length > 0) {
         Memory.attackAlert = { room: room.name, time: Game.time };
+        threatFound = true;
         break;
       }
 
@@ -87,19 +93,31 @@ module.exports = {
 
       if (invaderCore) {
         Memory.attackAlert = { room: room.name, time: Game.time };
+        threatFound = true;
         break;
       }
     }
 
-    for (const name in Game.creeps) {
+    const creepNames = Object.keys(Game.creeps);
+    if (
+      !Memory.attackerNamesCache ||
+      Memory.attackerNamesCacheCount !== creepNames.length
+    ) {
+      Memory.attackerNamesCache = creepNames.filter(
+        name => Game.creeps[name].memory.role === "attacker",
+      );
+      Memory.attackerNamesCacheCount = creepNames.length;
+    }
+
+    for (const name of Memory.attackerNamesCache) {
       const creep = Game.creeps[name];
-      if (creep.memory.role === "attacker") {
+      if (creep) {
         attacker.run(creep);
       }
     }
 
-    // Если угроз нигде нет — снимаем тревогу
-    if (Memory.attackAlert) {
+    // Если угроз нигде нет в этом тике — снимаем тревогу
+    if (!threatFound && Memory.attackAlert) {
       delete Memory.attackAlert;
     }
   },

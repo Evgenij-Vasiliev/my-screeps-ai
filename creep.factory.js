@@ -47,7 +47,7 @@ const factory = {
             c.memory.spot &&
             c.memory.spot.x === spot.x &&
             c.memory.spot.y === spot.y &&
-            c.ticksToLive > threshold,
+            (c.spawning || c.ticksToLive > threshold),
         );
 
         if (!taken) {
@@ -101,9 +101,10 @@ const factory = {
       memory: {},
     }),
 
-    worker: () => ({
+    worker: spawn => ({
       body: prepareBody(CREEP_BODIES.worker),
       memory: {
+        homeRoom: spawn.room.name,
         working: false,
       },
     }),

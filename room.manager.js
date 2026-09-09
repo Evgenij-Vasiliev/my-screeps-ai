@@ -16,6 +16,7 @@ const spawnManager = require("spawn.manager");
 const factoryManager = require("factory.manager");
 const powerSpawnManager = require("powerSpawn.manager");
 const linkManager = require("linkManager");
+const labManager = require("lab.manager");
 const roleTower = require("role.tower");
 
 const roleHarvester = require("role.harvester");
@@ -326,6 +327,7 @@ module.exports = {
    */
   runRoom: function (roomState) {
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
+    cpuMonitor.trackRole("labManager", () => labManager.run(roomState.room));
     cpuMonitor.trackRole("taskManager", () => {
       taskGenerators.generateFillSpawnsExtensions(roomState);
       taskGenerators.generateFillPowerSpawnPower(roomState);
