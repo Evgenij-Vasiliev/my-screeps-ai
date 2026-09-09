@@ -1,6 +1,7 @@
 const creepFactory = require("creep.factory");
 const {
   SPAWN_QUOTA,
+  ROOM_SPAWN_QUOTA_OVERRIDES,
   MINERAL_MIN_AMOUNT_TO_SPAWN,
   PRESPAWN_THRESHOLD,
 } = require("./constants");
@@ -55,7 +56,13 @@ function run(roomState) {
         continue;
     }
 
-    if (countRole(creeps, role, roomState.roomName) < SPAWN_QUOTA[role]) {
+    const override = ROOM_SPAWN_QUOTA_OVERRIDES[roomState.roomName];
+    const quota =
+      override && override[role] !== undefined
+        ? override[role]
+        : SPAWN_QUOTA[role];
+
+    if (countRole(creeps, role, roomState.roomName) < quota) {
       const result = creepFactory.run(
         spawn,
         role,

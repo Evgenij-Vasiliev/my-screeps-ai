@@ -100,11 +100,32 @@ module.exports = {
       }
     } else {
       // === РЕЖИМ СБОРА: берём из контейнера в удалённой комнате ===
-      let container = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-        filter: s =>
-          s.structureType === STRUCTURE_CONTAINER &&
-          s.store[RESOURCE_ENERGY] > 0,
-      });
+      let container = null;
+
+      if (creep.memory.containerId) {
+        container = Game.getObjectById(creep.memory.containerId);
+
+        if (
+          !container ||
+          container.structureType !== STRUCTURE_CONTAINER ||
+          container.room.name !== targetRoom
+        ) {
+          delete creep.memory.containerId;
+          container = null;
+        }
+      }
+
+      if (!container || container.store[RESOURCE_ENERGY] <= 0) {
+        container = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+          filter: s =>
+            s.structureType === STRUCTURE_CONTAINER &&
+            s.store[RESOURCE_ENERGY] > 0,
+        });
+
+        if (container) {
+          creep.memory.containerId = container.id;
+        }
+      }
 
       if (container) {
         if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
@@ -112,16 +133,43 @@ module.exports = {
         }
       } else {
         // Контейнер пуст — подбираем выпавшую энергию
-        let dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-          filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 20,
-        });
+        let dropped = null;
+
+        if (creep.memory.droppedId) {
+          dropped = Game.getObjectById(creep.memory.droppedId);
+          if (!dropped || dropped.amount <= 20) {
+            dropped = null;
+            delete creep.memory.droppedId;
+          }
+        }
+
+        if (!dropped) {
+          dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
+            filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 20,
+          });
+          if (dropped) {
+            creep.memory.droppedId = dropped.id;
+          }
+        }
+
         if (dropped) {
           if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) {
             creep.moveTo(dropped, { reusePath: 15, maxRooms: 1 });
           }
         } else {
           // Ждём у источника
-          let source = creep.pos.findClosestByRange(FIND_SOURCES);
+          let source = null;
+
+          if (creep.memory.waitSourceId) {
+            source = Game.getObjectById(creep.memory.waitSourceId);
+            if (!source) delete creep.memory.waitSourceId;
+          }
+
+          if (!source) {
+            source = creep.pos.findClosestByRange(FIND_SOURCES);
+            if (source) creep.memory.waitSourceId = source.id;
+          }
+
           if (source && creep.pos.getRangeTo(source) > 2) {
             creep.moveTo(source, { reusePath: 15, maxRooms: 1 });
           }

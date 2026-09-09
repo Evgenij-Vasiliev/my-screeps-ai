@@ -53,6 +53,10 @@ function ensureStructureCache(room) {
     storageId: room.storage ? room.storage.id : null,
     terminalId: room.terminal ? room.terminal.id : null,
     sourceIds: sources.map(s => s.id),
+    sourcePositions: sources.map(s => ({
+      x: s.pos.x,
+      y: s.pos.y,
+    })),
     mineralId: minerals[0] ? minerals[0].id : null,
   };
 
