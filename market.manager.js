@@ -22,6 +22,14 @@ const CONFIG = {
   POWER_MAX_PRICE_RATIO: 1.2,
 };
 
+const ROOM_RESOURCE_NEEDS = {
+  E35S37: { X: 0 },
+  E35S39: { O: 0 },
+  E36S38: { O: 0 },
+  E37S38: { O: 0 },
+  E37S37: { O: 0 },
+};
+
 const BASE_MINERALS = [
   RESOURCE_HYDROGEN,
   RESOURCE_OXYGEN,
@@ -179,6 +187,42 @@ function tryBuyPower(terminal) {
   const result = Game.market.deal(order.id, amount, terminal.room.name);
   return result === OK;
 }
+function tryBuyRoomNeeds(room, terminal) {
+  const needs = ROOM_RESOURCE_NEEDS[room.name];
+
+  if (!needs) return false;
+
+  for (const resourceType in needs) {
+    const target = needs[resourceType];
+    const current = terminal.store[resourceType] || 0;
+
+    if (current >= target) continue;
+
+    const needed = target - current;
+
+    const orders = findAffordableBuyOrders(
+      resourceType,
+      CONFIG.ROOM_NEEDS_MAX_PRICE_RATIO || 1.2,
+    );
+
+    for (const order of orders) {
+      const amount = Math.min(needed, order.amount);
+      const cost = Game.market.calcTransactionCost(
+        amount,
+        room.name,
+        order.roomName,
+      );
+
+      if (terminal.store[RESOURCE_ENERGY] < cost) continue;
+
+      const result = Game.market.deal(order.id, amount, room.name);
+
+      if (result === OK) return true;
+    }
+  }
+
+  return false;
+}
 
 function run() {
   if (!Game.market) return;
@@ -216,6 +260,26 @@ function run() {
       if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
 
       if (tryBuyPower(terminal)) {
+        dealsCount++;
+      }
+    }
+  }
+
+  if (CONFIG.ENABLE_POWER_BUY) {
+    for (const terminal of terminals) {
+      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+
+      if (tryBuyPower(terminal)) {
+        dealsCount++;
+      }
+    }
+  }
+
+  if (Object.keys(ROOM_RESOURCE_NEEDS).length > 0) {
+    for (const terminal of terminals) {
+      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+
+      if (tryBuyRoomNeeds(terminal.room, terminal)) {
         dealsCount++;
       }
     }
