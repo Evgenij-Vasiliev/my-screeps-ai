@@ -28,6 +28,7 @@ const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
 const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
+const roleLabWorker = require("lab.worker");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER } = require("./constants");
 
@@ -41,6 +42,7 @@ const ROLES = {
   linkWorker: roleLinkWorker,
   mineralMiner: roleMineralMiner,
   worker: workerRunner,
+  labWorker: roleLabWorker,
 };
 
 function runCreepLogic(roomState) {

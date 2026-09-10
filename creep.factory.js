@@ -116,6 +116,13 @@ const factory = {
       },
     }),
 
+    labWorker: spawn => ({
+      body: prepareBody(CREEP_BODIES.labWorker),
+      memory: {
+        homeRoom: spawn.room.name,
+      },
+    }),
+
     attacker: spawn => ({
       body: prepareBody(CREEP_BODIES.attacker),
       memory: { targetRoom: null, homeRoom: spawn.room.name },
