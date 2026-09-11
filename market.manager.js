@@ -1,290 +1,179 @@
 /**
- * MARKET MANAGER (ТЗ №6 v1.0)
- * Автоматическая продажа избыточных ресурсов через Market.
+ * ===================================================
+ * MARKET.MANAGER.JS — Менеджер рынка
+ * ===================================================
+ * Исполнитель сделок купли/продажи по спискам ресурсов
+ * из constants.js (MARKET.BUY_RESOURCES / MARKET.SELL_RESOURCES).
+ * Ничего не решает сверх этих списков — просто продаёт/покупает
+ * весь доступный/лучший объём по лучшей цене на рынке.
+ * ===================================================
  */
 
-const { TERMINAL_SUPPLY } = require("./constants");
-
-// Единый источник порогов терминала — TERMINAL_SUPPLY из constants.js.
-// Продаём всё, что превышает эти же значения, которые Task System
-// использует как цель для довоза. Дублирования порогов больше нет.
-const CONFIG = {
-  ENABLE_ENERGY: false,
-  ENABLE_BATTERY: true,
-  ENABLE_MINERALS: true,
-  ENABLE_COMPOUNDS: true,
-
-  MAX_DEALS_PER_TICK: 3,
-  MIN_PRICE_RATIO: 0.8,
-
-  ENABLE_POWER_BUY: false,
-  POWER_TARGET: 100000,
-  POWER_MAX_PRICE_RATIO: 1.2,
-};
-
-const ROOM_RESOURCE_NEEDS = {
-  E35S37: { X: 0 },
-  E35S39: { O: 0 },
-  E36S38: { O: 0 },
-  E37S38: { O: 0 },
-  E37S37: { O: 0 },
-};
-
-const BASE_MINERALS = [
-  RESOURCE_HYDROGEN,
-  RESOURCE_OXYGEN,
-  RESOURCE_UTRIUM,
-  RESOURCE_LEMERGIUM,
-  RESOURCE_KEANIUM,
-  RESOURCE_ZYNTHIUM,
-  RESOURCE_CATALYST,
-];
-
-const COMPOUNDS = RESOURCES_ALL.filter(
-  r =>
-    r !== RESOURCE_ENERGY &&
-    r !== RESOURCE_BATTERY &&
-    !BASE_MINERALS.includes(r),
-);
-
-function findAffordableBuyOrders(resourceType, maxPriceRatio = 1.2) {
-  const orders = Game.market.getAllOrders({
-    type: ORDER_SELL,
-    resourceType,
-  });
-
-  if (orders.length === 0) return [];
-
-  const minPrice = Math.min(...orders.map(o => o.price));
-  const maxAcceptable = minPrice * maxPriceRatio;
-
-  return orders
-    .filter(o => o.price <= maxAcceptable)
-    .sort((a, b) => a.price - b.price);
-}
+const { MARKET } = require("./constants");
 
 /**
- * Определяет группу ресурса (раздел 9 ТЗ №6): ENERGY / BATTERY /
- * MINERALS / COMPOUNDS — без жёсткой привязки к конкретным названиям.
- * @param {string} resourceType
- */
-function getResourceGroup(resourceType) {
-  if (resourceType === RESOURCE_ENERGY) return "ENERGY";
-  if (resourceType === RESOURCE_BATTERY) return "BATTERY";
-  if (BASE_MINERALS.includes(resourceType)) return "MINERALS";
-  return "COMPOUNDS";
-}
-
-function isGroupEnabled(group) {
-  return CONFIG[`ENABLE_${group}`];
-}
-
-function getReserve(group) {
-  const map = {
-    ENERGY: TERMINAL_SUPPLY.ENERGY_MIN,
-    BATTERY: TERMINAL_SUPPLY.BATTERY_MAX,
-    MINERALS: TERMINAL_SUPPLY.MINERAL_MAX,
-    COMPOUNDS: TERMINAL_SUPPLY.COMPOUND_MAX,
-  };
-  return map[group];
-}
-
-/**
- * Собирает все терминалы Империи (раздел 10 ТЗ №6).
+ * Возвращает терминалы всех собственных комнат.
  */
 function getEmpireTerminals() {
-  return Object.values(Game.rooms)
-    .filter(room => room.terminal && room.terminal.my)
-    .map(room => room.terminal);
+  const terminals = [];
+  for (const roomName in Game.rooms) {
+    const room = Game.rooms[roomName];
+    if (!room.controller || !room.controller.my) continue;
+    if (!room.terminal) continue;
+    terminals.push(room.terminal);
+  }
+  return terminals;
 }
 
 /**
- * Ищет лучший подходящий BUY Order для ресурса.
- * Правило (решение Координатора): не продавать дешевле 80%
- * от максимальной цены среди всех доступных BUY Order.
- * @param {string} resourceType
+ * Ищет лучший ORDER_BUY (покупателя) для продажи ресурса.
+ * Берём заказ с самой высокой ценой.
  */
-function findBestOrder(resourceType) {
+function findBestBuyOrder(resourceType) {
   const orders = Game.market.getAllOrders({
     type: ORDER_BUY,
     resourceType,
   });
+  if (!orders || orders.length === 0) return null;
 
-  if (orders.length === 0) return null;
-
-  const maxPrice = Math.max(...orders.map(o => o.price));
-  const minAcceptable = maxPrice * CONFIG.MIN_PRICE_RATIO;
-
-  const goodOrders = orders.filter(o => o.price >= minAcceptable);
-  if (goodOrders.length === 0) return null;
-
-  goodOrders.sort((a, b) => b.price - a.price);
-  return goodOrders[0];
+  return orders.reduce(
+    (best, o) => (o.price > best.price ? o : best),
+    orders[0],
+  );
 }
 
 /**
- * Основной цикл Market Manager. Вызывается один раз за тик для всей
- * Империи (не для каждой комнаты по отдельности — раздел 6 ТЗ №6).
+ * Ищет лучший ORDER_SELL (продавца) для закупки ресурса.
+ * Берём заказ с самой низкой ценой.
  */
-// Порядок обхода групп (ENERGY первой). Без явного порядка перебор
-// ресурсов в terminal.store идёт в произвольном/стабильном порядке
-// ключей объекта, и лимит MAX_DEALS_PER_TICK может каждый тик
-// расходоваться на одну и ту же группу, не давая другим шанса.
-const GROUP_ORDER = ["ENERGY", "BATTERY", "MINERALS", "COMPOUNDS"];
+function findBestSellOrder(resourceType) {
+  const orders = Game.market.getAllOrders({
+    type: ORDER_SELL,
+    resourceType,
+  });
+  if (!orders || orders.length === 0) return null;
 
-function trySellResource(terminal, resourceType, surplus) {
-  const order = findBestOrder(resourceType);
+  return orders.reduce(
+    (best, o) => (o.price < best.price ? o : best),
+    orders[0],
+  );
+}
+
+/**
+ * Продаёт весь доступный в терминале объём ресурса
+ * лучшему покупателю на рынке (одна сделка).
+ */
+function trySellResource(terminal, resourceType) {
+  if (terminal.cooldown > 0) return false;
+
+  const available = terminal.store[resourceType] || 0;
+  if (available <= 0) return false;
+
+  const order = findBestBuyOrder(resourceType);
   if (!order) return false;
 
-  const amount = Math.min(surplus, order.amount);
-  if (amount <= 0) return false;
-
-  const energyForDeal = Game.market.calcTransactionCost(
-    amount,
-    terminal.room.name,
-    order.roomName,
-  );
-  if (terminal.store[RESOURCE_ENERGY] < energyForDeal) return false;
-
-  const result = Game.market.deal(order.id, amount, terminal.room.name);
-  return result === OK;
-}
-
-function tryBuyPower(terminal) {
-  const currentPower = terminal.store[RESOURCE_POWER] || 0;
-
-  if (currentPower >= CONFIG.POWER_TARGET) {
-    return false;
-  }
-
-  const needed = CONFIG.POWER_TARGET - currentPower;
-
-  const orders = findAffordableBuyOrders(
-    RESOURCE_POWER,
-    CONFIG.POWER_MAX_PRICE_RATIO,
-  );
-  if (orders.length === 0) {
-    return false;
-  }
-
-  const order = orders[0];
-  const amount = Math.min(needed, order.amount);
-
-  if (amount <= 0) {
-    return false;
-  }
-
-  const energyForDeal = Game.market.calcTransactionCost(
+  const amount = Math.min(available, order.amount);
+  const txCost = Game.market.calcTransactionCost(
     amount,
     terminal.room.name,
     order.roomName,
   );
 
-  if (terminal.store[RESOURCE_ENERGY] < energyForDeal) {
-    return false;
-  }
-
-  const result = Game.market.deal(order.id, amount, terminal.room.name);
-  return result === OK;
-}
-function tryBuyRoomNeeds(room, terminal) {
-  const needs = ROOM_RESOURCE_NEEDS[room.name];
-
-  if (!needs) return false;
-
-  for (const resourceType in needs) {
-    const target = needs[resourceType];
-    const current = terminal.store[resourceType] || 0;
-
-    if (current >= target) continue;
-
-    const needed = target - current;
-
-    const orders = findAffordableBuyOrders(
-      resourceType,
-      CONFIG.ROOM_NEEDS_MAX_PRICE_RATIO || 1.2,
+  if (terminal.store[RESOURCE_ENERGY] < txCost) {
+    console.log(
+      `[Market] ⚡ ${terminal.room.name}: мало энергии для продажи ${resourceType}` +
+        ` (нужно: ${txCost}, есть: ${terminal.store[RESOURCE_ENERGY]})`,
     );
-
-    for (const order of orders) {
-      const amount = Math.min(needed, order.amount);
-      const cost = Game.market.calcTransactionCost(
-        amount,
-        room.name,
-        order.roomName,
-      );
-
-      if (terminal.store[RESOURCE_ENERGY] < cost) continue;
-
-      const result = Game.market.deal(order.id, amount, room.name);
-
-      if (result === OK) return true;
-    }
+    return false;
   }
 
+  const result = Game.market.deal(order.id, amount, terminal.room.name);
+
+  if (result === OK) {
+    console.log(
+      `[Market] ✅ ${terminal.room.name}: продано ${amount} ${resourceType}` +
+        ` по ${order.price} = ${Math.floor(amount * order.price)} кредитов`,
+    );
+    return true;
+  }
+
+  console.log(`[Market] ❌ Ошибка продажи ${resourceType}: ${result}`);
   return false;
 }
 
+/**
+ * Покупает весь объём лучшего предложения ресурса на рынке
+ * в терминал переданной комнаты (одна сделка).
+ */
+function tryBuyResource(terminal, resourceType) {
+  if (terminal.cooldown > 0) return false;
+
+  const order = findBestSellOrder(resourceType);
+  if (!order) return false;
+
+  const amount = order.amount;
+  const txCost = Game.market.calcTransactionCost(
+    amount,
+    terminal.room.name,
+    order.roomName,
+  );
+
+  if (terminal.store[RESOURCE_ENERGY] < txCost) {
+    console.log(
+      `[Market] ⚡ ${terminal.room.name}: мало энергии для закупки ${resourceType}` +
+        ` (нужно: ${txCost}, есть: ${terminal.store[RESOURCE_ENERGY]})`,
+    );
+    return false;
+  }
+
+  const result = Game.market.deal(order.id, amount, terminal.room.name);
+
+  if (result === OK) {
+    console.log(
+      `[Market] ✅ ${terminal.room.name}: куплено ${amount} ${resourceType}` +
+        ` по ${order.price} = ${Math.floor(amount * order.price)} кредитов`,
+    );
+    return true;
+  }
+
+  console.log(`[Market] ❌ Ошибка закупки ${resourceType}: ${result}`);
+  return false;
+}
+
+/**
+ * Точка входа. Вызывается один раз за тик из room.manager.js/empire-уровня.
+ */
 function run() {
   if (!Game.market) return;
 
-  const SELL_EXCLUDED = [RESOURCE_POWER];
-
   const terminals = getEmpireTerminals();
+  if (terminals.length === 0) return;
+
   let dealsCount = 0;
 
-  for (const group of GROUP_ORDER) {
-    if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
-    if (!isGroupEnabled(group)) continue;
+  for (const resourceType of MARKET.SELL_RESOURCES) {
+    if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
     for (const terminal of terminals) {
-      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+      if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
-      for (const resourceType in terminal.store) {
-        if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
-        if (SELL_EXCLUDED.includes(resourceType)) continue;
-        if (getResourceGroup(resourceType) !== group) continue;
-
-        const reserve = getReserve(group);
-        const surplus = terminal.store[resourceType] - reserve;
-        if (surplus <= 0) continue;
-
-        if (trySellResource(terminal, resourceType, surplus)) {
-          dealsCount++;
-        }
-      }
-    }
-  }
-
-  if (CONFIG.ENABLE_POWER_BUY) {
-    for (const terminal of terminals) {
-      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
-
-      if (tryBuyPower(terminal)) {
+      if (trySellResource(terminal, resourceType)) {
         dealsCount++;
       }
     }
   }
 
-  if (CONFIG.ENABLE_POWER_BUY) {
+  for (const resourceType of MARKET.BUY_RESOURCES) {
+    if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
+
     for (const terminal of terminals) {
-      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+      if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
-      if (tryBuyPower(terminal)) {
-        dealsCount++;
-      }
-    }
-  }
-
-  if (Object.keys(ROOM_RESOURCE_NEEDS).length > 0) {
-    for (const terminal of terminals) {
-      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
-
-      if (tryBuyRoomNeeds(terminal.room, terminal)) {
+      if (tryBuyResource(terminal, resourceType)) {
         dealsCount++;
       }
     }
   }
 }
 
-module.exports.CONFIG = CONFIG;
-module.exports.run = run;
+module.exports = { run };
