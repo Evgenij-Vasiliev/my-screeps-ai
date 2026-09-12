@@ -348,28 +348,33 @@ function isDuplicateFillTerminalResourceTask(roomName, candidate) {
 }
 
 function generateFillTerminalResources(roomState) {
-  if (!TASK_CONFIG.fillTerminalResources) return;
   const { storage, terminal, roomName } = roomState;
+  if (!storage || !terminal) return;
 
-  if (!storage || !terminal) {
-    return;
-  }
+  const exports =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].terminalExports) ||
+    {};
+  const exportTypes = Object.keys(exports);
+  if (!TASK_CONFIG.fillTerminalResources && exportTypes.length === 0) return;
 
   const RESOURCE_TERMINAL_MAX = 10000;
+  const resourceTypes = TASK_CONFIG.fillTerminalResources
+    ? Object.keys(storage.store)
+    : exportTypes;
 
-  for (const resourceType in storage.store) {
+  for (const resourceType of resourceTypes) {
     if (resourceType === RESOURCE_ENERGY || resourceType === RESOURCE_POWER) {
       continue;
     }
 
-    if (storage.store[resourceType] === 0) {
-      continue;
-    }
+    if ((storage.store[resourceType] || 0) === 0) continue;
 
     const currentInTerminal = terminal.store[resourceType] || 0;
-    if (currentInTerminal >= RESOURCE_TERMINAL_MAX) {
-      continue;
-    }
+    const exportNeed = exports[resourceType] || 0;
+    const cap = exportNeed || RESOURCE_TERMINAL_MAX;
+    if (currentInTerminal >= cap) continue;
 
     const candidate = {
       type: "transfer",

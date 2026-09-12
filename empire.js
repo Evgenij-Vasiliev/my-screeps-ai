@@ -34,7 +34,7 @@ module.exports.run = function () {
   cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
 
   // 6. TerminalNetwork — межкомнатная балансировка ресурсов
-  // cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+  cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
 
   // 7. Рынок империального уровня
   cpuMonitor.trackRole("marketManager", () => marketManager.run());

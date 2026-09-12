@@ -34,6 +34,21 @@ const TERMINAL_SUPPLY = {
   STORAGE_RESERVE_MULTIPLIER: 1.3, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня терминал не забирает энергию из хранилища
 };
 
+// ── TERMINAL_NETWORK ─────────────────────────────────────────────────────
+// Межкомнатная балансировка через Terminal.send().
+// Энергию считаем по Storage (им живёт экономика), прочие ресурсы —
+// по сумме Storage + Terminal (добыть можно только то, что уже в терминале).
+const TERMINAL_NETWORK = {
+  MIN_SEND_AMOUNT: 1000, // меньше не шлём — комиссия не окупается
+  RESOURCE_SURPLUS_ABOVE: 10000, // суммарный запас ресурса выше этого — донор
+  RESOURCE_DEFICIT_BELOW: 2000, // суммарный запас ниже этого — получатель
+  RESOURCE_TARGET: 5000, // до какого суммарного уровня докидываем получателю
+  LAB_REQUEST_BELOW: 3000, // ниже этого локального запаса реагента комната запрашивает сеть
+  LAB_KEEP: 3000, // донор, у которого та же реакция, столько оставляет себе
+  LAB_SHIP_AMOUNT: 3000, // объём одной поставки реагента
+  STATUS_INTERVAL: 50, // раз в сколько тиков писать статус, если send не было
+};
+
 // ── FACTORY ──────────────────────────────────────────────────────────────
 // Порог, ниже которого фабрика не имеет права забирать энергию из Storage.
 const FACTORY = {
@@ -56,12 +71,12 @@ const TOWER = {
 // true/false — вкл/выкл конкретной категории задач.
 const TASK_CONFIG = {
   fillSpawnsExtensions: true, // подвоз энергии в спавны/расширения
-  fillPowerSpawnPower: false, // подвоз POWER в PowerSpawn
-  fillPowerSpawnEnergy: false, // подвоз энергии в PowerSpawn
+  fillPowerSpawnPower: true, // подвоз POWER в PowerSpawn
+  fillPowerSpawnEnergy: true, // подвоз энергии в PowerSpawn
   fillTerminalEnergy: true, // подвоз энергии в терминал
-  fillTerminalResources: false, // подвоз прочих ресурсов в терминал
-  fillFactoryEnergy: false, // подвоз энергии в фабрику
-  collectFactoryBattery: false, // забор battery из фабрики
+  fillTerminalResources: true, // подвоз прочих ресурсов в терминал
+  fillFactoryEnergy: true, // подвоз энергии в фабрику
+  collectFactoryBattery: true, // забор battery из фабрики
   repairStructures: true, // ремонт повреждённых структур
   buildStructures: true, // стройка по construction site
   fillTowers: true, // подвоз энергии в башни
@@ -109,7 +124,7 @@ const SPAWN_QUOTA = {
 // Точечные переопределения SPAWN_QUOTA для конкретных комнат.
 // Если роль для комнаты не указана здесь — берётся значение из SPAWN_QUOTA.
 const ROOM_SPAWN_QUOTA_OVERRIDES = {
-  E35S37: { harvester: 2 },
+  E35S37: { harvester: 1 },
 };
 
 // ── MINERAL_MIN_AMOUNT_TO_SPAWN ──────────────────────────────────────────
@@ -128,13 +143,13 @@ const CREEP_BODIES = {
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
   repairer: { work: 3, carry: 2, move: 3 },
-  worker: { work: 8, carry: 8, move: 16 },
+  worker: { work: 10, carry: 10, move: 20 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
   attacker: { tough: 0, move: 10, heal: 0, ranged_attack: 10 },
   reserver: { claim: 2, move: 4 },
   remoteMiner: { work: 5, carry: 1, move: 6 },
   remoteHauler: { carry: 20, move: 20 },
-  labWorker: { carry: 1, move: 1 },
+  labWorker: { carry: 10, move: 10 },
 };
 
 // ── CONTROLLER ───────────────────────────────────────────────────────────
@@ -165,11 +180,11 @@ const CPU = {
 const MARKET = {
   // Ресурсы, которые нужно ЗАКУПАТЬ на рынке.
   // Чтобы включить/выключить закупку ресурса — просто добавь/убери строку.
-  BUY_RESOURCES: ["X", "O"],
+  BUY_RESOURCES: [], //"X", "O", "H"
 
   // Ресурсы, которые нужно ПРОДАВАТЬ на рынке.
   // Чтобы включить/выключить продажу ресурса — просто добавь/убери строку.
-  SELL_RESOURCES: [RESOURCE_ENERGY],
+  SELL_RESOURCES: [], //RESOURCE_ENERGY
 
   // Максимум сделок (покупок + продаж суммарно) за один тик —
   // защита от избыточного расхода CPU за один тик.
@@ -188,6 +203,7 @@ module.exports = {
   STORAGE,
   TASK_TYPES,
   TERMINAL_SUPPLY,
+  TERMINAL_NETWORK,
   FACTORY,
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
