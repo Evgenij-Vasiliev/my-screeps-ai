@@ -10,33 +10,41 @@ const { STORAGE } = require("./constants");
 
 module.exports = {
   /**
-   * Пытается получить энергию из storage комнаты крипа.
-   * Не позволяет опустить storage ниже STORAGE.ENERGY_MIN,
-   * если явно не указан аварийный режим (ignoreReserve).
+   * Берёт энергию из storage, не опуская его ниже STORAGE.ENERGY_MIN
+   * (если не ignoreReserve). Когда storage на резерве — забирает
+   * из терминала (туда приходит балансировка TerminalNetwork).
    *
    * @param {Creep} creep
    * @param {boolean} [ignoreReserve=false] — true для аварийного режима
    *                     (например, восстановление после нападения),
    *                     когда резерв storage можно игнорировать.
-   * @returns {boolean} true — storage доступен и не пуст (действие выполнено/начато);
-   *                     false — storage отсутствует, пуст, либо резерв
-   *                     не позволяет забрать энергию (роли следует
-   *                     перейти в свой аварийный режим).
+   * @returns {boolean} true — действие выполнено/начато;
+   *                     false — ни storage, ни terminal не дали энергию.
    */
   withdrawFromStorage: function (creep, ignoreReserve = false) {
     const storage = creep.room.storage;
-    if (!storage || storage.store[RESOURCE_ENERGY] === 0) return false;
+    const terminal = creep.room.terminal;
+    const storageEnergy = storage ? storage.store[RESOURCE_ENERGY] || 0 : 0;
 
     if (
-      !ignoreReserve &&
-      storage.store[RESOURCE_ENERGY] <= STORAGE.ENERGY_MIN
+      storage &&
+      storageEnergy > 0 &&
+      (ignoreReserve || storageEnergy > STORAGE.ENERGY_MIN)
     ) {
-      return false;
+      if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(storage, { reusePath: 50 });
+      }
+      return true;
     }
 
-    if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, { reusePath: 50 });
+    // Storage на резерве или пуст — забираем энергию, пришедшую сетью в терминал.
+    if (terminal && (terminal.store[RESOURCE_ENERGY] || 0) > 0) {
+      if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(terminal, { reusePath: 50 });
+      }
+      return true;
     }
-    return true;
+
+    return false;
   },
 };

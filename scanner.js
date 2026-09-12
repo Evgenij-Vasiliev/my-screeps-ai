@@ -1,24 +1,39 @@
 // scanner.js
-// Модуль-сканер: строит и хранит кеш id структур/источников комнаты.
+// Модуль-сканер: строит и хранит кэш id структур/источников комнаты в heap-памяти (global).
+// Это исключает тяжелую JSON-сериализацию/десериализацию сотен ID стен, дорог
+// и расширений через Memory в каждом тике, экономя значительную долю CPU на Shard3.
+
+if (!global._structureCache) {
+  global._structureCache = {};
+}
+
+// Период принудительного обновления кэша (тиков) для учета постройки/разрушения дорог/структур
+const STRUCTURE_CACHE_TTL = 1000;
 
 function ensureStructureCache(room) {
-  if (!Memory.rooms) {
-    Memory.rooms = {};
-  }
-  if (!Memory.rooms[room.name]) {
-    Memory.rooms[room.name] = {};
+  const roomName = room.name;
+
+  // Очистка устаревшего кэша из Memory для освобождения размера Memory и снижения CPU
+  if (
+    Memory.rooms &&
+    Memory.rooms[roomName] &&
+    Memory.rooms[roomName].structureCache
+  ) {
+    delete Memory.rooms[roomName].structureCache;
   }
 
-  const existing = Memory.rooms[room.name].structureCache;
+  const existing = global._structureCache[roomName];
 
   if (
     existing &&
+    existing._updatedAt &&
+    Game.time - existing._updatedAt < STRUCTURE_CACHE_TTL &&
     Array.isArray(existing.extensionIds) &&
     Array.isArray(existing.roadIds) &&
     Array.isArray(existing.wallIds) &&
     Array.isArray(existing.rampartIds)
   ) {
-    return; // кэш уже полный, ничего не делаем
+    return; // кэш в heap актуален, ничего не делаем
   }
 
   const structures = room.find(FIND_MY_STRUCTURES);
@@ -36,6 +51,7 @@ function ensureStructureCache(room) {
   const minerals = room.find(FIND_MINERALS);
 
   const cache = {
+    _updatedAt: Game.time,
     spawnIds: [],
     towerIds: [],
     linkIds: [],
@@ -95,15 +111,32 @@ function ensureStructureCache(room) {
     }
   }
 
-  Memory.rooms[room.name].structureCache = cache;
+  global._structureCache[roomName] = cache;
 }
 
 function getStructureCache(room) {
   ensureStructureCache(room);
-  return Memory.rooms[room.name].structureCache;
+  return global._structureCache[room.name];
+}
+
+/**
+ * Ручной сброс кэша (например, после завершения стройки или через консоль игры)
+ * @param {string} [roomName] - имя комнаты (если не указано, сбрасываются все)
+ */
+function clearStructureCache(roomName) {
+  if (roomName) {
+    if (global._structureCache) delete global._structureCache[roomName];
+    if (Memory.rooms && Memory.rooms[roomName]) {
+      delete Memory.rooms[roomName].structureCache;
+    }
+  } else {
+    global._structureCache = {};
+  }
 }
 
 module.exports = {
   ensureStructureCache,
   getStructureCache,
+  clearStructureCache,
 };
+

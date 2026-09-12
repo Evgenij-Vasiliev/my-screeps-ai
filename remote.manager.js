@@ -33,11 +33,14 @@ function assignTargetRoom(creeps) {
 
 module.exports = {
   run: function () {
+    const REMOTE_CACHE_MAX_AGE = 50; // тиков — максимум устаревания кэша
+
     const creepNames = Object.keys(Game.creeps);
 
     if (
       !Memory.remoteRoleCache ||
-      Memory.remoteRoleCacheCount !== creepNames.length
+      Memory.remoteRoleCacheCount !== creepNames.length ||
+      Game.time - (Memory.remoteRoleCacheUpdatedAt || 0) > REMOTE_CACHE_MAX_AGE
     ) {
       const reservers = [];
       const remoteMiners = [];
@@ -52,8 +55,8 @@ module.exports = {
 
       Memory.remoteRoleCache = { reservers, remoteMiners, remoteHaulers };
       Memory.remoteRoleCacheCount = creepNames.length;
+      Memory.remoteRoleCacheUpdatedAt = Game.time;
     }
-
     const cache = Memory.remoteRoleCache;
 
     const reservers = cache.reservers

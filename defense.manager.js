@@ -98,15 +98,20 @@ module.exports = {
       }
     }
 
+    const ATTACKER_CACHE_MAX_AGE = 50; // тиков — максимум устаревания кэша
+
     const creepNames = Object.keys(Game.creeps);
     if (
       !Memory.attackerNamesCache ||
-      Memory.attackerNamesCacheCount !== creepNames.length
+      Memory.attackerNamesCacheCount !== creepNames.length ||
+      Game.time - (Memory.attackerNamesCacheUpdatedAt || 0) >
+        ATTACKER_CACHE_MAX_AGE
     ) {
       Memory.attackerNamesCache = creepNames.filter(
         name => Game.creeps[name].memory.role === "attacker",
       );
       Memory.attackerNamesCacheCount = creepNames.length;
+      Memory.attackerNamesCacheUpdatedAt = Game.time;
     }
 
     for (const name of Memory.attackerNamesCache) {
