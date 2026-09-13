@@ -71,12 +71,12 @@ const TOWER = {
 // true/false — вкл/выкл конкретной категории задач.
 const TASK_CONFIG = {
   fillSpawnsExtensions: true, // подвоз энергии в спавны/расширения
-  fillPowerSpawnPower: true, // подвоз POWER в PowerSpawn
-  fillPowerSpawnEnergy: true, // подвоз энергии в PowerSpawn
+  fillPowerSpawnPower: false, // подвоз POWER в PowerSpawn
+  fillPowerSpawnEnergy: false, // подвоз энергии в PowerSpawn
   fillTerminalEnergy: true, // подвоз энергии в терминал
   fillTerminalResources: true, // подвоз прочих ресурсов в терминал
-  fillFactoryEnergy: true, // подвоз энергии в фабрику
-  collectFactoryBattery: true, // забор battery из фабрики
+  fillFactoryEnergy: false, // подвоз энергии в фабрику
+  collectFactoryBattery: false, // забор battery из фабрики
   repairStructures: true, // ремонт повреждённых структур
   buildStructures: true, // стройка по construction site
   fillTowers: true, // подвоз энергии в башни
@@ -124,7 +124,7 @@ const SPAWN_QUOTA = {
 // Точечные переопределения SPAWN_QUOTA для конкретных комнат.
 // Если роль для комнаты не указана здесь — берётся значение из SPAWN_QUOTA.
 const ROOM_SPAWN_QUOTA_OVERRIDES = {
-  E35S37: { harvester: 1 },
+  E35S37: { harvester: 0 },
 };
 
 // ── MINERAL_MIN_AMOUNT_TO_SPAWN ──────────────────────────────────────────
