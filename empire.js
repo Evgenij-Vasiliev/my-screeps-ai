@@ -12,7 +12,12 @@ const defenseManager = require("defense.manager");
 const remoteManager = require("remote.manager");
 
 module.exports.run = function () {
-  cpuMonitor.startTick();
+  try {
+    cpuMonitor.startTick();
+  } catch (error) {
+    console.error(`[cpuMonitor.startTick] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
   // 1. Очистка памяти умерших крипов
   for (const name in Memory.creeps) {
@@ -20,24 +25,57 @@ module.exports.run = function () {
   }
 
   // 2. Уровень комнат — вся комнатная логика внутри roomManager
-  cpuMonitor.trackRole("roomManager", () => roomManager.run());
-  // roomManager.run();
+  try {
+    cpuMonitor.trackRole("roomManager", () => roomManager.run());
+  } catch (error) {
+    console.error(`[roomManager] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
   // 3. Разведка
-
-  cpuMonitor.trackRole("observerManager", () => observerManager.run());
+  try {
+    cpuMonitor.trackRole("observerManager", () => observerManager.run());
+  } catch (error) {
+    console.error(`[observerManager] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
   // 4. Оборона — защита ремоут-комнат
-  cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
+  try {
+    cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
+  } catch (error) {
+    console.error(`[defenseManager] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
   // 5. Дальняя добыча — резервер / дальний майнер / дальний хайлер
-  cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
+  try {
+    cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
+  } catch (error) {
+    console.error(`[remoteManager] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
   // 6. TerminalNetwork — межкомнатная балансировка ресурсов
-  cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+  try {
+    cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+  } catch (error) {
+    console.error(`[terminalNetwork] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
   // 7. Рынок империального уровня
-  cpuMonitor.trackRole("marketManager", () => marketManager.run());
+  try {
+    cpuMonitor.trackRole("marketManager", () => marketManager.run());
+  } catch (error) {
+    console.error(`[marketManager] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 
-  cpuMonitor.endTick();
+  try {
+    cpuMonitor.endTick();
+  } catch (error) {
+    console.error(`[cpuMonitor.endTick] Ошибка: ${error.message}`);
+    console.error(error.stack);
+  }
 };
