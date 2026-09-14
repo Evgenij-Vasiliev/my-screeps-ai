@@ -11,6 +11,25 @@ const terminalNetwork = require("terminalNetwork");
 const defenseManager = require("defense.manager");
 const remoteManager = require("remote.manager");
 
+// ── ИНИЦИАЛИЗАЦИЯ ГЛОБАЛЬНЫХ КЭШЕВ (heap) ─────────────────────────────────
+// Все кэши живут в global (не сериализуются в Memory, переживают тик).
+// После Global Reset global пуст — кэши пересобираются при первом обращении.
+function initGlobalCaches() {
+  if (!global._structureCache) global._structureCache = {};
+  if (!global._mineralCache) global._mineralCache = {};
+  if (!global._defenseCache) global._defenseCache = {};
+  if (!global._remoteRoleCache) {
+    global._remoteRoleCache = { reservers: [], remoteMiners: [], remoteHaulers: [] };
+    global._remoteRoleCacheCount = 0;
+    global._remoteRoleCacheUpdatedAt = 0;
+  }
+  if (!global._attackerNamesCache) {
+    global._attackerNamesCache = [];
+    global._attackerNamesCacheCount = 0;
+    global._attackerNamesCacheUpdatedAt = 0;
+  }
+}
+
 module.exports.run = function () {
   try {
     cpuMonitor.startTick();
@@ -24,7 +43,10 @@ module.exports.run = function () {
     if (!Game.creeps[name]) delete Memory.creeps[name];
   }
 
-  // 2. Уровень комнат — вся комнатная логика внутри roomManager
+  // 2. Инициализация глобальных кэшей (самопосборка после Global Reset)
+  initGlobalCaches();
+
+  // 3. Уровень комнат — вся комнатная логика внутри roomManager
   try {
     cpuMonitor.trackRole("roomManager", () => roomManager.run());
   } catch (error) {

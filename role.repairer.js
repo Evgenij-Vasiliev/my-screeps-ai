@@ -38,7 +38,7 @@ module.exports = {
           });
         }
       } else {
-        roleBuilder.run(creep, roomState);
+        roleBuilder.run(creep);
       }
     }
   },

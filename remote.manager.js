@@ -35,12 +35,19 @@ module.exports = {
   run: function () {
     const REMOTE_CACHE_MAX_AGE = 50; // тиков — максимум устаревания кэша
 
+    // Инициализация глобального кэша (самопосборка после Global Reset)
+    if (!global._remoteRoleCache) {
+      global._remoteRoleCache = { reservers: [], remoteMiners: [], remoteHaulers: [] };
+      global._remoteRoleCacheCount = 0;
+      global._remoteRoleCacheUpdatedAt = 0;
+    }
+
     const creepNames = Object.keys(Game.creeps);
 
     if (
-      !Memory.remoteRoleCache ||
-      Memory.remoteRoleCacheCount !== creepNames.length ||
-      Game.time - (Memory.remoteRoleCacheUpdatedAt || 0) > REMOTE_CACHE_MAX_AGE
+      !global._remoteRoleCache ||
+      global._remoteRoleCacheCount !== creepNames.length ||
+      Game.time - (global._remoteRoleCacheUpdatedAt || 0) > REMOTE_CACHE_MAX_AGE
     ) {
       const reservers = [];
       const remoteMiners = [];
@@ -53,11 +60,11 @@ module.exports = {
         else if (role === "remoteHauler") remoteHaulers.push(name);
       }
 
-      Memory.remoteRoleCache = { reservers, remoteMiners, remoteHaulers };
-      Memory.remoteRoleCacheCount = creepNames.length;
-      Memory.remoteRoleCacheUpdatedAt = Game.time;
+      global._remoteRoleCache = { reservers, remoteMiners, remoteHaulers };
+      global._remoteRoleCacheCount = creepNames.length;
+      global._remoteRoleCacheUpdatedAt = Game.time;
     }
-    const cache = Memory.remoteRoleCache;
+    const cache = global._remoteRoleCache;
 
     const reservers = cache.reservers
       .map(name => Game.creeps[name])

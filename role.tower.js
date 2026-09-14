@@ -27,7 +27,7 @@ module.exports = {
         healers.length > 0 ? healers : hostiles,
       );
       if (closestHostile) {
-        tower.attack(closestHostile);
+        tower.attack(/** @type {Creep} */ (closestHostile));
         return;
       }
     }

@@ -38,9 +38,10 @@ module.exports = {
     // ── 2. САМОЗАЩИТА В ПУТИ ─────────────────────────────────────────────
     // Включается только если мы ЕЩЕ НЕ в целевой комнате (на автостраде или точке сбора)
     if (creep.room.name !== targetRoom) {
-      const cache = Memory.rooms[creep.room.name];
-      const cachedIds =
-        cache && cache.defenseCache && cache.defenseCache.hostileCreepIds;
+      // Глобальный кэш обороны (самопосборка после Global Reset)
+      if (!global._defenseCache) global._defenseCache = {};
+      const cache = global._defenseCache[creep.room.name];
+      const cachedIds = cache && cache.hostileCreepIds;
 
       if (cachedIds && cachedIds.length > 0) {
         const attacker = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS, {
@@ -153,7 +154,7 @@ module.exports = {
     if (range < 3) {
       const dirToTarget = creep.pos.getDirectionTo(target);
       const fleeDir = ((dirToTarget + 3) % 8) + 1;
-      creep.move(fleeDir);
+      creep.move(/** @type {DirectionConstant} */ (fleeDir));
     } else if (range > 3) {
       creep.moveTo(target, {
         reusePath: 3,

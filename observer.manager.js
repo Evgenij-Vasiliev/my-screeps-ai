@@ -13,6 +13,6 @@ module.exports = {
     const observer = observers[0];
     const roomName = ROOMS[Game.time % ROOMS.length];
 
-    observer.observeRoom(roomName);
+    /** @type {any} */ (observer).observeRoom(roomName);
   },
 };
