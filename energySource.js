@@ -15,7 +15,7 @@ module.exports = {
    * из терминала (туда приходит балансировка TerminalNetwork).
    *
    * @param {Creep} creep
-   * @param {boolean} [ignoreReserve=false] — true для аварийного режима
+   * @param {boolean} [ignoreReserve=false] - true для аварийного режима
    *                     (например, восстановление после нападения),
    *                     когда резерв storage можно игнорировать.
    * @returns {boolean} true — действие выполнено/начато;

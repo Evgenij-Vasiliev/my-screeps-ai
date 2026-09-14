@@ -43,25 +43,26 @@ module.exports = {
 
     for (const room of sorted) {
       // Ищем опасных врагов (с деталями атаки или лечения)
-      const cache = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
+      // Инициализация глобального кэша обороны (самопосборка после Global Reset)
+      if (!global._defenseCache) global._defenseCache = {};
+      if (!global._defenseCache[room.name]) global._defenseCache[room.name] = {};
+      const cache = global._defenseCache[room.name];
 
-      if (!cache.defenseCache) cache.defenseCache = {};
       // Обновляем Core и список вражеских крипов раз в 25 тиков
       if (Game.time % 25 === 0) {
         const core = room.find(FIND_HOSTILE_STRUCTURES, {
           filter: s => s.structureType === STRUCTURE_INVADER_CORE,
         });
 
-        cache.defenseCache.invaderCoreId = core.length ? core[0].id : null;
+        cache.invaderCoreId = core.length ? core[0].id : null;
 
         const hostileCreeps = room.find(FIND_HOSTILE_CREEPS);
-        cache.defenseCache.hostileCreepIds = hostileCreeps.map(c => c.id);
+        cache.hostileCreepIds = hostileCreeps.map(c => c.id);
       }
       const hostileCreepIds =
         cache &&
-        cache.defenseCache &&
-        Array.isArray(cache.defenseCache.hostileCreepIds)
-          ? cache.defenseCache.hostileCreepIds
+        Array.isArray(cache.hostileCreepIds)
+          ? cache.hostileCreepIds
           : [];
 
       const hostiles = hostileCreepIds
@@ -84,8 +85,7 @@ module.exports = {
       }
 
       // Ищем ядра захватчиков в удалённых комнатах
-      const invaderCoreId =
-        cache && cache.defenseCache ? cache.defenseCache.invaderCoreId : null;
+      const invaderCoreId = cache.invaderCoreId || null;
 
       const invaderCore = invaderCoreId
         ? Game.getObjectById(invaderCoreId)
@@ -100,21 +100,28 @@ module.exports = {
 
     const ATTACKER_CACHE_MAX_AGE = 50; // тиков — максимум устаревания кэша
 
-    const creepNames = Object.keys(Game.creeps);
-    if (
-      !Memory.attackerNamesCache ||
-      Memory.attackerNamesCacheCount !== creepNames.length ||
-      Game.time - (Memory.attackerNamesCacheUpdatedAt || 0) >
-        ATTACKER_CACHE_MAX_AGE
-    ) {
-      Memory.attackerNamesCache = creepNames.filter(
-        name => Game.creeps[name].memory.role === "attacker",
-      );
-      Memory.attackerNamesCacheCount = creepNames.length;
-      Memory.attackerNamesCacheUpdatedAt = Game.time;
+    // Инициализация глобального кэша (самопосборка после Global Reset)
+    if (!global._attackerNamesCache) {
+      global._attackerNamesCache = [];
+      global._attackerNamesCacheCount = 0;
+      global._attackerNamesCacheUpdatedAt = 0;
     }
 
-    for (const name of Memory.attackerNamesCache) {
+    const creepNames = Object.keys(Game.creeps);
+    if (
+      !global._attackerNamesCache ||
+      global._attackerNamesCacheCount !== creepNames.length ||
+      Game.time - (global._attackerNamesCacheUpdatedAt || 0) >
+        ATTACKER_CACHE_MAX_AGE
+    ) {
+      global._attackerNamesCache = creepNames.filter(
+        name => Game.creeps[name].memory.role === "attacker",
+      );
+      global._attackerNamesCacheCount = creepNames.length;
+      global._attackerNamesCacheUpdatedAt = Game.time;
+    }
+
+    for (const name of global._attackerNamesCache) {
       const creep = Game.creeps[name];
       if (creep) {
         attacker.run(creep);

@@ -19,7 +19,9 @@ function rebuildMineralState(room) {
       console.log(`[Mineral] ${roomName} : no mineral source`);
       room.memory._mineralNoneLogged = true;
     }
-    Memory.rooms[roomName].mineral = { none: true };
+    // Кэш в heap — не сериализуется в Memory
+    if (!global._mineralCache) global._mineralCache = {};
+    global._mineralCache[roomName] = { none: true };
     return null;
   }
 
@@ -30,7 +32,9 @@ function rebuildMineralState(room) {
   );
   const extractorId = extractor ? extractor.id : null;
 
-  Memory.rooms[roomName].mineral = {
+  // Кэш в heap — не сериализуется в Memory
+  if (!global._mineralCache) global._mineralCache = {};
+  global._mineralCache[roomName] = {
     id: mineral.id,
     mineralType: mineral.mineralType,
     extractorId,
@@ -41,9 +45,10 @@ function rebuildMineralState(room) {
 
 function buildMineralState(room) {
   const roomName = room.name;
-  if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
+  // Инициализация глобального кэша (самопосборка после Global Reset)
+  if (!global._mineralCache) global._mineralCache = {};
 
-  const cache = Memory.rooms[roomName].mineral;
+  const cache = global._mineralCache[roomName];
 
   if (!cache || typeof cache !== "object") {
     return rebuildMineralState(room);

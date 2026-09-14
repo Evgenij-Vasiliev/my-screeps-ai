@@ -3,9 +3,8 @@
     "module": "commonjs",
     "target": "es2020",
     "moduleResolution": "classic",
-    "ignoreDeprecations": "6.0",
     "checkJs": true,
     "types": ["screeps"]
   },
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "eslint.config.js"]
 }

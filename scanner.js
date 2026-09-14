@@ -6,6 +6,9 @@
 if (!global._structureCache) {
   global._structureCache = {};
 }
+if (!global._mineralCache) {
+  global._mineralCache = {};
+}
 
 // Период принудительного обновления кэша (тиков) для учета постройки/разрушения дорог/структур
 const STRUCTURE_CACHE_TTL = 1000;
@@ -13,14 +16,7 @@ const STRUCTURE_CACHE_TTL = 1000;
 function ensureStructureCache(room) {
   const roomName = room.name;
 
-  // Очистка устаревшего кэша из Memory для освобождения размера Memory и снижения CPU
-  if (
-    Memory.rooms &&
-    Memory.rooms[roomName] &&
-    Memory.rooms[roomName].structureCache
-  ) {
-    delete Memory.rooms[roomName].structureCache;
-  }
+  // Кэш уже живёт в global._structureCache — ничего не чистим в Memory
 
   const existing = global._structureCache[roomName];
 
@@ -126,11 +122,11 @@ function getStructureCache(room) {
 function clearStructureCache(roomName) {
   if (roomName) {
     if (global._structureCache) delete global._structureCache[roomName];
-    if (Memory.rooms && Memory.rooms[roomName]) {
-      delete Memory.rooms[roomName].structureCache;
-    }
+    // Также очищаем связанный кэш минерала, если он есть
+    if (global._mineralCache) delete global._mineralCache[roomName];
   } else {
     global._structureCache = {};
+    global._mineralCache = {};
   }
 }
 
