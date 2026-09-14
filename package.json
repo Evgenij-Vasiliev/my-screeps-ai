@@ -13,6 +13,9 @@
   "devDependencies": {
     "@types/lodash": "^4.17.24",
     "@types/screeps": "^3.3.8",
+    "eslint": "^10.10.0",
+    "eslint-config-screeps": "^1.1.1",
+    "globals": "^17.12.0",
     "grunt-screeps": "^1.5.0"
   },
   "dependencies": {

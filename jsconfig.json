@@ -2,7 +2,9 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "es2020",
-    "checkJs": false,
+    "moduleResolution": "classic",
+    "ignoreDeprecations": "6.0",
+    "checkJs": true,
     "types": ["screeps"]
   },
   "exclude": ["node_modules"]
