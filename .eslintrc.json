@@ -1,0 +1,6 @@
+{
+  "extends": ["screeps"],
+  "env": {
+    "node": true
+  }
+}

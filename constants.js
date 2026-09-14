@@ -125,6 +125,7 @@ const SPAWN_QUOTA = {
 // Если роль для комнаты не указана здесь — берётся значение из SPAWN_QUOTA.
 const ROOM_SPAWN_QUOTA_OVERRIDES = {
   E35S37: { harvester: 0 },
+  E35S39: { harvester: 0 },
 };
 
 // ── MINERAL_MIN_AMOUNT_TO_SPAWN ──────────────────────────────────────────
