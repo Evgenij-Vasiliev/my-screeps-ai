@@ -22,7 +22,7 @@ module.exports = {
 
       const result = creep.withdraw(storageLink, RESOURCE_ENERGY);
       if (result === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storageLink, { reusePath: 5 });
+        creep.travelTo(storageLink);
       } else if (result !== OK) {
         console.log(
           `[LinkWorker] ${creep.room.name} : withdraw() вернул ошибку ${result}`,
@@ -33,7 +33,7 @@ module.exports = {
 
     const result = creep.transfer(storage, RESOURCE_ENERGY);
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, { reusePath: 5 });
+      creep.travelTo(storage);
     } else if (result !== OK) {
       console.log(
         `[LinkWorker] ${creep.room.name} : transfer() вернул ошибку ${result}`,

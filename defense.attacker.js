@@ -76,7 +76,7 @@ module.exports = {
   respondToAlert: function (creep, targetRoom) {
     // Переход в целевую комнату
     if (creep.room.name !== targetRoom) {
-      creep.moveTo(new RoomPosition(25, 25, targetRoom), {
+      creep.travelTo(new RoomPosition(25, 25, targetRoom), {
         reusePath: 5,
       });
       return;
@@ -114,14 +114,14 @@ module.exports = {
    */
   goToRally: function (creep) {
     if (creep.room.name !== RALLY_ROOM) {
-      creep.moveTo(new RoomPosition(25, 25, RALLY_ROOM), {
+      creep.travelTo(new RoomPosition(25, 25, RALLY_ROOM), {
         reusePath: 20,
       });
       return;
     }
 
     if (!creep.pos.inRangeTo(RALLY_X, RALLY_Y, 2)) {
-      creep.moveTo(new RoomPosition(RALLY_X, RALLY_Y, creep.room.name), {
+      creep.travelTo(new RoomPosition(RALLY_X, RALLY_Y, creep.room.name), {
         reusePath: 20,
       });
     }
