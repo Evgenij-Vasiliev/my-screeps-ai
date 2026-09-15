@@ -9,9 +9,10 @@ module.exports = {
   run: function (tower, roomData) {
     if (!tower) return;
 
-    if (!Memory.towerState) Memory.towerState = {};
-    if (!Memory.towerState[tower.id]) Memory.towerState[tower.id] = {};
-    const state = Memory.towerState[tower.id];
+    // Глобальный кэш состояний башен (не сериализуется в Memory)
+    if (!global._towerState) global._towerState = {};
+    if (!global._towerState[tower.id]) global._towerState[tower.id] = {};
+    const state = global._towerState[tower.id];
 
     const hostiles = roomData.hostiles;
     const hasHostiles = hostiles && hostiles.length > 0;

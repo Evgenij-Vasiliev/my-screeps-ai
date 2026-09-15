@@ -48,6 +48,9 @@ declare global {
     mineralType?: string;
     observeRoom?: (...args: any[]) => any;
   }
+  interface Creep {
+  travelTo?: (destination: any, options?: any) => any;
+}
 
   var _: any;
   var global: any;

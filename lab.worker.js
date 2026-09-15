@@ -230,14 +230,12 @@ module.exports = {
         if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(target, {
             reusePath: 5,
-            visualizePathStyle: { stroke: "#ff0000" },
           });
       } else {
         const r = creep.transfer(dest, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(dest, {
             reusePath: 5,
-            visualizePathStyle: { stroke: "#ff0000" },
           });
         if (r === OK) creep.memory.task = null;
       }
@@ -262,14 +260,12 @@ module.exports = {
         if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(reactor, {
             reusePath: 5,
-            visualizePathStyle: { stroke: "#00ff00" },
           });
       } else {
         const r = creep.transfer(dest, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(dest, {
             reusePath: 5,
-            visualizePathStyle: { stroke: "#00ff00" },
           });
         if (r === OK) creep.memory.task = null;
       }
@@ -299,7 +295,6 @@ module.exports = {
         if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(src, {
             reusePath: 5,
-            visualizePathStyle: { stroke: "#ffff00" },
           });
         if (r === OK) delete creep.memory.amount;
       } else {
@@ -307,7 +302,6 @@ module.exports = {
         if (r === ERR_NOT_IN_RANGE)
           creep.moveTo(dest, {
             reusePath: 5,
-            visualizePathStyle: { stroke: "#ffff00" },
           });
         if (r === OK) creep.memory.task = null;
       }
