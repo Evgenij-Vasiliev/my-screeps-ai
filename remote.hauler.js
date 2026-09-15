@@ -54,10 +54,7 @@ module.exports = {
         delete creep.memory._travel;
       }
       creep.memory._lastRoom = creep.room.name;
-      creep.moveTo(new RoomPosition(25, 25, currentGoal), {
-        reusePath: 0,
-        maxRooms: 3,
-      });
+      creep.travelTo(new RoomPosition(25, 25, currentGoal));
       return;
     }
 
@@ -70,9 +67,7 @@ module.exports = {
       creep.pos.y === 0 ||
       creep.pos.y === 49
     ) {
-      creep.moveTo(new RoomPosition(25, 25, creep.room.name), {
-        reusePath: 0,
-      });
+      creep.travelTo(new RoomPosition(25, 25, creep.room.name));
       return;
     }
 
@@ -84,17 +79,14 @@ module.exports = {
       if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
         // Есть линк и в нём есть место — идём к нему
         if (creep.transfer(link, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(link, {
-            reusePath: 15,
-            maxRooms: 1,
-          });
+          creep.travelTo(link);
         }
       } else {
         // Линк полный или недоступен — запасной вариант: Storage
         const target = creep.room.storage;
         if (target) {
           if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, { reusePath: 15, maxRooms: 1 });
+            creep.travelTo(target);
           }
         }
       }
@@ -129,7 +121,7 @@ module.exports = {
 
       if (container) {
         if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(container, { reusePath: 15, maxRooms: 1 });
+          creep.travelTo(container);
         }
       } else {
         // Контейнер пуст — подбираем выпавшую энергию
@@ -154,7 +146,7 @@ module.exports = {
 
         if (dropped) {
           if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(dropped, { reusePath: 15, maxRooms: 1 });
+            creep.travelTo(dropped);
           }
         } else {
           // Ждём у источника
@@ -171,7 +163,7 @@ module.exports = {
           }
 
           if (source && creep.pos.getRangeTo(source) > 2) {
-            creep.moveTo(source, { reusePath: 15, maxRooms: 1 });
+            creep.travelTo(source);
           }
         }
       }

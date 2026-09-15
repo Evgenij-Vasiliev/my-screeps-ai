@@ -43,12 +43,22 @@ module.exports = {
     /**
      * 2. ПЕРЕХОД В ЦЕЛЕВУЮ КОМНАТУ
      *
-     * reusePath: 50 — путь между комнатами стабилен, кэшируем надолго.
+     * Путь кэширует сам Traveler (creep.memory._travel); при смене
+     * комнаты кэш сбрасывается ниже, чтобы пережить границу.
      */
     if (creep.room.name !== targetRoom) {
-      creep.moveTo(new RoomPosition(25, 25, targetRoom), {
-        reusePath: 50,
-      });
+      // Traveler сериализует путь только внутри комнаты, поэтому при
+      // пересечении границы кэш пути сбрасывается — тот же приём, что
+      // уже используется в remote.hauler и remote.miner.
+      if (
+        creep.memory._lastRoom &&
+        creep.memory._lastRoom !== creep.room.name
+      ) {
+        delete creep.memory._travel;
+      }
+      creep.memory._lastRoom = creep.room.name;
+
+      creep.travelTo(new RoomPosition(25, 25, targetRoom));
       return;
     }
 
@@ -81,9 +91,7 @@ module.exports = {
     const result = creep.reserveController(controller);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(controller, {
-        reusePath: 20,
-      });
+      creep.travelTo(controller);
     }
   },
 };

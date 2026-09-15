@@ -32,7 +32,7 @@ module.exports = {
       (ignoreReserve || storageEnergy > STORAGE.ENERGY_MIN)
     ) {
       if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, { reusePath: 50 });
+        creep.travelTo(storage);
       }
       return true;
     }
@@ -40,7 +40,7 @@ module.exports = {
     // Storage на резерве или пуст — забираем энергию, пришедшую сетью в терминал.
     if (terminal && (terminal.store[RESOURCE_ENERGY] || 0) > 0) {
       if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(terminal, { reusePath: 50 });
+        creep.travelTo(terminal);
       }
       return true;
     }

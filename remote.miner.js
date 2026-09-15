@@ -16,10 +16,7 @@ module.exports = {
 
       creep.memory._lastRoom = creep.room.name;
 
-      creep.moveTo(new RoomPosition(25, 25, targetRoom), {
-        reusePath: 0,
-        maxRooms: 3,
-      });
+      creep.travelTo(new RoomPosition(25, 25, targetRoom));
 
       return;
     }
@@ -33,9 +30,7 @@ module.exports = {
       creep.pos.y === 49;
 
     if (onBorder) {
-      creep.moveTo(new RoomPosition(25, 25, creep.room.name), {
-        reusePath: 0,
-      });
+      creep.travelTo(new RoomPosition(25, 25, creep.room.name));
       return;
     }
 
@@ -91,18 +86,12 @@ module.exports = {
 
     if (container) {
       if (!creep.pos.isEqualTo(container.pos)) {
-        creep.moveTo(container, {
-          reusePath: 15,
-          maxRooms: 1,
-        });
+        creep.travelTo(container);
         return;
       }
     } else {
       if (creep.pos.getRangeTo(source) > 1) {
-        creep.moveTo(source, {
-          reusePath: 15,
-          maxRooms: 1,
-        });
+        creep.travelTo(source);
         return;
       }
     }

@@ -26,7 +26,7 @@ module.exports = {
 
     if (tower) {
       if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(tower, { reusePath: 5 });
+        creep.travelTo(tower);
       }
       return;
     }
@@ -35,7 +35,7 @@ module.exports = {
       if (
         creep.transfer(creep.room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
       ) {
-        creep.moveTo(creep.room.storage, { reusePath: 5 });
+        creep.travelTo(creep.room.storage);
       }
     }
   },

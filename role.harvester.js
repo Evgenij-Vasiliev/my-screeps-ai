@@ -26,7 +26,7 @@ module.exports = {
 
       if (terminal && terminal.store[RESOURCE_ENERGY] > 0) {
         if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(terminal, { reusePath: 15 });
+          creep.travelTo(terminal);
         }
         return;
       }
@@ -60,7 +60,7 @@ module.exports = {
 
       if (source) {
         if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { reusePath: 15 });
+          creep.travelTo(source);
         }
       }
       return;
@@ -111,6 +111,7 @@ module.exports = {
 
     if (target) {
       if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.travelTo(target);
       }
     }
   },

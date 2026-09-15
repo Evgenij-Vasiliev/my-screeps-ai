@@ -386,7 +386,7 @@ module.exports = function (globalOpts = {}) {
       if (global.traveler && global.travelerTick !== Game.time) {
         global.traveler = new Traveler();
       }
-      return global.traveler.moveTo(this, destination, options);
+      return global.traveler.travelTo(this, destination, options);
     };
   }
 

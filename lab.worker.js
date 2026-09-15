@@ -228,15 +228,11 @@ module.exports = {
       if (creep.store[creep.memory.resource] === 0) {
         const r = creep.withdraw(target, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
-          creep.moveTo(target, {
-            reusePath: 5,
-          });
+          creep.travelTo(target);
       } else {
         const r = creep.transfer(dest, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
-          creep.moveTo(dest, {
-            reusePath: 5,
-          });
+          creep.travelTo(dest);
         if (r === OK) creep.memory.task = null;
       }
       return;
@@ -258,15 +254,11 @@ module.exports = {
         }
         const r = creep.withdraw(reactor, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
-          creep.moveTo(reactor, {
-            reusePath: 5,
-          });
+          creep.travelTo(reactor);
       } else {
         const r = creep.transfer(dest, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
-          creep.moveTo(dest, {
-            reusePath: 5,
-          });
+          creep.travelTo(dest);
         if (r === OK) creep.memory.task = null;
       }
       return;
@@ -293,16 +285,12 @@ module.exports = {
           creep.memory.amount,
         );
         if (r === ERR_NOT_IN_RANGE)
-          creep.moveTo(src, {
-            reusePath: 5,
-          });
+          creep.travelTo(src);
         if (r === OK) delete creep.memory.amount;
       } else {
         const r = creep.transfer(dest, creep.memory.resource);
         if (r === ERR_NOT_IN_RANGE)
-          creep.moveTo(dest, {
-            reusePath: 5,
-          });
+          creep.travelTo(dest);
         if (r === OK) creep.memory.task = null;
       }
       return;
