@@ -28,14 +28,16 @@ function initGlobalCaches() {
     global._attackerNamesCacheCount = 0;
     global._attackerNamesCacheUpdatedAt = 0;
   }
+  if (!global._towerState) global._towerState = {};
+  if (typeof global._taskIdSeq !== "number") global._taskIdSeq = 0;
 }
 
 module.exports.run = function () {
   try {
     cpuMonitor.startTick();
   } catch (error) {
-    console.error(`[cpuMonitor.startTick] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[cpuMonitor.startTick] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
   // 1. Очистка памяти умерших крипов
@@ -50,54 +52,54 @@ module.exports.run = function () {
   try {
     cpuMonitor.trackRole("roomManager", () => roomManager.run());
   } catch (error) {
-    console.error(`[roomManager] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[roomManager] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
-  // 3. Разведка
+  // 4. Разведка
   try {
     cpuMonitor.trackRole("observerManager", () => observerManager.run());
   } catch (error) {
-    console.error(`[observerManager] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[observerManager] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
   // 4. Оборона — защита ремоут-комнат
   try {
     cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
   } catch (error) {
-    console.error(`[defenseManager] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[defenseManager] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
   // 5. Дальняя добыча — резервер / дальний майнер / дальний хайлер
   try {
     cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
   } catch (error) {
-    console.error(`[remoteManager] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[remoteManager] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
   // 6. TerminalNetwork — межкомнатная балансировка ресурсов
   try {
     cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
   } catch (error) {
-    console.error(`[terminalNetwork] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[terminalNetwork] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
   // 7. Рынок империального уровня
   try {
     cpuMonitor.trackRole("marketManager", () => marketManager.run());
   } catch (error) {
-    console.error(`[marketManager] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[marketManager] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 
   try {
     cpuMonitor.endTick();
   } catch (error) {
-    console.error(`[cpuMonitor.endTick] Ошибка: ${error.message}`);
-    console.error(error.stack);
+    console.log(`[cpuMonitor.endTick] Ошибка: ${error.message}`);
+    console.log(error.stack);
   }
 };

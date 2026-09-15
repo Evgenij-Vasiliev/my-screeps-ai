@@ -16,7 +16,9 @@ module.exports = {
 
     // Идём на рабочее место
     if (!creep.pos.isEqualTo(spot.x, spot.y)) {
-      creep.moveTo(spot.x, spot.y, { reusePath: 20 });
+      creep.moveTo(new RoomPosition(spot.x, spot.y, creep.room.name), {
+        reusePath: 20,
+      });
       return;
     }
 

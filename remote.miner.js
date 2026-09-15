@@ -11,14 +11,13 @@ module.exports = {
         creep.memory._lastRoom &&
         creep.memory._lastRoom !== creep.room.name
       ) {
-        delete creep.memory._move;
+        delete creep.memory._travel;
       }
 
       creep.memory._lastRoom = creep.room.name;
 
       creep.moveTo(new RoomPosition(25, 25, targetRoom), {
         reusePath: 0,
-        visualizePathStyle: { stroke: "#ffaa00" },
         maxRooms: 3,
       });
 
@@ -36,7 +35,6 @@ module.exports = {
     if (onBorder) {
       creep.moveTo(new RoomPosition(25, 25, creep.room.name), {
         reusePath: 0,
-        visualizePathStyle: { stroke: "#ffffff" },
       });
       return;
     }
@@ -95,7 +93,6 @@ module.exports = {
       if (!creep.pos.isEqualTo(container.pos)) {
         creep.moveTo(container, {
           reusePath: 15,
-          visualizePathStyle: { stroke: "#ffaa00" },
           maxRooms: 1,
         });
         return;
@@ -104,7 +101,6 @@ module.exports = {
       if (creep.pos.getRangeTo(source) > 1) {
         creep.moveTo(source, {
           reusePath: 15,
-          visualizePathStyle: { stroke: "#ffaa00" },
           maxRooms: 1,
         });
         return;

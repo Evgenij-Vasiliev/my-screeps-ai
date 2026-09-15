@@ -78,7 +78,6 @@ module.exports = {
     if (creep.room.name !== targetRoom) {
       creep.moveTo(new RoomPosition(25, 25, targetRoom), {
         reusePath: 5,
-        visualizePathStyle: { stroke: "#ff0000" },
       });
       return;
     }
@@ -117,15 +116,13 @@ module.exports = {
     if (creep.room.name !== RALLY_ROOM) {
       creep.moveTo(new RoomPosition(25, 25, RALLY_ROOM), {
         reusePath: 20,
-        visualizePathStyle: { stroke: "#00ff00" },
       });
       return;
     }
 
     if (!creep.pos.inRangeTo(RALLY_X, RALLY_Y, 2)) {
-      creep.moveTo(RALLY_X, RALLY_Y, {
+      creep.moveTo(new RoomPosition(RALLY_X, RALLY_Y, creep.room.name), {
         reusePath: 20,
-        visualizePathStyle: { stroke: "#00ff00" },
       });
     }
   },
@@ -158,7 +155,6 @@ module.exports = {
     } else if (range > 3) {
       creep.moveTo(target, {
         reusePath: 3,
-        visualizePathStyle: { stroke: "#ff0000" },
       });
     }
   },

@@ -33,12 +33,12 @@ function initRoomTasks(roomName) {
 }
 
 function generateTaskId() {
-  if (typeof Memory._taskIdSeq !== "number") {
-    Memory._taskIdSeq = 0;
+  if (typeof global._taskIdSeq !== "number") {
+    global._taskIdSeq = 0;
   }
 
-  Memory._taskIdSeq++;
-  return "task_" + Memory._taskIdSeq;
+  global._taskIdSeq++;
+  return "task_" + global._taskIdSeq;
 }
 
 function findIndexByTaskId(queue, taskId) {

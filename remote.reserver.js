@@ -48,7 +48,6 @@ module.exports = {
     if (creep.room.name !== targetRoom) {
       creep.moveTo(new RoomPosition(25, 25, targetRoom), {
         reusePath: 50,
-        visualizePathStyle: { stroke: "#00ff00" },
       });
       return;
     }
@@ -84,7 +83,6 @@ module.exports = {
     if (result === ERR_NOT_IN_RANGE) {
       creep.moveTo(controller, {
         reusePath: 20,
-        visualizePathStyle: { stroke: "#00ff00" },
       });
     }
   },
