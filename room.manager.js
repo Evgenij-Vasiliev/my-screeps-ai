@@ -49,6 +49,12 @@ function runCreepLogic(roomState) {
     if (!creep) continue;
     const roleModule = ROLES[creep.memory.role];
     if (!roleModule) continue;
+
+    // Задача 3 роадмапа (ТЗ №1): спавнящийся крип ещё не может действовать, но
+    // его роль (worker) успела бы занять Task и держать резервацию «немой» до
+    // конца спавна (десятки тиков для больших тел). Роль для него не выполняется.
+    if (creep.spawning) continue;
+
     // ВАЖНО (ТЗ №0): бакет роли "worker" — это и есть выполнение Task System
     // (worker.runner: выбор задачи из FIFO Memory.rooms[].tasks + executor).
     // Отдельного бакета ему не нужно — имя бакета совпадает с ролью.
