@@ -18,6 +18,23 @@ declare global {
   interface CreepMemory {
     role?: string;
     homeRoom?: string;
+    // ── режимы ролей ─────────────────────────────────────────────────────
+    working?: boolean;
+    // ── пачечная добыча (role.miner / remote.miner) ──────────────────────
+    harvestInterval?: number;
+    harvestPerCall?: number;
+    // ── дальняя добыча (remote.*) ────────────────────────────────────────
+    targetRoom?: string | null;
+    sourceId?: string | null;
+    containerId?: string | null;
+    containerSiteId?: string | null;
+    containerCheckedAt?: number;
+    droppedId?: string | null;
+    waitSourceId?: string | null;
+    nextHaulSearch?: number;
+    // ── Traveler (traveler.js) ───────────────────────────────────────────
+    _travel?: any;
+    _lastRoom?: string;
   }
 
   interface Memory {

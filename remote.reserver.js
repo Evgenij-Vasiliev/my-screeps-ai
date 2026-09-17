@@ -14,11 +14,20 @@
  *   Memory.reserverConfig = {
  *     targetRooms: ["E35S38", "E36S37"]
  *   }
+ * (по умолчанию используется список constants.REMOTE.ROOMS)
  *
  * Память крипа (creep.memory):
  * - targetRoom {string} — целевая комната
+ *
+ * Оптимизация CPU (замеры — docs/REMOTE-CPU-OPTIMIZATION.md):
+ * вызов reserveController стоит ≈0.21 мс и раньше шёл каждый тик, даже когда
+ * крип был далеко от контроллера (вызов возвращал ERR_NOT_IN_RANGE и ничего
+ * не делал). Теперь сначала проверяется расстояние (isNearTo ≈0.001 мс), и
+ * только рядом стоящий крип реально резервирует.
  * ===================================================
  */
+const { REMOTE } = require("./constants");
+
 module.exports = {
   run: function (creep) {
     /**
@@ -29,7 +38,7 @@ module.exports = {
      */
     if (!creep.memory.targetRoom) {
       const config = Memory.reserverConfig || {};
-      const rooms = config.targetRooms || ["E35S38", "E36S37"];
+      const rooms = config.targetRooms || REMOTE.ROOMS;
 
       let hash = 0;
       for (let i = 0; i < creep.name.length; i++) {
@@ -87,11 +96,18 @@ module.exports = {
       return;
     }
 
-    // Резервируем контроллер
-    const result = creep.reserveController(controller);
-
-    if (result === ERR_NOT_IN_RANGE) {
+    /**
+     * 4. РЕЗЕРВАЦИЯ КОНТРОЛЛЕРА
+     *
+     * Действие вызывается только когда крип уже рядом с контроллером:
+     * вызов «издалека» возвращает ERR_NOT_IN_RANGE, ничего не делает, но
+     * стоит как продуктивный (≈0.21 мс). Пока крип идёт — только travelTo.
+     */
+    if (!creep.pos.isNearTo(controller)) {
       creep.travelTo(controller);
+      return;
     }
+
+    creep.reserveController(controller);
   },
 };
