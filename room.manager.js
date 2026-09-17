@@ -50,6 +50,9 @@ function runCreepLogic(roomState) {
     if (!creep) continue;
     const roleModule = ROLES[creep.memory.role];
     if (!roleModule) continue;
+    // ВАЖНО (ТЗ №0): бакет роли "worker" — это и есть выполнение Task System
+    // (worker.runner: выбор задачи из FIFO Memory.rooms[].tasks + executor).
+    // Отдельного бакета ему не нужно — имя бакета совпадает с ролью.
     cpuMonitor.trackRole(creep.memory.role, () => {
       try {
         roleModule.run(creep, roomState);
@@ -85,28 +88,63 @@ function detectAttack(roomState) {
   return previousTotalHits - currentTotalHits > ATTACK_DROP_THRESHOLD;
 }
 
+/**
+ * Возвращает самого сильно раненого союзного крипа, физически находящегося
+ * в комнате башни, либо null. В roomState.creeps попадают и крипы с
+ * homeRoom == комнаты, ушедшие в ремоут/на другой сквад — их башня вылечить
+ * не может, поэтому фильтруем по текущей комнате. Выбирается крип с худшим
+ * отношением hits/hitsMax (а не первый попавшийся), чтобы лечение спасало
+ * именно того, кто вот-вот погибнет.
+ * @param {Object} roomState
+ * @param {string} roomName
+ * @returns {Creep|null}
+ */
+function findWoundedCreep(roomState, roomName) {
+  let wounded = null;
+  let worstRatio = 1;
+
+  for (let i = 0; i < roomState.creeps.length; i++) {
+    const creep = roomState.creeps[i];
+    if (creep.room.name !== roomName) continue;
+    if (creep.hits >= creep.hitsMax) continue;
+
+    const ratio = creep.hits / creep.hitsMax;
+    if (ratio < worstRatio) {
+      worstRatio = ratio;
+      wounded = creep;
+    }
+  }
+
+  return wounded;
+}
+
 function runTowerLogic(roomState) {
   cpuMonitor.trackRole("towers", () => {
     if (!roomState.towers || roomState.towers.length === 0) return;
 
     const roomName = roomState.roomName;
-    const wasUnderAttack =
-      Memory.rooms[roomName] && Memory.rooms[roomName].underAttack;
+
+    // Врагов сканируем КАЖДЫЙ тик, а не "по тревоге". Раньше список
+    // hostiles заполнялся только при Memory.rooms[].underAttack, который сам
+    // вычислялся из этого же списка (всегда пустого) — из-за этого башни
+    // молчали, пока враг не снесёт >1500 хитов стен за один тик.
+    // room.find выполняется только в комнатах с башнями.
+    const hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
+
+    // Просадка суммарных хитов стен/валов за тик — дополнительный признак
+    // атаки (например, враг в этом тике бьёт только стены/валы).
     const hitsDropped = detectAttack(roomState);
 
-    const roomData = {};
+    const roomData = {
+      hostiles,
+      // Раненый союзник нужен каждый тик: лечение не должно ждать
+      // REPAIR_INTERVAL и не должно блокироваться ремонтом (см. role.tower).
+      woundedCreep: findWoundedCreep(roomState, roomName),
+    };
 
-    if (wasUnderAttack || hitsDropped) {
-      roomData.hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
-    } else {
-      roomData.hostiles = [];
-    }
-
-    Memory.rooms[roomName].underAttack = roomData.hostiles.length > 0;
+    Memory.rooms[roomName].underAttack = hostiles.length > 0 || hitsDropped;
 
     if (Game.time % TOWER.REPAIR_INTERVAL === 0) {
-      roomData.woundedCreep = roomState.creeps.find(c => c.hits < c.hitsMax);
-
       const wallThreshold =
         roomState.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
 
@@ -355,13 +393,24 @@ module.exports = {
   /**
    * Главный метод уровня комнат: строит состояния и запускает
    * логику для каждой собственной комнаты.
+   *
+   * Профилирование (ТЗ №0): замеряются только два дополнительных крупных
+   * блока — построение roomState всех комнат ("roomState") и полная
+   * обработка одной комнаты (`room:<имя>`, она включает в себя уже
+   * существующие бакеты spawnManager/labManager/taskManager/роли/towers/
+   * linkManager/factoryManager/powerSpawnManager). Логика и порядок вызовов
+   * не изменены — добавлены только обёртки измерения.
    * @returns {Object[]} массив roomState
    */
   run: function () {
-    const roomStates = this.buildAllRoomStates();
+    const roomStates = cpuMonitor.trackRole("roomState", () =>
+      this.buildAllRoomStates(),
+    );
 
     for (const roomState of roomStates) {
-      this.runRoom(roomState);
+      cpuMonitor.trackRole(`room:${roomState.roomName}`, () =>
+        this.runRoom(roomState),
+      );
     }
 
     return roomStates;
