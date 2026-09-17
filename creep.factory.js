@@ -4,7 +4,7 @@
  * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
-const { PRESPAWN_THRESHOLD, CREEP_BODIES } = require("./constants");
+const { PRESPAWN_THRESHOLD, CREEP_BODIES, HARVESTER } = require("./constants");
 
 const prepareBody = ({
   work = 0,
@@ -79,12 +79,23 @@ const factory = {
       memory: {},
     }),
 
-    harvester: () => ({
-      body: prepareBody(CREEP_BODIES.harvester),
-      memory: {
-        state: "harvesting",
-      },
-    }),
+    harvester: spawn => {
+      // Двухуровневое тело (см. constants.HARVESTER):
+      // хватает энергии в спавнах/расширениях — штатное тело на 400;
+      // аварийная ситуация (энергии нет нигде) — минимальное тело на 200,
+      // чтобы крип вообще мог встать и поднять комнату.
+      const body =
+        spawn.room.energyAvailable >= HARVESTER.NORMAL_BODY_ENERGY
+          ? CREEP_BODIES.harvester
+          : CREEP_BODIES.harvesterEmergency;
+
+      return {
+        body: prepareBody(body),
+        memory: {
+          state: "harvesting",
+        },
+      };
+    },
 
     upgrader: () => ({
       body: prepareBody(CREEP_BODIES.upgrader),

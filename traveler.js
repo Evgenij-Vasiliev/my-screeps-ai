@@ -246,15 +246,32 @@ module.exports = function (globalOpts = {}) {
         travelData.prev = undefined;
         let cpu = Game.cpu.getUsed();
         let ret = this.findTravelPath(creep, destPos, options);
-        travelData.cpu += Game.cpu.getUsed() - cpu;
+        // cpu/count — это ОКНО между отчётами, а не накопление за всю жизнь.
+        // Раньше travelData.cpu суммировался за всю жизнь крипа и не сбрасывался:
+        // у долгоживущего крипа после порога 50 сообщение печаталось на КАЖДОМ
+        // пересчёте пути (лог-спам, а сам console.log в Screeps тоже ест CPU),
+        // при этом число в логе — не стоимость текущего тика, а суммарная.
+        // Теперь окно обнуляется после отчёта, cpuTotal хранит значение за жизнь
+        // только для диагностики.
+        const pathCost = Game.cpu.getUsed() - cpu;
+        travelData.cpu += pathCost;
         travelData.count++;
+        travelData.cpuTotal = (travelData.cpuTotal || 0) + pathCost;
         if (travelData.cpu > gOpts.reportThreshold) {
           console.log(
-            `TRAVELER: heavy cpu use: ${creep.name}, cpu: ${_.round(
+            `TRAVELER: heavy pathing: ${creep.name}, cpu: ${_.round(
               travelData.cpu,
+              2,
+            )} за ${travelData.count} перепчётов (avg ${_.round(
+              travelData.cpu / travelData.count,
+              3,
+            )}), всего за жизнь: ${_.round(
+              travelData.cpuTotal,
               2,
             )}, pos: ${creep.pos}`,
           );
+          travelData.cpu = 0;
+          travelData.count = 0;
         }
         if (ret.incomplete) {
           console.log(`TRAVELER: incomplete path for ${creep.name}`);
@@ -385,6 +402,13 @@ module.exports = function (globalOpts = {}) {
     Creep.prototype.travelTo = function (destination, options) {
       if (global.traveler && global.travelerTick !== Game.time) {
         global.traveler = new Traveler();
+        // ВАЖНО: без этой строки travelerTick оставался равным тику загрузки
+        // модуля (Global Reset), и условие выше было истинно ВСЕГДА. Тогда
+        // каждый вызов travelTo создавал новый экземпляр Traveler с пустыми
+        // кэшами матриц — то есть CostMatrix комнаты (room.find(FIND_STRUCTURES)
+        // + обход дорог/стен, traveler.js:312-334) перестраивалась на КАЖДЫЙ
+        // пересчёт пути вместо одного раза за тик.
+        global.travelerTick = Game.time;
       }
       return global.traveler.travelTo(this, destination, options);
     };

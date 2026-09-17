@@ -12,15 +12,6 @@ const STORAGE = {
   ENERGY_MIN: 150000, // не опускаться ниже — резерв комнаты
 };
 
-// ── TASK_TYPES ───────────────────────────────────────────────────────────
-// Типы задач для системы Worker/Task (taskManager, taskExecutors).
-const TASK_TYPES = {
-  TRANSFER: "transfer",
-  BUILD: "build",
-  REPAIR: "repair",
-  UPGRADE: "upgrade",
-};
-
 // ── TERMINAL_SUPPLY ──────────────────────────────────────────────────────
 // Пороги пополнения терминала энергией/ресурсами из Storage.
 // Единый источник порогов — market.manager.js продаёт всё, что превышает
@@ -63,7 +54,9 @@ const TOWER = {
   WALL_THRESHOLD_DEFAULT: 1000, // стартовый порог прочности стен для ремонта
   WALL_THRESHOLD_STEP: 1000, // на сколько поднимаем порог с каждым уровнем
   SUPPLY_THRESHOLD: 750, // ниже этого — башне нужна подпитка энергией
-  HOSTILE_CHECK_INTERVAL: 100, // раз в сколько тиков ищем врагов (когда их не было)
+  // Интервала скана врагов здесь нет намеренно: комнаты с башнями ищут
+  // FIND_HOSTILE_CREEPS каждый тик (room.manager.runTowerLogic) — иначе
+  // башни запаздывают с реакцией на нападение и не лечат своих.
 };
 
 // ── TASK_CONFIG ──────────────────────────────────────────────────────────
@@ -124,14 +117,28 @@ const SPAWN_QUOTA = {
 // Точечные переопределения SPAWN_QUOTA для конкретных комнат.
 // Если роль для комнаты не указана здесь — берётся значение из SPAWN_QUOTA.
 const ROOM_SPAWN_QUOTA_OVERRIDES = {
-  E35S37: { harvester: 2 },
+  E35S37: { harvester: 1 },
   E35S39: { harvester: 2 },
+  E36S38: { harvester: 2 },
 };
 
 // ── MINERAL_MIN_AMOUNT_TO_SPAWN ──────────────────────────────────────────
 // Минимальный остаток минерала в месторождении, ниже которого
 // mineralMiner не спавнится (нет смысла добывать крохи).
 const MINERAL_MIN_AMOUNT_TO_SPAWN = 500;
+
+// ── HARVESTER ────────────────────────────────────────────────────────────
+// Роль-страховка (пока Task System не справляется с подвозом энергии в
+// спавны/расширения). Тело двухуровневое:
+//   - штатное (CREEP_BODIES.harvester, 400 энергии) — когда в спавнах и
+//     расширениях энергии хватает. Батарея в 4 раза больше → в 4 раза меньше
+//     рейсов storage ↔ расширения, а каждый рейс — это вызовы PathFinder.search
+//     (0.04–0.11 CPU за вызов, замер 17.09.2026);
+//   - аварийное (CREEP_BODIES.harvesterEmergency, 200 энергии) — когда энергии
+//     в спавнах/расширениях нет, чтобы крип мог встать и поднять комнату.
+const HARVESTER = {
+  NORMAL_BODY_ENERGY: 400, // = стоимость штатного тела {work:1,carry:4,move:3}
+};
 
 // ── CREEP_BODIES ─────────────────────────────────────────────────────────
 // Тело (набор частей) для каждой роли. Порядок частей в самом крипе
@@ -140,7 +147,8 @@ const CREEP_BODIES = {
   miner: { work: 5, carry: 12, move: 5 },
   towerSupplier: { carry: 4, move: 2 },
   linkWorker: { carry: 4, move: 2 },
-  harvester: { work: 1, carry: 1, move: 1 },
+  harvester: { work: 1, carry: 4, move: 3 },
+  harvesterEmergency: { work: 1, carry: 1, move: 1 },
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
   repairer: { work: 3, carry: 2, move: 3 },
@@ -174,6 +182,16 @@ const CPU = {
   REPORT_INTERVAL: 10,
   AVERAGE_WINDOW: 100,
   BUCKET_CRITICAL: 500,
+
+  // ── Профилирование Room Manager (ТЗ №0, временный блок) ────────────────
+  // PROFILE_ENABLED: false — полностью выключает измерительный слой
+  // (замеры не копятся, Memory.cpuStats.profile не обновляется).
+  // PROFILE_REPORT_INTERVAL: раз в сколько тиков накопленное окно замеров
+  // сбрасывается в Memory.cpuStats.profile и печатается сводка в консоль.
+  // Сами замеры копятся в heap каждый тик (без обращений к Memory), так что
+  // сбор не создаёт заметной нагрузки; Memory пишется 1 раз в N тиков.
+  PROFILE_ENABLED: true,
+  PROFILE_REPORT_INTERVAL: 100,
 };
 
 // ── MARKET ───────────────────────────────────────────────────────────────
@@ -202,7 +220,6 @@ const MARKET = {
 
 module.exports = {
   STORAGE,
-  TASK_TYPES,
   TERMINAL_SUPPLY,
   TERMINAL_NETWORK,
   FACTORY,
@@ -211,6 +228,7 @@ module.exports = {
   TOWER,
   TASK_CONFIG,
   POWER_SPAWN,
+  HARVESTER,
   SPAWN_QUOTA,
   ROOM_SPAWN_QUOTA_OVERRIDES,
   MINERAL_MIN_AMOUNT_TO_SPAWN,
