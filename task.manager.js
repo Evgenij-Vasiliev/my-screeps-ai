@@ -12,7 +12,16 @@ const TASK_CHAIN = [
   "upgradeController",
 ];
 
+// Проверка «категория из цепочки» за O(1) вместо TASK_CHAIN.includes()
+// (ТЗ №1, P7): порядок цепочки остаётся единственным источником правды.
+const TASK_TYPES = /** @type {Object<string, boolean>} */ ({});
+for (let i = 0; i < TASK_CHAIN.length; i++) {
+  TASK_TYPES[TASK_CHAIN[i]] = true;
+}
+
 function initRoomTasks(roomName) {
+  // ТЗ №1 (счётчик): полный проход по TASK_CHAIN — измеряем число прогонов и
+  // итераций. Ставится в консоли/heap-вызове, addTask больше его не вызывает.
   if (!Memory.rooms) {
     Memory.rooms = {};
   }
@@ -32,6 +41,32 @@ function initRoomTasks(roomName) {
   }
 }
 
+/**
+ * Возвращает (создавая при необходимости) очередь конкретной категории.
+ * Полная инициализация всех категорий (initRoomTasks) нужна при первом
+ * появлении комнаты; на каждом addTask достаточно своей категории — O(1)
+ * вместо прохода по всему TASK_CHAIN (ТЗ №1, P7).
+ * @param {string} roomName
+ * @param {string} taskType
+ * @returns {any[]}
+ */
+function ensureQueue(roomName, taskType) {
+  if (!Memory.rooms) {
+    Memory.rooms = {};
+  }
+  if (!Memory.rooms[roomName]) {
+    Memory.rooms[roomName] = {};
+  }
+  const roomMemory = Memory.rooms[roomName];
+  if (!roomMemory.tasks) {
+    roomMemory.tasks = {};
+  }
+  if (!roomMemory.tasks[taskType]) {
+    roomMemory.tasks[taskType] = [];
+  }
+  return roomMemory.tasks[taskType];
+}
+
 function generateTaskId() {
   if (typeof global._taskIdSeq !== "number") {
     global._taskIdSeq = 0;
@@ -42,6 +77,7 @@ function generateTaskId() {
 }
 
 function findIndexByTaskId(queue, taskId) {
+  // ТЗ №1 (счётчик): полный проход очереди на каждую reserve/complete/remove.
   for (let i = 0; i < queue.length; i++) {
     if (queue[i].taskId === taskId) {
       return i;
@@ -52,20 +88,20 @@ function findIndexByTaskId(queue, taskId) {
 }
 
 function addTask(roomName, taskType, task) {
-  if (!TASK_CHAIN.includes(taskType)) {
-    return false;
+  if (!TASK_TYPES[taskType]) {    return false;
   }
-  if (typeof task !== "object" || task === null) {
-    return false;
+  if (typeof task !== "object" || task === null) {    return false;
   }
 
-  initRoomTasks(roomName);
+  // Раньше здесь вызывался initRoomTasks (проход по всем 11 категориям на
+  // каждую создаваемую задачу) — теперь только очередь своей категории.
+  const queue = ensureQueue(roomName, taskType);
 
   if (typeof task.taskId === "undefined") {
     task.taskId = generateTaskId();
   }
 
-  Memory.rooms[roomName].tasks[taskType].push(task);
+  queue.push(task);
   return true;
 }
 
@@ -75,18 +111,21 @@ function getNextTask(roomName, taskType) {
     !Memory.rooms[roomName] ||
     !Memory.rooms[roomName].tasks ||
     !Memory.rooms[roomName].tasks[taskType]
-  ) {
-    return null;
+  ) {    return null;
   }
 
   const queue = Memory.rooms[roomName].tasks[taskType];
-
   for (let i = 0; i < queue.length; i++) {
-    if (!queue[i].reservedBy || !Game.creeps[queue[i].reservedBy]) {
+    const reservedBy = queue[i].reservedBy;
+    // ТЗ №1 (H6): запись, зарезервированная крипом, которого уже нет,
+    // удлиняет просмотр очереди — считаем такие случаи отдельно.
+    if (reservedBy && !Game.creeps[reservedBy]) {    }
+    if (!reservedBy || !Game.creeps[reservedBy]) {
       return queue[i];
     }
   }
 
+  if (queue.length === 0) {  } else {  }
   return null;
 }
 
@@ -96,19 +135,16 @@ function reserveTask(roomName, taskType, task, creepName) {
     !Memory.rooms[roomName] ||
     !Memory.rooms[roomName].tasks ||
     !Memory.rooms[roomName].tasks[taskType]
-  ) {
-    return false;
+  ) {    return false;
   }
 
-  if (!task || typeof task.taskId === "undefined") {
-    return false;
+  if (!task || typeof task.taskId === "undefined") {    return false;
   }
 
   const queue = Memory.rooms[roomName].tasks[taskType];
   const index = findIndexByTaskId(queue, task.taskId);
 
-  if (index === -1) {
-    return false;
+  if (index === -1) {    return false;
   }
 
   // Резервация проставляется на реальном объекте очереди, а не на
@@ -124,19 +160,16 @@ function releaseTask(roomName, taskType, task) {
     !Memory.rooms[roomName] ||
     !Memory.rooms[roomName].tasks ||
     !Memory.rooms[roomName].tasks[taskType]
-  ) {
-    return false;
+  ) {    return false;
   }
 
-  if (!task || typeof task.taskId === "undefined") {
-    return false;
+  if (!task || typeof task.taskId === "undefined") {    return false;
   }
 
   const queue = Memory.rooms[roomName].tasks[taskType];
   const index = findIndexByTaskId(queue, task.taskId);
 
-  if (index === -1) {
-    return false;
+  if (index === -1) {    return false;
   }
 
   delete queue[index].reservedBy;
@@ -149,19 +182,16 @@ function completeTask(roomName, taskType, task) {
     !Memory.rooms[roomName] ||
     !Memory.rooms[roomName].tasks ||
     !Memory.rooms[roomName].tasks[taskType]
-  ) {
-    return false;
+  ) {    return false;
   }
 
-  if (!task || typeof task.taskId === "undefined") {
-    return false;
+  if (!task || typeof task.taskId === "undefined") {    return false;
   }
 
   const queue = Memory.rooms[roomName].tasks[taskType];
   const index = findIndexByTaskId(queue, task.taskId);
 
-  if (index === -1) {
-    return false;
+  if (index === -1) {    return false;
   }
 
   delete queue[index].reservedBy;

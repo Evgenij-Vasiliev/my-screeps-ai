@@ -8,34 +8,51 @@ function run(creep) {
     creep.memory.taskIndex = 0;
   }
 
-  const roomName = creep.room.name;
+  // Комната очереди — homeRoom крипа (ТЗ №1, задача 11 роадмапа): задачи роли
+  // создаются в домашней комнате, поэтому и брать/завершать их нужно там. Если
+  // очередь домашней комнаты ещё не инициализирована, поведение прежнее —
+  // физическая комната. Для обычного крипа (homeRoom === текущая комната)
+  // ничего не меняется.
+  const homeRoom = creep.memory.homeRoom;
+  const roomName =
+    homeRoom && Memory.rooms && Memory.rooms[homeRoom]
+      ? homeRoom
+      : creep.room.name;
 
   if (!creep.memory.task) {
-    const taskType = TASK_CHAIN[creep.memory.taskIndex];
-    const task = taskManager.getNextTask(roomName, taskType);
+    // Поиск по всей цепочке за один тик (ТЗ №1, задача 2 роадмапа): старт с
+    // taskIndex, дальше по приоритетному порядку TASK_CHAIN с заворотом.
+    // taskIndex остаётся точкой старта — он не «перескакивает» пустые категории
+    // по одному типу за тик, а остаётся ближайшим приоритетным стартом.
+    let pickedIndex = -1;
+    let pickedTask = null;
 
-    if (!task) {
-      // Очередь текущего taskType пуста (или все Task зарезервированы) —
-      // переходим ровно на следующий тип.
-      creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
+    for (let i = 0; i < TASK_CHAIN.length; i++) {
+      const index = (creep.memory.taskIndex + i) % TASK_CHAIN.length;
+      const taskType = TASK_CHAIN[index];
+      const task = taskManager.getNextTask(roomName, taskType);
+
+      if (!task) continue;
+
+      if (!taskManager.reserveTask(roomName, taskType, task, creep.name)) {
+        // Защитный случай: не удалось зарезервировать (например, Task уже
+        // не в очереди) — пробуем следующую категорию.
+        continue;
+      }
+
+      pickedIndex = index;
+      pickedTask = task;
+      break;
+    }
+
+    if (!pickedTask) {
+      // Вся цепочка пуста (или все Task зарезервированы).
       return;
     }
 
-    const reserved = taskManager.reserveTask(
-      roomName,
-      taskType,
-      task,
-      creep.name,
-    );
-
-    if (!reserved) {
-      // Защитный случай: не удалось зарезервировать (например, Task уже
-      // не в очереди). В этом тике ничего не берём.
-      return;
-    }
-
+    creep.memory.taskIndex = pickedIndex;
     // Task остаётся в FIFO — только ссылка сохраняется в памяти Worker.
-    creep.memory.task = task;
+    creep.memory.task = pickedTask;
   }
 
   // Категория определяется через taskIndex (позицию в TASK_CHAIN),
