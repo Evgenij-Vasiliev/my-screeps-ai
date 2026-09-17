@@ -28,7 +28,10 @@ function initGlobalCaches() {
     global._attackerNamesCacheCount = 0;
     global._attackerNamesCacheUpdatedAt = 0;
   }
-  if (!global._towerState) global._towerState = {};
+  // Heap-кэш суммарных хитов стен/валов на прошлом скане (detectAttack):
+  // значение живёт между сканами TOWER.WALL_SCAN_INTERVAL, в Memory его
+  // сериализовать незачем.
+  if (!global._towerWallHits) global._towerWallHits = {};
   if (typeof global._taskIdSeq !== "number") global._taskIdSeq = 0;
 }
 
