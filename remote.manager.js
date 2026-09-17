@@ -5,14 +5,23 @@
  * Резервер, дальний майнер и дальний хайлер
  * распределяются по комнатам и запускают свою
  * ролевую логику.
+ *
+ * Список удалённых комнат — constants.REMOTE.ROOMS (одна точка правды;
+ * роли используют тот же список для fallback-назначения).
+ *
+ * Кэш имён ролей: пересобирается, когда изменилось число крипов в империи
+ * или прошло REMOTE_CACHE_MAX_AGE тиков. Дешёвая проверка по количеству
+ * сознательно оставлена как есть (разбор — docs/REMOTE-CPU-OPTIMIZATION.md,
+ * раздел 6: у блока remoteManager на менеджер приходится меньше 3 % CPU,
+ * а корректная инвалидация «по набору имён» стоит дороже — это отдельная
+ * задача 10 в docs/PROJECT_AUDIT_AND_ROADMAP.md).
  * ===================================================
  */
 
 const roleReserver = require("remote.reserver");
 const roleRemoteMiner = require("remote.miner");
 const roleRemoteHauler = require("remote.hauler");
-
-const REMOTE_ROOMS = ["E35S38", "E36S37"];
+const { REMOTE } = require("./constants");
 
 function assignTargetRoom(creeps) {
   const usedRooms = {};
@@ -22,7 +31,7 @@ function assignTargetRoom(creeps) {
 
   for (const creep of creeps) {
     if (!creep.memory.targetRoom) {
-      const targetRoom = REMOTE_ROOMS.find(room => !usedRooms[room]);
+      const targetRoom = REMOTE.ROOMS.find(room => !usedRooms[room]);
       if (targetRoom) {
         creep.memory.targetRoom = targetRoom;
         usedRooms[targetRoom] = true;
