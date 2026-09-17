@@ -10,7 +10,6 @@
 const scanner = require("scanner");
 const { getRoomRole } = require("roomRoles");
 const mineralManager = require("mineral.manager");
-const taskManager = require("task.manager");
 const taskGenerators = require("task.generators");
 const spawnManager = require("spawn.manager");
 const factoryManager = require("factory.manager");
@@ -65,27 +64,80 @@ function runCreepLogic(roomState) {
   }
 }
 
-function detectAttack(roomState) {
-  const roomName = roomState.roomName;
-  const ATTACK_DROP_THRESHOLD = 1500;
+/**
+ * Суммарные хиты стен/валов на прошлом скане. Хранится в heap, а не в Memory:
+ * значение живёт ровно между двумя сканами (TOWER.WALL_SCAN_INTERVAL) и
+ * больше никому не нужно, а запись в Memory каждый тик держала всю Memory
+ * «грязной» ради одного числа.
+ * @returns {Object<string, number>}
+ */
+function getWallHitsCache() {
+  if (!global._towerWallHits) global._towerWallHits = {};
+  return global._towerWallHits;
+}
 
-  if (!Memory.rooms) Memory.rooms = {};
-  if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
+/**
+ * Один проход по стенам и валам комнаты (выполняется раз в
+ * TOWER.WALL_SCAN_INTERVAL тиков): суммарные хиты — сигнал «враг бьёт только
+ * стены», плюс самая слабая стена/рампарт ниже порога ремонта. Разыменование
+ * идёт по id из scanner-кэша, без map/filter/concat, то есть без аллокаций
+ * массивов на каждый тик.
+ * @param {Object} roomState
+ * @returns {{ totalHits: number, weakest: any, wallThreshold: number }}
+ */
+function scanWallsAndRamparts(roomState) {
+  const cache = scanner.getStructureCache(roomState.room);
+  const wallThreshold =
+    roomState.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
 
-  const wallsAndRamparts = []
-    .concat(roomState.walls)
-    .concat(roomState.ramparts);
+  let totalHits = 0;
+  let weakest = null;
 
-  const currentTotalHits = wallsAndRamparts.reduce((sum, s) => sum + s.hits, 0);
-  const previousTotalHits = Memory.rooms[roomName].lastWallHits;
-
-  Memory.rooms[roomName].lastWallHits = currentTotalHits;
-
-  if (previousTotalHits === undefined) {
-    return false;
+  const wallIds = cache.wallIds;
+  for (let i = 0; i < wallIds.length; i++) {
+    const s = Game.getObjectById(wallIds[i]);
+    if (!s) continue;
+    totalHits += s.hits;
+    if (s.hits < wallThreshold && (weakest === null || s.hits < weakest.hits)) {
+      weakest = s;
+    }
   }
 
-  return previousTotalHits - currentTotalHits > ATTACK_DROP_THRESHOLD;
+  const rampartIds = cache.rampartIds;
+  for (let i = 0; i < rampartIds.length; i++) {
+    const s = Game.getObjectById(rampartIds[i]);
+    if (!s) continue;
+    totalHits += s.hits;
+    if (s.hits < wallThreshold && (weakest === null || s.hits < weakest.hits)) {
+      weakest = s;
+    }
+  }
+
+  return { totalHits, weakest, wallThreshold };
+}
+
+/**
+ * Список вражеских лекарей (их башни убивают первыми). Считается один раз на
+ * комнату за тик, а не внутри roleTower.run для каждой башни: раньше
+ * body.some(HEAL) прогонялся N_башен × N_врагов раз за тик.
+ * @param {Creep[]} hostiles
+ * @returns {Creep[]|null}
+ */
+function findHealers(hostiles) {
+  let healers = null;
+
+  for (let i = 0; i < hostiles.length; i++) {
+    const body = hostiles[i].body;
+    for (let j = 0; j < body.length; j++) {
+      if (body[j].type === HEAL) {
+        if (healers === null) healers = [];
+        healers.push(hostiles[i]);
+        break;
+      }
+    }
+  }
+
+  return healers;
 }
 
 /**
@@ -120,9 +172,13 @@ function findWoundedCreep(roomState, roomName) {
 
 function runTowerLogic(roomState) {
   cpuMonitor.trackRole("towers", () => {
-    if (!roomState.towers || roomState.towers.length === 0) return;
+    const towers = roomState.towers;
+    if (!towers || towers.length === 0) return;
 
     const roomName = roomState.roomName;
+
+    if (!Memory.rooms) Memory.rooms = {};
+    const roomMemory = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
 
     // Врагов сканируем КАЖДЫЙ тик, а не "по тревоге". Раньше список
     // hostiles заполнялся только при Memory.rooms[].underAttack, который сам
@@ -130,51 +186,44 @@ function runTowerLogic(roomState) {
     // молчали, пока враг не снесёт >1500 хитов стен за один тик.
     // room.find выполняется только в комнатах с башнями.
     const hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
-
-    // Просадка суммарных хитов стен/валов за тик — дополнительный признак
-    // атаки (например, враг в этом тике бьёт только стены/валы).
-    const hitsDropped = detectAttack(roomState);
+    const hasHostiles = hostiles.length > 0;
 
     const roomData = {
       hostiles,
+      // Лекарей ищем один раз на комнату (а не в каждой башне).
+      healers: hasHostiles ? findHealers(hostiles) : null,
       // Раненый союзник нужен каждый тик: лечение не должно ждать
-      // REPAIR_INTERVAL и не должно блокироваться ремонтом (см. role.tower).
+      // WALL_SCAN_INTERVAL и не должно блокироваться ремонтом (см. role.tower).
       woundedCreep: findWoundedCreep(roomState, roomName),
     };
 
-    Memory.rooms[roomName].underAttack = hostiles.length > 0 || hitsDropped;
+    // Тяжёлая часть (стены/валы) выполняется только раз в
+    // TOWER.WALL_SCAN_INTERVAL тиков — в тот же тик, в который башни
+    // ремонтируют (REPAIR_INTERVAL), поэтому цели ремонта считаются тогда,
+    // когда нужны, и ни один интент ремонта не теряется.
+    let hitsDropped = false;
 
-    if (Game.time % TOWER.REPAIR_INTERVAL === 0) {
-      const wallThreshold =
-        roomState.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
+    if (Game.time % TOWER.WALL_SCAN_INTERVAL === 0) {
+      const scan = scanWallsAndRamparts(roomState);
 
-      // Поиск самой повреждённой стены/рампарта одним проходом, без filter+sort
-      let weakestWallOrRampart = null;
-      let foundBelowThreshold = false;
-      const wallsAndRamparts = []
-        .concat(roomState.walls)
-        .concat(roomState.ramparts);
-
-      for (let i = 0; i < wallsAndRamparts.length; i++) {
-        const s = wallsAndRamparts[i];
-        if (s.hits < wallThreshold) {
-          foundBelowThreshold = true;
-          if (
-            weakestWallOrRampart === null ||
-            s.hits < weakestWallOrRampart.hits
-          ) {
-            weakestWallOrRampart = s;
-          }
-        }
+      if (scan.weakest) {
+        roomData.wallTarget = scan.weakest;
+      } else {
+        // Стен ниже порога нет — поднимаем планку (как и раньше).
+        roomMemory.wallThreshold =
+          scan.wallThreshold + TOWER.WALL_THRESHOLD_STEP;
       }
 
-      if (!foundBelowThreshold) {
-        roomState.room.memory.wallThreshold =
-          wallThreshold + TOWER.WALL_THRESHOLD_STEP;
-      }
-      roomData.wallsAndRamparts = weakestWallOrRampart
-        ? [weakestWallOrRampart]
-        : [];
+      // Просадка суммарных хитов стен/валов — дополнительный признак атаки
+      // (например, враг бьёт только стены/валы). Порог масштабирован на длину
+      // интервала, чтобы чувствительность (хитов на тик) не изменилась.
+      const wallHits = getWallHitsCache();
+      const previousTotalHits = wallHits[roomName];
+      wallHits[roomName] = scan.totalHits;
+      hitsDropped =
+        previousTotalHits !== undefined &&
+        previousTotalHits - scan.totalHits >
+          TOWER.HITS_DROP_THRESHOLD * TOWER.WALL_SCAN_INTERVAL;
 
       // Поиск самого повреждённого здания одним проходом, без sort
       let weakestDamagedStructure = null;
@@ -188,10 +237,17 @@ function runTowerLogic(roomState) {
           weakestDamagedStructure = s;
         }
       }
-      roomData.damagedStructure = weakestDamagedStructure;
+      roomData.damagedTarget = weakestDamagedStructure;
     }
 
-    for (const tower of roomState.towers) {
+    // Пишем только при изменении: одно и то же значение каждый тик — лишний
+    // нагрев Memory (её сериализация + парсинг в начале следующего тика).
+    const underAttack = hasHostiles || hitsDropped;
+    if (roomMemory.underAttack !== underAttack) {
+      roomMemory.underAttack = underAttack;
+    }
+
+    for (const tower of towers) {
       roleTower.run(tower, roomData);
     }
   });
@@ -239,10 +295,11 @@ module.exports = {
         .map(id => Game.getObjectById(id))
         .filter(Boolean),
       roads: cache.roadIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      walls: cache.wallIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      ramparts: cache.rampartIds
-        .map(id => Game.getObjectById(id))
-        .filter(Boolean),
+      // walls/ramparts здесь НЕ разыменовываются: их читает только
+      // runTowerLogic, и только раз в TOWER.WALL_SCAN_INTERVAL тиков —
+      // напрямую по id из scanner-кэша (см. scanWallsAndRamparts).
+      // Раньше на каждый тик в каждой комнате уходило ~190 Game.getObjectById
+      // плюс два массива map/filter только ради башенного скана.
       factories: cache.factoryId
         ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
         : [],
@@ -314,8 +371,6 @@ module.exports = {
       towers: grouped.towers,
       extensions: grouped.extensions,
       roads: grouped.roads,
-      walls: grouped.walls,
-      ramparts: grouped.ramparts,
       damagedStructures,
       creeps,
       sources,

@@ -6,8 +6,10 @@ declare global {
     mineral?: any;
     links?: any;
     structureCache?: any;
-    lastWallHits?: number;
     underAttack?: boolean;
+    // Порог прочности стен для башенного ремонта: растёт на
+    // TOWER.WALL_THRESHOLD_STEP каждый скан, когда стен ниже порога нет.
+    wallThreshold?: number;
     role?: string;
     minerSpots?: any[];
     labWorkerIndex?: number;
