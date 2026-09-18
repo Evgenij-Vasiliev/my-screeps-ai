@@ -425,19 +425,12 @@ module.exports = {
   runRoom: function (roomState) {
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
     cpuMonitor.trackRole("labManager", () => labManager.run(roomState.room));
-    cpuMonitor.trackRole("taskManager", () => {
-      taskGenerators.generateFillSpawnsExtensions(roomState);
-      taskGenerators.generateFillPowerSpawnPower(roomState);
-      taskGenerators.generateFillPowerSpawnEnergy(roomState);
-      taskGenerators.generateFillFactoryEnergy(roomState);
-      taskGenerators.generateCollectFactoryBattery(roomState);
-      taskGenerators.generateFillTerminalEnergy(roomState);
-      taskGenerators.generateFillTerminalResources(roomState);
-      taskGenerators.generateFillTowers(roomState);
-      taskGenerators.generateRepairStructures(roomState);
-      taskGenerators.generateBuildStructures(roomState);
-      taskGenerators.generateUpgradeController(roomState);
-    });
+    // Единая точка генерации задач с троттлингом по категориям
+    // (TASK_GEN_INTERVAL в constants.js): генераторы идемпотентны, поэтому
+    // дорогие сканы целей (ремонт, стройка) не обязаны идти каждый тик.
+    cpuMonitor.trackRole("taskManager", () =>
+      taskGenerators.runAll(roomState),
+    );
     runCreepLogic(roomState);
     runTowerLogic(roomState);
     runLinkLogic(roomState);

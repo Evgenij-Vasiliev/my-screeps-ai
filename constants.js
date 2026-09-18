@@ -85,6 +85,27 @@ const TASK_CONFIG = {
   upgradeController: true, // прокачка контроллера
 };
 
+// ── TASK_GEN_INTERVAL ────────────────────────────────────────────────────
+// Как часто перегенерировать очередь категории задач (в тиках). Генератор
+// идемпотентен (дедуп по taskType|targetId|resourceType), поэтому пропуск тика
+// не создаёт дублей — только откладывает реакцию на смену состояния цели.
+// 1 — каждый тик. Фаза расписания сдвигается по имени комнаты, чтобы комнаты
+// не пересобирали очереди в один и тот же тик (синхронные пики CPU).
+const TASK_GEN_INTERVAL = {
+  fillSpawnsExtensions: 1, // критичная логистика энергии спавна — каждый тик
+  fillPowerSpawnPower: 5,
+  fillPowerSpawnEnergy: 5,
+  fillTerminalEnergy: 5,
+  fillTerminalResources: 5,
+  fillFactoryEnergy: 5,
+  collectFactoryBattery: 5,
+  repairStructures: 3,
+  buildStructures: 3,
+  fillTowers: 2,
+  upgradeController: 5,
+};
+const TASK_GEN_INTERVAL_DEFAULT = 1;
+
 // ── POWER_SPAWN ──────────────────────────────────────────────────────────
 // Минимумы для запуска processPower() в PowerSpawn.
 const POWER_SPAWN = {
@@ -123,8 +144,8 @@ const SPAWN_QUOTA = {
 // Если роль для комнаты не указана здесь — берётся значение из SPAWN_QUOTA.
 const ROOM_SPAWN_QUOTA_OVERRIDES = {
   E35S37: { harvester: 0 },
-  E35S39: { harvester: 1 },
-  E36S38: { harvester: 1 },
+  E35S39: { harvester: 0 },
+  E36S38: { harvester: 0 },
 };
 
 // ── MINERAL_MIN_AMOUNT_TO_SPAWN ──────────────────────────────────────────
@@ -330,6 +351,8 @@ module.exports = {
   CREEP_BODIES,
   TOWER,
   TASK_CONFIG,
+  TASK_GEN_INTERVAL,
+  TASK_GEN_INTERVAL_DEFAULT,
   POWER_SPAWN,
   HARVESTER,
   MINER,
