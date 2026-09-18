@@ -19,11 +19,7 @@ const labManager = require("lab.manager");
 const roleTower = require("role.tower");
 
 const roleHarvester = require("role.harvester");
-const roleUpgrader = require("role.upgrader");
-const roleBuilder = require("role.builder");
-const roleRepairer = require("role.repairer");
 const roleMiner = require("role.miner");
-const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
 const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
@@ -31,13 +27,13 @@ const roleLabWorker = require("lab.worker");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER } = require("./constants");
 
+// Специализации, которые действительно спавнятся (см. SPAWN_QUOTA).
+// Роли upgrader/builder/repairer/towerSupplier убраны: их квота равна 0 во всех
+// комнатах, а всю их работу (включая прокачку контроллера, стройку, ремонт и
+// подвоз башен) выполняет Task System через worker (worker.runner).
 const ROLES = {
   harvester: roleHarvester,
-  upgrader: roleUpgrader,
-  builder: roleBuilder,
-  repairer: roleRepairer,
   miner: roleMiner,
-  towerSupplier: roleTowerSupplier,
   linkWorker: roleLinkWorker,
   mineralMiner: roleMineralMiner,
   worker: workerRunner,
