@@ -66,6 +66,13 @@ function executeFillSpawnsExtensions(creep, task) {
     return "SKIP";
   }
 
+  // Полноту цели проверяем ДО снятия энергии: иначе воркер снимает полный груз
+  // под цель, которую уже успели заполнить (например, role.harvester), а затем
+  // «осиротевшую» энергию приходится скидывать обратно в storage.
+  if (isTargetFull(target)) {
+    return "DONE";
+  }
+
   if (creep.store[RESOURCE_ENERGY] === 0) {
     const withdrawn = energySource.withdrawFromStorage(creep);
 
@@ -74,10 +81,6 @@ function executeFillSpawnsExtensions(creep, task) {
     }
 
     return "CONTINUE";
-  }
-
-  if (isTargetFull(target)) {
-    return "DONE";
   }
 
   const result = creep.transfer(target, RESOURCE_ENERGY);
@@ -348,6 +351,11 @@ function executeFillTerminalEnergy(creep, task) {
     return "SKIP";
   }
 
+  // Полнота цели — до снятия энергии (см. executeFillSpawnsExtensions).
+  if (isTargetFull(target)) {
+    return "DONE";
+  }
+
   if (creep.store[RESOURCE_ENERGY] === 0) {
     const reserveThreshold =
       STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
@@ -362,10 +370,6 @@ function executeFillTerminalEnergy(creep, task) {
     }
 
     return "CONTINUE";
-  }
-
-  if (isTargetFull(target)) {
-    return "DONE";
   }
 
   const result = creep.transfer(target, RESOURCE_ENERGY);

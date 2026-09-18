@@ -6,6 +6,8 @@ const {
   TERMINAL_SUPPLY,
   TOWER,
   TASK_CONFIG,
+  TASK_GEN_INTERVAL,
+  TASK_GEN_INTERVAL_DEFAULT,
   CONTROLLER,
 } = require("./constants");
 
@@ -390,7 +392,90 @@ function generateUpgradeController(roomState) {
   );
 }
 
+// ── ТРОТТЛИНГ ГЕНЕРАЦИИ ─────────────────────────────────────────────────
+// Генераторы идемпотентны (дедуп по `taskType|targetId|resourceType`), поэтому
+// их можно запускать не каждый тик, а раз в TASK_GEN_INTERVAL тиков категории:
+// пропуск тика не создаёт дублей и не теряет потребность — только откладывает
+// реакцию на смену состояния цели на несколько тиков. Фаза расписания сдвинута
+// по имени комнаты, чтобы комнаты не сканировали в один и тот же тик.
+
+/**
+ * Систематический сдвиг комнаты по имени: разные комнаты запускают генератор в
+ * разные тики внутри интервала. Считается один раз на комнату и живёт в heap.
+ * @param {string} roomName
+ * @returns {number}
+ */
+function getRoomPhase(roomName) {
+  if (!global._taskGenPhase) global._taskGenPhase = {};
+  const cached = global._taskGenPhase[roomName];
+  if (typeof cached === "number") return cached;
+
+  let phase = 0;
+  for (let i = 0; i < roomName.length; i++) {
+    phase = (phase * 31 + roomName.charCodeAt(i)) % 97;
+  }
+  global._taskGenPhase[roomName] = phase;
+  return phase;
+}
+
+/**
+ * Запускает генератор категории не чаще одного раза в `interval` тиков.
+ * @param {string} roomName
+ * @param {string} taskType
+ * @param {Object} roomState
+ * @param {Function} generator
+ * @param {number} [interval] явный интервал (тесты); по умолчанию — из конфига
+ * @returns {boolean} запускался ли генератор в этом тике
+ */
+function runIfDue(roomName, taskType, roomState, generator, interval) {
+  const gap =
+    typeof interval === "number"
+      ? interval
+      : TASK_GEN_INTERVAL[taskType] || TASK_GEN_INTERVAL_DEFAULT;
+
+  if (gap > 1 && (Game.time + getRoomPhase(roomName)) % gap !== 0) {
+    return false;
+  }
+
+  generator(roomState);
+  return true;
+}
+
+/**
+ * Таблица «категория → генератор». Порядок совпадает с прежним порядком вызовов
+ * в room.manager (категории независимы, дедуп внутри каждой).
+ */
+const TASK_GENERATORS = [
+  { taskType: "fillSpawnsExtensions", run: generateFillSpawnsExtensions },
+  { taskType: "fillPowerSpawnPower", run: generateFillPowerSpawnPower },
+  { taskType: "fillPowerSpawnEnergy", run: generateFillPowerSpawnEnergy },
+  { taskType: "fillFactoryEnergy", run: generateFillFactoryEnergy },
+  { taskType: "collectFactoryBattery", run: generateCollectFactoryBattery },
+  { taskType: "fillTerminalEnergy", run: generateFillTerminalEnergy },
+  { taskType: "fillTerminalResources", run: generateFillTerminalResources },
+  { taskType: "fillTowers", run: generateFillTowers },
+  { taskType: "repairStructures", run: generateRepairStructures },
+  { taskType: "buildStructures", run: generateBuildStructures },
+  { taskType: "upgradeController", run: generateUpgradeController },
+];
+
+/**
+ * Единая точка запуска генерации задач комнаты с троттлингом по категориям.
+ * room.manager вызывает её вместо ручного перечисления 11 генераторов.
+ * @param {Object} roomState
+ */
+function runAll(roomState) {
+  const roomName = roomState.roomName;
+  for (let i = 0; i < TASK_GENERATORS.length; i++) {
+    const entry = TASK_GENERATORS[i];
+    runIfDue(roomName, entry.taskType, roomState, entry.run);
+  }
+}
+
 module.exports = {
+  TASK_GENERATORS,
+  runIfDue,
+  runAll,
   generateFillSpawnsExtensions,
   generateFillPowerSpawnPower,
   generateFillPowerSpawnEnergy,
