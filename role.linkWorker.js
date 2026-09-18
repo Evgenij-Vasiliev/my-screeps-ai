@@ -12,9 +12,13 @@ module.exports = {
   run: function (creep) {
     if (!creep.room.storage) return;
     const storage = creep.room.storage;
-    const config = (Memory.rooms[creep.room.name] || {}).links;
+    // Конфиг линков может отсутствовать/быть битым — тогда роль просто ждёт.
+    const roomMemory = (Memory.rooms && Memory.rooms[creep.room.name]) || {};
+    const config = roomMemory.links;
     const storageLink =
-      config && config.storage ? Game.getObjectById(config.storage) : null;
+      config && typeof config.storage === "string"
+        ? Game.getObjectById(config.storage)
+        : null;
     if (!storageLink) return;
 
     if (creep.store[RESOURCE_ENERGY] === 0) {

@@ -14,7 +14,10 @@
  *     сделка принимается, только если после комиссии остаётся доля выручки
  *     (покупатель в дальнем секторе иначе «съедает» всю сумму);
  *   - MAX_DEALS_PER_TICK / MIN_DEAL_AMOUNT / MAX_DEAL_AMOUNT — лимиты объёма;
- *   - CHECK_INTERVAL          — getAllOrders вызывается раз в N тиков.
+ *   - CHECK_INTERVAL          — getAllOrders вызывается раз в N тиков;
+ *   - защита от продажи того, что империя сама расходует: power и реагенты
+ *     активных реакций (Memory.rooms[*].labs*) не продаются, даже если окажутся
+ *     в SELL_RESOURCES (см. collectProtectedResources).
  *
  * Оптимизация CPU: на каждый ресурс книга заявок читается ОДИН раз за запуск
  * (`getAllOrders({resourceType})` возвращает и buy, и sell) и переиспользуется
@@ -23,6 +26,7 @@
  */
 
 const { MARKET, STORAGE } = require("./constants");
+const labWorker = require("./lab.worker");
 
 // Кэши одного запуска: книга заявок по ресурсам (чтобы `getAllOrders` для
 // одного ресурса вызывался один раз), цена энергии (комиссия платится
@@ -30,6 +34,10 @@ const { MARKET, STORAGE } = require("./constants");
 let bookCache = null;
 let energyPriceCache = null;
 let logged = null;
+
+// Ресурсы, которые империя расходует сама (power + реагенты активных реакций)
+// и потому не имеет права продавать. Считается лениво один раз за запуск.
+let protectedCache = null;
 
 /**
  * Книга заявок ресурса, прочитанная один раз за запуск.
@@ -195,6 +203,47 @@ function pickSellOrder(amount, roomName, orders) {
 }
 
 /**
+ * Ресурсы, которые империя расходует сама и потому НЕ имеет права продавать,
+ * даже если в терминале формально «излишек»:
+ *   - power — катализатор PowerSpawn/GPL;
+ *   - реагенты активных реакций — берутся из Memory.rooms[*].labs* через
+ *     labWorker.getConfigs, поэтому смена реакции автоматически защищает свои
+ *     ингредиенты (X, O, H, OH, K, L, U, Z и промежуточные соединения).
+ * Продажа реагента морит голодом тройки лаб: терминал — единственный буфер,
+ * из которого lab.worker добирает ингредиенты.
+ * @returns {Object<string, boolean>}
+ */
+function collectProtectedResources() {
+  /** @type {Object<string, boolean>} */
+  const protectedResources = {};
+  protectedResources[RESOURCE_POWER] = true;
+
+  for (const roomName in Game.rooms) {
+    const room = Game.rooms[roomName];
+    if (!room.controller || !room.controller.my) continue;
+    if (!room.memory) continue;
+
+    for (const { config } of labWorker.getConfigs(room)) {
+      if (config.reagent1) protectedResources[config.reagent1] = true;
+      if (config.reagent2) protectedResources[config.reagent2] = true;
+    }
+  }
+
+  return protectedResources;
+}
+
+/**
+ * Защищён ли ресурс от продажи (power или реагент активной реакции).
+ * Набор считается лениво и переиспользуется в пределах запуска.
+ * @param {string} resourceType
+ * @returns {boolean}
+ */
+function isProtectedResource(resourceType) {
+  if (!protectedCache) protectedCache = collectProtectedResources();
+  return protectedCache[resourceType] === true;
+}
+
+/**
  * Продаёт излишек одного ресурса из терминалов империи (по одной сделке на
  * терминал, пока не исчерпан лимит сделок на тик).
  * @param {string} resourceType
@@ -203,6 +252,10 @@ function pickSellOrder(amount, roomName, orders) {
  * @returns {number} число успешных сделок
  */
 function sellSurplus(resourceType, terminals, dealBudget) {
+  // Реагенты реакций и power не продаём никогда: это не «излишек», а рабочее
+  // сырьё лаб / катализатор GPL. Отсечка до чтения книги заявок.
+  if (isProtectedResource(resourceType)) return 0;
+
   // Дешёвая отсечка: если отдавать нечего, книгу заявок даже не читаем.
   let totalSellable = 0;
   for (let i = 0; i < terminals.length; i++) {
@@ -376,11 +429,12 @@ function run() {
   bookCache = {};
   energyPriceCache = null;
   logged = {};
+  protectedCache = null;
 
   let deals = 0;
   const sell = MARKET.SELL_RESOURCES;
   // Round-robin: каждое срабатывание список начинается со следующего ресурса,
-  // иначе первый в списке (power) всегда выбирал бы весь лимит сделок.
+  // иначе первый в списке всегда выбирал бы весь лимит сделок.
   const start =
     sell.length > 0
       ? Math.floor(Game.time / MARKET.CHECK_INTERVAL) % sell.length
@@ -412,4 +466,6 @@ module.exports = {
   bestBuyOrder,
   bestSellOrder,
   buyCandidates,
+  collectProtectedResources,
+  isProtectedResource,
 };

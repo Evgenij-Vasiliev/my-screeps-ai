@@ -14,16 +14,21 @@
  */
 module.exports = {
   run: function (roomState) {
-    const config = (Memory.rooms[roomState.roomName] || {}).links;
-    if (!config) return;
+    // Безопасное чтение конфига: Memory.rooms может быть не инициализирован,
+    // а links — отсутствовать или быть не-объектом (ручная правка/битая запись).
+    const roomMemory = (Memory.rooms && Memory.rooms[roomState.roomName]) || {};
+    const config = roomMemory.links;
+    if (!config || typeof config !== "object") return;
 
-    const storageLink = config.storage
-      ? Game.getObjectById(config.storage)
-      : null;
+    const storageLink =
+      typeof config.storage === "string"
+        ? Game.getObjectById(config.storage)
+        : null;
     if (!storageLink) return;
     if (storageLink.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return;
 
-    for (const senderId of config.senders || []) {
+    const senders = Array.isArray(config.senders) ? config.senders : [];
+    for (const senderId of senders) {
       const sender = Game.getObjectById(senderId);
       if (!sender) continue; // линк уничтожен
       if (sender.store[RESOURCE_ENERGY] === 0) continue; // пустой

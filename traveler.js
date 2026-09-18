@@ -6,7 +6,9 @@
  *
  * exportTraveler: boolean Whether the require() should return the Traveler class. Defaults to true.
  * installTraveler: boolean Whether the Traveler class should be stored in `global.Traveler`. Defaults to false.
- * installPrototype: boolean Whether Creep.prototype.moveTo() should be created. Defaults to true.
+ * installPrototype: boolean Whether Creep.prototype.travelTo() should be created. Defaults to true.
+ *                    Нативный Creep.prototype.moveTo() НЕ подменяется: тактический
+ *                    шаг боя (defense.attacker) сознательно использует его (см. аудит, п. 5 «Что НЕ менять»).
  * hostileLocation: string Where in Memory a list of hostile rooms can be found. If it can be found in
  * Memory.empire, use 'empire'. Defaults to 'empire'.
  * maxOps: integer The maximum number of operations PathFinder should use. Defaults to 20000
@@ -309,6 +311,15 @@ module.exports = function (globalOpts = {}) {
       if (travelData.prev && travelData.stuck === 0) {
         travelData.path = travelData.path.substr(1);
       }
+      // Одноклеточный путь: если путь состоял ровно из одного шага, то после
+      // вычитания уже сделанного шага строка пуста. Раньше это давало
+      // parseInt("") === NaN и creep.move(NaN) — невалидный интент и
+      // «залипание» крипа. Сбрасываем исчерпанный путь: следующий тик либо
+      // пересчитает его, либо travelTo вернётся по раннему условию «уже у цели».
+      if (travelData.path.length === 0) {
+        delete travelData.path;
+        return ERR_NO_PATH;
+      }
       travelData.prev = creep.pos;
       let nextDirection = parseInt(travelData.path[0]);
       let outcome = creep.move(nextDirection);
@@ -440,12 +451,62 @@ module.exports = function (globalOpts = {}) {
         .forEach(creep => matrix.set(creep.pos.x, creep.pos.y, 0xff));
       return matrix;
     }
+    /**
+     * Направление шага, пересекающего границу комнат.
+     *
+     * `RoomPosition.getDirectionTo()` считает направление по «сырым» x/y и на
+     * границе даёт мусор: переход на восток `(49,y,roomA) -> (0,y,roomB)`
+     * выглядит как шаг ВЛЕВО на 49 клеток. Раньше `serializePath` такие шаги
+     * просто выбрасывала, из-за чего весь последующий путь оказывался сдвинут
+     * на одну клетку и крип упирался в границу, не переходя в соседнюю комнату.
+     * Направление перехода восстанавливаем по кромке: `49 -> 0` — шаг на
+     * восток/юг, `0 -> 49` — на запад/север (та же логика, что у `creep.move`).
+     *
+     * @param {RoomPosition} from
+     * @param {RoomPosition} to
+     * @returns {number} DirectionConstant (1..8) либо 0, если шаг не распознан
+     */
+    static directionAcrossRooms(from, to) {
+      let dx = 0;
+      let dy = 0;
+      if (from.x === 49 && to.x === 0) dx = 1;
+      else if (from.x === 0 && to.x === 49) dx = -1;
+      if (from.y === 49 && to.y === 0) dy = 1;
+      else if (from.y === 0 && to.y === 49) dy = -1;
+      return Traveler.directionFromDelta(dx, dy);
+    }
+    /**
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {number} DirectionConstant (1..8) либо 0
+     */
+    static directionFromDelta(dx, dy) {
+      const offsetX = [0, 0, 1, 1, 1, 0, -1, -1, -1];
+      const offsetY = [0, -1, -1, 0, 1, 1, 1, 0, -1];
+      for (let direction = 1; direction <= 8; direction++) {
+        if (offsetX[direction] === dx && offsetY[direction] === dy) {
+          return direction;
+        }
+      }
+      return 0;
+    }
     static serializePath(startPos, path) {
       let serializedPath = "";
       let lastPosition = startPos;
       for (let position of path) {
         if (position.roomName === lastPosition.roomName) {
           serializedPath += lastPosition.getDirectionTo(position);
+        } else {
+          // Шаг через границу комнат — не теряем его (см. directionAcrossRooms).
+          // Если кромка не распознана (на практике не бывает), шаг пропускаем,
+          // но НЕ пишем 0 — это невалидное направление для creep.move.
+          const direction = Traveler.directionAcrossRooms(
+            lastPosition,
+            position,
+          );
+          if (direction !== 0) {
+            serializedPath += direction;
+          }
         }
         lastPosition = position;
       }

@@ -17,7 +17,9 @@
  *   delete Memory.cpuStats            — сбросить статистику
  *
  * Профилирование Room Manager (ТЗ №0, ВРЕМЕННЫЙ измерительный слой):
- *   Memory.cpuStats.profile                 — накопленные замеры по блокам
+ *   Memory.cpuStats.profile                 — замеры по блокам (скользящее окно
+ *                                             до CPU.PROFILE_MAX_SAMPLES тиков,
+ *                                             дальше сбрасывается автоматически)
  *   delete Memory.cpuStats.profile          — сбросить только замеры
  *   require("cpuMonitor").reportProfile()   — напечатать сводку вручную
  * ===================================================
@@ -219,6 +221,12 @@ module.exports = {
    * Существующие поля cpuStats (total/count/average) не изменяются:
    * profile — дополнительный подраздел, удаляется отдельно
    * через `delete Memory.cpuStats.profile`.
+   *
+   * Профиль — ограниченное скользящее окно: когда в нём набралось
+   * CPU.PROFILE_MAX_SAMPLES замеров, он автоматически начинается заново
+   * (суммы, счётчики и ключи комнат/блоков сбрасываются). Иначе Memory-запись
+   * росла бы бессрочно, копя суммы за всю историю шарда и комнаты, которых
+   * уже нет.
    */
   flushProfile() {
     const window = this.profileWindow;
@@ -228,7 +236,11 @@ module.exports = {
       Memory.cpuStats = { total: 0, count: 0, average: 0 };
     }
     const cpuStats = /** @type {any} */ (Memory.cpuStats);
-    if (!cpuStats.profile) {
+    const maxSamples = CPU.PROFILE_MAX_SAMPLES || 0;
+    if (
+      !cpuStats.profile ||
+      (maxSamples > 0 && cpuStats.profile.samples >= maxSamples)
+    ) {
       cpuStats.profile = {
         // Тик начала сбора — от него считается период измерения.
         startTick: window.startTick || Game.time,

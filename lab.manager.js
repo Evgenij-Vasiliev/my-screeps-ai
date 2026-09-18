@@ -24,7 +24,7 @@
  * ===================================================
  */
 const labManager = {
-  runReaction: function (room, config, label) {
+  runReaction: function (room, config) {
     if (!config) return;
     const lab1 = Game.getObjectById(config.lab1);
     const lab2 = Game.getObjectById(config.lab2);
@@ -37,21 +37,21 @@ const labManager = {
       return;
     const result = reactor.runReaction(lab1, lab2);
     if (result !== OK && result !== ERR_TIRED) {
-      // console.log(
-      //   `[LabManager ${room.name}] [${label}] Ошибка реакции ${config.product}: ${result}`,
-      // );
+      // Ошибка реакции: конфиг/лаборатории разобраны выше, поэтому сюда
+      // попадают только редкие состояния (например, смена рецепта на лету).
+      // Лог намеренно не пишем каждый тик — см. аудит, п. 38.
     }
   },
   run: function (room) {
     const mem = room.memory;
     const configs = [];
-    if (mem.labs) configs.push({ config: mem.labs, label: "labs" });
-    if (mem.labs2) configs.push({ config: mem.labs2, label: "labs2" });
-    if (mem.labs3) configs.push({ config: mem.labs3, label: "labs3" });
-    if (mem.labs4) configs.push({ config: mem.labs4, label: "labs4" });
-    if (mem.labs5) configs.push({ config: mem.labs5, label: "labs5" });
-    for (const { config, label } of configs) {
-      this.runReaction(room, config, label);
+    if (mem.labs) configs.push(mem.labs);
+    if (mem.labs2) configs.push(mem.labs2);
+    if (mem.labs3) configs.push(mem.labs3);
+    if (mem.labs4) configs.push(mem.labs4);
+    if (mem.labs5) configs.push(mem.labs5);
+    for (const config of configs) {
+      this.runReaction(room, config);
     }
   },
 };

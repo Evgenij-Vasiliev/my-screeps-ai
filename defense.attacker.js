@@ -26,7 +26,10 @@ const RALLY_Y = 45;
 module.exports = {
   run: function (creep) {
     // ── 1. ЛЕЧЕНИЕ ───────────────────────────────────────────────────────
-    if (creep.hits < creep.hitsMax) {
+    // Только при наличии HEAL-частей: у штатного тела атакующего
+    // (CREEP_BODIES.attacker: heal = 0) их нет, поэтому creep.heal(creep)
+    // возвращал ERR_NO_BODYPART — «мёртвый» интент на каждом тике.
+    if (creep.hits < creep.hitsMax && creep.getActiveBodyparts(HEAL) > 0) {
       creep.heal(creep);
     }
 
@@ -38,12 +41,20 @@ module.exports = {
     // ── 2. САМОЗАЩИТА В ПУТИ ─────────────────────────────────────────────
     // Включается только если мы ЕЩЕ НЕ в целевой комнате (на автостраде или точке сбора)
     if (creep.room.name !== targetRoom) {
-      // Глобальный кэш обороны (самопосборка после Global Reset)
+      // Глобальный кэш обороны (самопосборка после Global Reset).
+      // Если комната ещё не сканировалась в этом тике (нет updatedAt) — врагов
+      // смотрим напрямую: иначе после Global Reset самозащита молчит до
+      // первого скана defense.manager. Известный пустой список (комната
+      // просканирована, врагов нет) позволяет не тратить скан в остальные тики.
       if (!global._defenseCache) global._defenseCache = {};
       const cache = global._defenseCache[creep.room.name];
-      const cachedIds = cache && cache.hostileCreepIds;
+      const cacheKnown =
+        cache &&
+        Array.isArray(cache.hostileCreepIds) &&
+        cache.updatedAt !== undefined;
+      const hasKnownHostiles = cacheKnown && cache.hostileCreepIds.length > 0;
 
-      if (cachedIds && cachedIds.length > 0) {
+      if (!cacheKnown || hasKnownHostiles) {
         const attacker = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS, {
           filter: c => c.pos.getRangeTo(creep) <= 4,
         });

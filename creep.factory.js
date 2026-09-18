@@ -33,11 +33,42 @@ const prepareBody = ({
   return body;
 };
 
+/**
+ * Валидация списка рабочих мест майнера из Memory.rooms[*].minerSpots.
+ * Принимает только клетки с целыми x/y внутри комнаты (0..49).
+ * @param {any} raw
+ * @returns {{x: number, y: number}[]}
+ */
+function sanitizeMinerSpots(raw) {
+  if (!Array.isArray(raw)) return [];
+
+  const spots = [];
+  for (const spot of raw) {
+    if (
+      spot &&
+      Number.isInteger(spot.x) &&
+      Number.isInteger(spot.y) &&
+      spot.x >= 0 &&
+      spot.x <= 49 &&
+      spot.y >= 0 &&
+      spot.y <= 49
+    ) {
+      spots.push({ x: spot.x, y: spot.y });
+    }
+  }
+
+  return spots;
+}
+
 const factory = {
   blueprints: {
     miner: (spawn, threshold = PRESPAWN_THRESHOLD.miner) => {
-      const roomMemory = Memory.rooms[spawn.room.name] || {};
-      const spots = roomMemory.minerSpots || [];
+      // Безопасный дефолт: Memory.rooms может быть не инициализирован, а
+      // minerSpots — отсутствовать или быть битым. Валидные споты фильтруются:
+      // иначе spot без x/y давал бы у роли RoomPosition(NaN, NaN). Пустой
+      // список — майнер не спавнится (как и раньше, creep.factory.run → null).
+      const roomMemory = (Memory.rooms && Memory.rooms[spawn.room.name]) || {};
+      const spots = sanitizeMinerSpots(roomMemory.minerSpots);
 
       if (spots.length === 0) return null;
 
