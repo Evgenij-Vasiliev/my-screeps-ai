@@ -25,7 +25,7 @@ const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
 const roleLabWorker = require("lab.worker");
 const cpuMonitor = require("cpuMonitor");
-const { TOWER } = require("./constants");
+const { TOWER, TASK_CONFIG } = require("./constants");
 
 // Специализации, которые действительно спавнятся (см. SPAWN_QUOTA).
 // Роли upgrader/builder/repairer/towerSupplier убраны: их квота равна 0 во всех
@@ -39,6 +39,23 @@ const ROLES = {
   worker: workerRunner,
   labWorker: roleLabWorker,
 };
+
+/**
+ * Изоляция сбоев подсистем: ошибка внутри одной подсистемы комнаты
+ * (спавн, лаборатории, генераторы задач, роли, башни, линки, фабрика,
+ * PowerSpawn) логируется и НЕ мешает остальным. Комнату нельзя «уложить»
+ * падением одной из них: раньше исключение прерывало runRoom, а с ним и
+ * обработку остальных комнат в этом тике (инцидент 18.09.2026).
+ * @param {string} label
+ * @param {Function} fn
+ */
+function safe(label, fn) {
+  try {
+    fn();
+  } catch (e) {
+    console.log(`[RoomManager] ${label}: ${e && e.stack ? e.stack : e}`);
+  }
+}
 
 function runCreepLogic(roomState) {
   for (const creep of roomState.creeps) {
@@ -423,21 +440,41 @@ module.exports = {
    * @param {Object} roomState
    */
   runRoom: function (roomState) {
-    cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
-    cpuMonitor.trackRole("labManager", () => labManager.run(roomState.room));
+    safe("spawnManager", () =>
+      cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState)),
+    );
+    safe("labManager", () =>
+      cpuMonitor.trackRole("labManager", () => labManager.run(roomState.room)),
+    );
     // Единая точка генерации задач с троттлингом по категориям
     // (TASK_GEN_INTERVAL в constants.js): генераторы идемпотентны, поэтому
     // дорогие сканы целей (ремонт, стройка) не обязаны идти каждый тик.
-    cpuMonitor.trackRole("taskManager", () =>
-      taskGenerators.runAll(roomState),
+    safe("taskManager", () =>
+      cpuMonitor.trackRole("taskManager", () =>
+        taskGenerators.runAll(roomState),
+      ),
     );
-    runCreepLogic(roomState);
-    runTowerLogic(roomState);
-    runLinkLogic(roomState);
-    cpuMonitor.trackRole("factoryManager", () => factoryManager.run(roomState));
-    cpuMonitor.trackRole("powerSpawnManager", () =>
-      powerSpawnManager.run(roomState),
-    );
+    safe("creeps", () => runCreepLogic(roomState));
+    safe("towers", () => runTowerLogic(roomState));
+    safe("links", () => runLinkLogic(roomState));
+    // Задача 16 «Экономика»: фабрика и PowerSpawn выключены флагами
+    // TASK_CONFIG (нет снабжения: fillFactoryEnergy/fillPowerSpawn* = false).
+    // Когда флаг false, вызов менеджера не делается вовсе — раньше структуры
+    // «дёргались» каждый тик вхолостую (produce/processPower без сырья).
+    if (TASK_CONFIG.factory) {
+      safe("factoryManager", () =>
+        cpuMonitor.trackRole("factoryManager", () =>
+          factoryManager.run(roomState),
+        ),
+      );
+    }
+    if (TASK_CONFIG.powerSpawn) {
+      safe("powerSpawnManager", () =>
+        cpuMonitor.trackRole("powerSpawnManager", () =>
+          powerSpawnManager.run(roomState),
+        ),
+      );
+    }
   },
 
   /**
@@ -458,9 +495,17 @@ module.exports = {
     );
 
     for (const roomState of roomStates) {
-      cpuMonitor.trackRole(`room:${roomState.roomName}`, () =>
-        this.runRoom(roomState),
-      );
+      // Изоляция по комнатам: исключение в одной комнате не должно лишать
+      // обработки остальные (иначе одна «больная» подсистема кладёт империю).
+      try {
+        cpuMonitor.trackRole(`room:${roomState.roomName}`, () =>
+          this.runRoom(roomState),
+        );
+      } catch (e) {
+        console.log(
+          `[RoomManager] room:${roomState.roomName}: ${e && e.stack ? e.stack : e}`,
+        );
+      }
     }
 
     return roomStates;

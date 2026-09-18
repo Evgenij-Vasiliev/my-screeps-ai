@@ -20,6 +20,15 @@ declare global {
     homeRoom?: string;
     // ── режимы ролей ─────────────────────────────────────────────────────
     working?: boolean;
+    // ── Task System (worker.runner) ──────────────────────────────────────
+    // Ссылка на взятую (зарезервированную) Task из FIFO Memory.rooms[*].tasks.
+    task?: any;
+    // Категория (ключ TASK_CHAIN) удерживаемой Task. Хранится строкой, а не
+    // индексом цепочки: порядок TASK_CHAIN — конфиг приоритета.
+    taskType?: string;
+    // Устаревшее поле старой версии (категория как индекс TASK_CHAIN).
+    // Не используется; оставлено, чтобы старые записи Memory не роняли tsc.
+    taskIndex?: number;
     // ── пачечная добыча (role.miner / remote.miner) ──────────────────────
     harvestInterval?: number;
     harvestPerCall?: number;
