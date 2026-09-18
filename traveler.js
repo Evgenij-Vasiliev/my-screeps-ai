@@ -13,6 +13,10 @@
  * defaultStuckValue: integer The maximum number of ticks the creep is in the same RoomPosition before it
  * determines it is stuck and repaths.
  * reportThreshold: integer The mimimum CPU used on pathing to console.log() warnings on CPU usage. Defaults to 50
+ * incompleteReportCooldown: integer Не чаще, чем раз в столько тиков, писать в консоль про одну и ту же
+ * неудачную цель (иначе в пробке лог печатается на каждый пересчёт пути). Defaults to 50
+ * noPathRetryTicks: integer Пауза в тиках перед повторным поиском пути, если предыдущий поиск не дал
+ * ни одной клетки пути (иначе дорогой PathFinder.search вызывается каждый тик впустую). Defaults to 5
  *
  * Examples: var Traveler = require('Traveler')();
  * require('util.traveler')({exportTraveler: false, installTraveler: false, installPrototype: true, defaultStuckValue: 2});
@@ -27,6 +31,8 @@ module.exports = function (globalOpts = {}) {
     maxOps: 20000,
     defaultStuckValue: 3,
     reportThreshold: 50,
+    incompleteReportCooldown: 50,
+    noPathRetryTicks: 5,
   });
   class Traveler {
     constructor() {
@@ -239,9 +245,21 @@ module.exports = function (globalOpts = {}) {
         travelData.dest.roomName !== destPos.roomName
       ) {
         delete travelData.path;
+        // Новая цель — старые «нет пути» и «уже жаловались» больше не относятся к делу.
+        delete travelData.noPathTick;
+        delete travelData.incompleteDest;
       }
       if (!travelData.path) {
         if (creep.spawning) return ERR_BUSY;
+        // Предыдущий поиск не дал ни одной клетки пути — не жжём CPU на повтор
+        // каждый тик. Пауза короткая: цель может освободиться (крип ушёл,
+        // структура достроена), но за 5 тиков ситуация успевает измениться.
+        if (
+          travelData.noPathTick &&
+          Game.time - travelData.noPathTick < gOpts.noPathRetryTicks
+        ) {
+          return ERR_NO_PATH;
+        }
         travelData.dest = destPos;
         travelData.prev = undefined;
         let cpu = Game.cpu.getUsed();
@@ -274,23 +292,16 @@ module.exports = function (globalOpts = {}) {
           travelData.count = 0;
         }
         if (ret.incomplete) {
-          console.log(`TRAVELER: incomplete path for ${creep.name}`);
-          if (
-            ret.ops < 2000 &&
-            options.useFindRoute === undefined &&
-            travelData.stuck < gOpts.defaultStuckValue
-          ) {
-            options.useFindRoute = false;
-            ret = this.findTravelPath(creep, destPos, options);
-            console.log(
-              `attempting path without findRoute was ${
-                ret.incomplete ? "not" : ""
-              } successful`,
-            );
-          }
+          ret = this.handleIncomplete(creep, travelData, destPos, ret, options);
         }
         travelData.path = Traveler.serializePath(creep.pos, ret.path);
         travelData.stuck = 0;
+        // Пути нет совсем — запомним тик, чтобы не пересчитывать его каждый тик.
+        if (travelData.path.length === 0) {
+          travelData.noPathTick = Game.time;
+        } else {
+          delete travelData.noPathTick;
+        }
       }
       if (!travelData.path || travelData.path.length === 0) {
         return ERR_NO_PATH;
@@ -307,6 +318,70 @@ module.exports = function (globalOpts = {}) {
         return Traveler.positionAtDirection(creep.pos, nextDirection);
       }
     }
+
+    /**
+     * Разбирает неудачный поиск пути (`result.incomplete`) и пытается исправить его.
+     *
+     * Почему поиск вообще может не дойти до цели:
+     * 1. `ignoreCreeps === false` — так ищется маршрут ПОСЛЕ застревания (крип стоит
+     *    `defaultStuckValue` тиков). Все крипы, включая самого ходока, помечены как
+     *    стена. В плотном узле базы (storage/terminal/лабы) подходных клеток к цели
+     *    всего 2–5, и если их заняли другие крипы, PathFinder не находит НИ ОДНОЙ
+     *    клетки в радиусе `range` → `incomplete`. Это не «нет маршрута», а пробка:
+     *    по структурной матрице цель комнаты достижима (замер 18.09.2026: у всех
+     *    структур E35S39 есть достижимая подходная клетка). Поэтому повторяем поиск
+     *    без крипов и берём более длинный, но валидный маршрут вместо пустого.
+     * 2. Обычный случай (структурная матрица) — `useFindRoute` мог переусердствовать
+     *    с ограничением комнат: пробуем ещё раз без него (как было в оригинале).
+     *
+     * Лог печатается один раз на (крип, цель) и не чаще `incompleteReportCooldown`
+     * тиков: иначе в пробке сообщение выводится на каждый пересчёт пути и забивает
+     * консоль (и само по себе ест CPU).
+     *
+     * @param {Creep} creep
+     * @param {Object} travelData элемент `creep.memory._travel`
+     * @param {RoomPosition} destPos
+     * @param {Object} ret результат `PathFinder.search`
+     * @param {Object} options опции текущего вызова `travelTo`
+     * @returns {Object} возможно исправленный результат поиска
+     */
+    handleIncomplete(creep, travelData, destPos, ret, options) {
+      if (options.ignoreCreeps === false) {
+        let relaxed = this.findTravelPath(
+          creep,
+          destPos,
+          _.assign({}, options, { ignoreCreeps: true }),
+        );
+        if (!relaxed.incomplete || relaxed.path.length > ret.path.length) {
+          ret = relaxed;
+        }
+      } else if (
+        ret.ops < 2000 &&
+        options.useFindRoute === undefined &&
+        travelData.stuck < gOpts.defaultStuckValue
+      ) {
+        options.useFindRoute = false;
+        ret = this.findTravelPath(creep, destPos, options);
+      }
+
+      let destKey = destPos.roomName + ":" + destPos.x + ":" + destPos.y;
+      let cooldown = gOpts.incompleteReportCooldown;
+      if (
+        travelData.incompleteDest !== destKey ||
+        Game.time - (travelData.incompleteTick || 0) >= cooldown
+      ) {
+        console.log(
+          `TRAVELER: incomplete path for ${creep.name}, dest: ${destPos}, ` +
+            `pos: ${creep.pos}, ops: ${ret.ops}, path: ${ret.path.length}, ` +
+            `creepsAsWalls: ${options.ignoreCreeps === false ? "yes" : "no"}, ` +
+            `stuck: ${travelData.stuck}`,
+        );
+        travelData.incompleteDest = destKey;
+        travelData.incompleteTick = Game.time;
+      }
+      return ret;
+    }
+
     refreshMatrices() {
       if (Game.time !== this.currentTick) {
         this.currentTick = Game.time;

@@ -32,6 +32,9 @@ declare global {
     droppedId?: string | null;
     waitSourceId?: string | null;
     nextHaulSearch?: number;
+    // Позиция контроллера удалённой комнаты: маршрут резервера идёт к ней,
+    // а не к центру комнаты (см. docs/REMOTE-BORDER-PING-PONG.md).
+    controllerPos?: { x: number; y: number } | null;
     // ── Traveler (traveler.js) ───────────────────────────────────────────
     _travel?: any;
     _lastRoom?: string;

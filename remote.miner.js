@@ -20,7 +20,22 @@
  *    1–2 вызова на каждый тик работы, ≈0.011 мс за вызов в разреженной
  *    удалённой комнате);
  *  - createConstructionSite вызывается один раз на позицию, а не каждый тик
- *    (проверка «есть ли площадка» идёт из того же кэша).
+ *    (проверка «есть ли площадка» идёт из того же кэша);
+ *  - рабочее место (клетка контейнера) задано в constants.REMOTE
+ *    (ROOM_TO_CONTAINER_POS), а не «под крипом»: майнер подходит к источнику
+ *    разными маршрутами, и площадка контейнера появлялась в случайной клетке
+ *    (в E35S38 — (37,33) вместо (37,32)). Пока клетка для комнаты не настроена,
+ *    работает прежнее правило: любая клетка в радиусе 1 от источника, площадка
+ *    ставится под самим крипом.
+ *
+ * Переход между комнатами (правка 18.09.2026, docs/REMOTE-BORDER-PING-PONG.md):
+ *  - пока крип вне целевой комнаты, он идёт сразу к рабочей цели
+ *    (контейнер/источник), а центр комнаты (25,25) — только запасной вариант
+ *    для первого захода, когда цель ещё не найдена;
+ *  - ветка «стою на кромке — уйду в центр» удалена: вместе с подменой цели
+ *    она и превращала рейс в вечный пинг-понг на границе (путь к источнику
+ *    E35S38 дешевле через дороги домашней комнаты, и крип, выйдя из комнаты,
+ *    каждый раз разворачивался к её центру).
  */
 const { REMOTE } = require("./constants");
 const { harvestPlan } = require("./role.miner");
@@ -31,6 +46,35 @@ const { harvestPlan } = require("./role.miner");
  */
 function isContainer(s) {
   return s.structureType === STRUCTURE_CONTAINER;
+}
+
+/**
+ * Рабочая цель крипа, известная из прошлого захода в удалённую комнату:
+ * контейнер, иначе источник. Пока крип вне целевой комнаты, идти нужно
+ * именно к ней, а не к точке (25,25).
+ *
+ * Почему (разбор — docs/REMOTE-BORDER-PING-PONG.md): в E35S38 путь от входа
+ * к источнику (36,32) дешевле не внутри комнаты, а через дороги домашней
+ * комнаты (стоимость PathFinder 80 против 88). Раньше роль на каждом шаге
+ * вне комнаты подменяла цель центром комнаты, поэтому крип, выйдя из
+ * удалённой комнаты по «дешёвому» маршруту, снова разворачивался к центру —
+ * и так по кругу на кромке: ни источника, ни контейнера.
+ *
+ * @param {Creep} creep
+ * @returns {any} контейнер, источник или null
+ */
+function knownWorkTarget(creep) {
+  if (creep.memory.containerId) {
+    const container = Game.getObjectById(creep.memory.containerId);
+    if (container) return container;
+  }
+
+  if (creep.memory.sourceId) {
+    const source = Game.getObjectById(creep.memory.sourceId);
+    if (source) return source;
+  }
+
+  return null;
 }
 
 /**
@@ -93,6 +137,25 @@ function findContainerTargets(creep, source) {
   return { container: container, site: site };
 }
 
+/**
+ * Рабочее место дальнего майнера в комнате — настроенная клетка контейнера у
+ * источника (constants.REMOTE.ROOM_TO_CONTAINER_POS). Майнер стоит на ней,
+ * добывает с источника и отдаёт энергию в контейнер.
+ *
+ * Зачем настраивать явно: пока контейнера нет, роль ставила площадку под
+ * собой, а к источнику крип подходит разными маршрутами (в E35S38 путь идёт
+ * через дороги домашней комнаты — docs/REMOTE-BORDER-PING-PONG.md), поэтому
+ * клетка контейнера получалась случайной: в E35S38 — (37,33). С настроенной
+ * клеткой положение контейнера и рабочего места детерминировано.
+ *
+ * @param {string} targetRoom
+ * @returns {RoomPosition|null} клетка или null, если для комнаты не настроена
+ */
+function configuredWorkCell(targetRoom) {
+  const cell = (REMOTE.ROOM_TO_CONTAINER_POS || {})[targetRoom];
+  return cell ? new RoomPosition(cell.x, cell.y, targetRoom) : null;
+}
+
 module.exports = {
   run: function (creep) {
     const targetRoom = creep.memory.targetRoom;
@@ -101,6 +164,15 @@ module.exports = {
       return;
     }
 
+    // Целевая комната недостижима напрямую (крип вне неё) — идём к рабочей
+    // цели, если она уже известна из прошлого захода; точка (25,25) — только
+    // запасной вариант для первого захода.
+    //
+    // ВАЖНО: цель здесь НЕ подменяется на каждом пересечении границы.
+    // Именно подмена («вне комнаты — иди в центр») превращала рейс в вечный
+    // пинг-понг на кромке: путь к источнику дешевле через дороги домашней
+    // комнаты, крип выходил из удалённой комнаты, роль возвращала его к
+    // центру, и так по кругу (docs/REMOTE-BORDER-PING-PONG.md).
     if (creep.room.name !== targetRoom) {
       if (
         creep.memory._lastRoom &&
@@ -111,23 +183,14 @@ module.exports = {
 
       creep.memory._lastRoom = creep.room.name;
 
-      creep.travelTo(new RoomPosition(25, 25, targetRoom));
+      creep.travelTo(
+        knownWorkTarget(creep) || new RoomPosition(25, 25, targetRoom),
+      );
 
       return;
     }
 
     creep.memory._lastRoom = creep.room.name;
-
-    const onBorder =
-      creep.pos.x === 0 ||
-      creep.pos.x === 49 ||
-      creep.pos.y === 0 ||
-      creep.pos.y === 49;
-
-    if (onBorder) {
-      creep.travelTo(new RoomPosition(25, 25, creep.room.name));
-      return;
-    }
 
     if (creep.memory.sourceId) {
       const cachedSource = Game.getObjectById(creep.memory.sourceId);
@@ -163,18 +226,20 @@ module.exports = {
     const container = targets.container;
     const site = targets.site;
 
-    // Рабочее место: клетка контейнера (энергия отдаётся в него) либо, пока
-    // контейнера нет, любая клетка в радиусе 1 от источника.
-    if (container) {
-      if (!creep.pos.isEqualTo(container.pos)) {
-        creep.travelTo(container);
+    // Рабочее место: клетка контейнера (энергия отдаётся в него), а пока
+    // контейнера нет — настроенная клетка контейнера из REMOTE. Если клетка для
+    // комнаты не настроена, работает прежнее правило: любая клетка в радиусе 1
+    // от источника.
+    const workCell = container ? container.pos : configuredWorkCell(targetRoom);
+
+    if (workCell) {
+      if (!creep.pos.isEqualTo(workCell)) {
+        creep.travelTo(workCell);
         return;
       }
-    } else {
-      if (creep.pos.getRangeTo(source) > 1) {
-        creep.travelTo(source);
-        return;
-      }
+    } else if (creep.pos.getRangeTo(source) > 1) {
+      creep.travelTo(source);
+      return;
     }
 
     // Контейнер повреждён — латаем его своей энергией (как было).
@@ -197,7 +262,10 @@ module.exports = {
       }
 
       if (!site) {
-        creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
+        // Площадка ставится в настроенную клетку (рабочее место), а не под
+        // крипом: иначе положение контейнера зависит от того, каким маршрутом
+        // майнер подошёл к источнику (docs/REMOTE-BORDER-PING-PONG.md).
+        (workCell || creep.pos).createConstructionSite(STRUCTURE_CONTAINER);
         delete creep.memory.containerCheckedAt;
       }
     }
