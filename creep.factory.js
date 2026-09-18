@@ -69,11 +69,6 @@ const factory = {
       };
     },
 
-    towerSupplier: () => ({
-      body: prepareBody(CREEP_BODIES.towerSupplier),
-      memory: {},
-    }),
-
     linkWorker: () => ({
       body: prepareBody(CREEP_BODIES.linkWorker),
       memory: {},
@@ -96,21 +91,6 @@ const factory = {
         },
       };
     },
-
-    upgrader: () => ({
-      body: prepareBody(CREEP_BODIES.upgrader),
-      memory: {},
-    }),
-
-    builder: () => ({
-      body: prepareBody(CREEP_BODIES.builder),
-      memory: {},
-    }),
-
-    repairer: () => ({
-      body: prepareBody(CREEP_BODIES.repairer),
-      memory: {},
-    }),
 
     worker: spawn => ({
       body: prepareBody(CREEP_BODIES.worker),
@@ -138,15 +118,6 @@ const factory = {
       body: prepareBody(CREEP_BODIES.attacker),
       memory: { targetRoom: null, homeRoom: spawn.room.name },
     }),
-
-    // reserver: (spawn, roleData) => ({
-    //   body: prepareBody(CREEP_BODIES.reserver),
-    //   memory: {
-    //     working: false,
-    //     memory: { working: false, targetRoom: null },
-    //     //targetRoom: roleData.targetRoom || null,
-    //   },
-    // }),
 
     reserver: spawn => ({
       body: prepareBody(CREEP_BODIES.reserver),

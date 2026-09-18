@@ -43,11 +43,6 @@ function run(roomState) {
     if (role === "remoteMiner" && roomState.roomName !== "E35S37") continue;
     if (role === "remoteHauler" && roomState.roomName !== "E35S37") continue;
     if (role === "attacker" && roomState.roomName === "E35S37") continue;
-    if (
-      role === "upgrader" &&
-      roomState.room.controller.ticksToDowngrade > 100000
-    )
-      continue;
 
     if (role === "mineralMiner") {
       if (!roomState.mineral || !roomState.mineral.extractorId) continue;

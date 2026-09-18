@@ -109,10 +109,6 @@ const SPAWN_QUOTA = {
   harvester: 0,
   linkWorker: 1,
   miner: 2,
-  towerSupplier: 0,
-  repairer: 0,
-  builder: 0,
-  upgrader: 0,
   worker: 2,
   mineralMiner: 1,
   attacker: 1,
@@ -226,13 +222,9 @@ const CREEP_BODIES = {
   // пустые CARRY усталости не дают). Роль стационарная: MOVE нужны один раз,
   // чтобы дойти до спота. Расчёт — docs/MINER-CPU-OPTIMIZATION.md, раздел 3.2.
   miner: { work: 10, carry: 6, move: 5 },
-  towerSupplier: { carry: 4, move: 2 },
   linkWorker: { carry: 4, move: 2 },
   harvester: { work: 1, carry: 4, move: 3 },
   harvesterEmergency: { work: 1, carry: 1, move: 1 },
-  upgrader: { work: 3, carry: 2, move: 3 },
-  builder: { work: 5, carry: 5, move: 5 },
-  repairer: { work: 3, carry: 2, move: 3 },
   worker: { work: 10, carry: 10, move: 20 },
   mineralMiner: { work: 5, carry: 5, move: 5 },
   attacker: { tough: 0, move: 10, heal: 0, ranged_attack: 10 },
@@ -273,7 +265,8 @@ const LAB_WORKER = {
 };
 
 // Пороги деградации контроллера (ticksToDowngrade), на которые
-// ориентируется upgrader и логика тревоги по контроллеру.
+// ориентируется задача upgradeController (Task System) и логика тревоги
+// по контроллеру.
 const CONTROLLER = {
   DOWNGRADE_MAX: 150000,
   DOWNGRADE_MIN: 50000,
