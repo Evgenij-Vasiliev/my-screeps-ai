@@ -54,6 +54,11 @@ module.exports = {
      *
      * Путь кэширует сам Traveler (creep.memory._travel); при смене
      * комнаты кэш сбрасывается ниже, чтобы пережить границу.
+     *
+     * Идём к запомненной позиции контроллера, а не к точке (25,25): иначе
+     * цель подменялась бы центром комнаты при каждом пересечении границы и
+     * крип разворачивался бы на кромке (разбор общего механизма —
+     * docs/REMOTE-BORDER-PING-PONG.md).
      */
     if (creep.room.name !== targetRoom) {
       // Traveler сериализует путь только внутри комнаты, поэтому при
@@ -67,7 +72,13 @@ module.exports = {
       }
       creep.memory._lastRoom = creep.room.name;
 
-      creep.travelTo(new RoomPosition(25, 25, targetRoom));
+      const controllerPos = creep.memory.controllerPos;
+
+      creep.travelTo(
+        controllerPos
+          ? new RoomPosition(controllerPos.x, controllerPos.y, targetRoom)
+          : new RoomPosition(25, 25, targetRoom),
+      );
       return;
     }
 
@@ -94,6 +105,22 @@ module.exports = {
       creep.say("🏠 своя комната");
       delete creep.memory.targetRoom;
       return;
+    }
+
+    // Позиция контроллера запоминается (только при изменении, чтобы не
+    // дёргать сериализацию Memory каждый тик): по ней резервер идёт в
+    // удалённую комнату с любой стороны, не сворачивая к её центру.
+    const knownControllerPos = creep.memory.controllerPos;
+
+    if (
+      !knownControllerPos ||
+      knownControllerPos.x !== controller.pos.x ||
+      knownControllerPos.y !== controller.pos.y
+    ) {
+      creep.memory.controllerPos = {
+        x: controller.pos.x,
+        y: controller.pos.y,
+      };
     }
 
     /**
