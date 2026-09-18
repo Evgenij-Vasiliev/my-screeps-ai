@@ -8,7 +8,7 @@
  * вызов Room Manager'а и глобальный рынок — вся комнатная логика здесь.
  */
 const scanner = require("scanner");
-const { getRoomRole } = require("roomRoles");
+const { isCombatHostile, getHostiles } = require("threat");
 const mineralManager = require("mineral.manager");
 const taskGenerators = require("task.generators");
 const spawnManager = require("spawn.manager");
@@ -203,9 +203,21 @@ function runTowerLogic(roomState) {
     // hostiles заполнялся только при Memory.rooms[].underAttack, который сам
     // вычислялся из этого же списка (всегда пустого) — из-за этого башни
     // молчали, пока враг не снесёт >1500 хитов стен за один тик.
-    // room.find выполняется только в комнатах с башнями.
-    const hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
+    // Скан идёт через threat.getHostiles: башни — производитель списка на тик,
+    // defense.manager переиспользует его (см. threat.js). room.find выполняется
+    // только в комнатах с башнями.
+    const hostiles = getHostiles(roomState.room);
     const hasHostiles = hostiles.length > 0;
+
+    // «Угроза» в комнате определяется тем же предикатом, что и тревога
+    // defense.manager (боевые тела), — определения больше не расходятся.
+    let hasCombatHostiles = false;
+    for (let i = 0; i < hostiles.length; i++) {
+      if (isCombatHostile(hostiles[i])) {
+        hasCombatHostiles = true;
+        break;
+      }
+    }
 
     const roomData = {
       hostiles,
@@ -261,7 +273,9 @@ function runTowerLogic(roomState) {
 
     // Пишем только при изменении: одно и то же значение каждый тик — лишний
     // нагрев Memory (её сериализация + парсинг в начале следующего тика).
-    const underAttack = hasHostiles || hitsDropped;
+    // Флаг согласован с определением тревоги defense.manager: «угроза» — это
+    // боевой враг (ATTACK/RANGED_ATTACK/HEAL) или просадка хитов стен.
+    const underAttack = hasCombatHostiles || hitsDropped;
     if (roomMemory.underAttack !== underAttack) {
       roomMemory.underAttack = underAttack;
     }
@@ -381,7 +395,10 @@ module.exports = {
     return {
       room,
       roomName: room.name,
-      role: getRoomRole(room),
+      // roomState.role (специализация комнаты) убран: поле никто не читал,
+      // а getRoomRole() тратил время на каждой комнате каждый тик. Реестр
+      // roomRoles.js оставлен как есть — он не подключён ни к одному
+      // потребителю (см. отчёт/аудит, п. 37).
       spawn: grouped.spawns[0] || null,
       spawns: grouped.spawns,
       controller: room.controller,

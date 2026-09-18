@@ -28,6 +28,21 @@
  */
 const { REMOTE } = require("./constants");
 
+/**
+ * Валидные имена комнат из Memory.reserverConfig.targetRooms.
+ * Пустой/битый/не-массив конфиг → список дальней добычи constants.REMOTE.ROOMS.
+ * Без этого пустой массив давал `hash % 0 === NaN` и targetRoom = undefined
+ * (роль пересчитывала комнату каждый тик).
+ * @param {any} raw
+ * @returns {string[]}
+ */
+function sanitizeTargetRooms(raw) {
+  const list = Array.isArray(raw)
+    ? raw.filter(name => typeof name === "string" && name.length > 0)
+    : [];
+  return list.length > 0 ? list : REMOTE.ROOMS;
+}
+
 module.exports = {
   run: function (creep) {
     /**
@@ -38,7 +53,8 @@ module.exports = {
      */
     if (!creep.memory.targetRoom) {
       const config = Memory.reserverConfig || {};
-      const rooms = config.targetRooms || REMOTE.ROOMS;
+      const rooms = sanitizeTargetRooms(config.targetRooms);
+      if (rooms.length === 0) return;
 
       let hash = 0;
       for (let i = 0; i < creep.name.length; i++) {

@@ -17,24 +17,39 @@ module.exports = {
     // ── 1. АТАКА ─────────────────────────────────────────────────────────
     // Высший приоритет и без оглядки на запас энергии: если башня не
     // выстрелит сейчас, враг успеет снести крипов/постройки.
-    const targetList =
+    //
+    // Приоритет лекарей сохраняется, но только пока лекарь ДОСТАЁТ башней:
+    // findClosestByRange вернёт ближайшего даже за пределами дальности, и
+    // раньше один лекарь вне TOWER_FALLOFF_RANGE вообще блокировал атаку —
+    // интент по нему сгорал (ERR_NOT_IN_RANGE), а до других доступных
+    // врагов дело не доходило. Теперь цель выбирается ТОЛЬКО из врагов в
+    // зоне поражения: сначала лекарь в зоне, иначе любой враг в зоне.
+    const reachableHealers =
       roomData.healers && roomData.healers.length > 0
-        ? roomData.healers
-        : roomData.hostiles;
+        ? tower.pos.findInRange(roomData.healers, TOWER_FALLOFF_RANGE)
+        : [];
 
-    if (targetList && targetList.length > 0) {
-      const closestHostile = tower.pos.findClosestByRange(targetList);
+    let attackTarget =
+      reachableHealers.length > 0
+        ? tower.pos.findClosestByRange(reachableHealers)
+        : null;
 
-      // Башня достаёт не всю комнату: findClosestByRange вернёт ближайшего
-      // даже если он за пределами дальности, и такой интент сгорит впустую
-      // (ERR_NOT_IN_RANGE), заблокировав лечение и ремонт в этом тике.
-      if (
-        closestHostile &&
-        tower.pos.inRangeTo(closestHostile, TOWER_FALLOFF_RANGE)
-      ) {
-        tower.attack(/** @type {Creep} */ (closestHostile));
-        return;
+    if (!attackTarget && roomData.hostiles && roomData.hostiles.length > 0) {
+      const reachableHostiles = tower.pos.findInRange(
+        roomData.hostiles,
+        TOWER_FALLOFF_RANGE,
+      );
+
+      // Башня достаёт не всю комнату: интент по врагу за пределами дальности
+      // сгорел бы впустую (ERR_NOT_IN_RANGE), заблокировав лечение и ремонт.
+      if (reachableHostiles.length > 0) {
+        attackTarget = tower.pos.findClosestByRange(reachableHostiles);
       }
+    }
+
+    if (attackTarget) {
+      tower.attack(/** @type {Creep} */ (attackTarget));
+      return;
     }
 
     // ── 2. ЛЕЧЕНИЕ ───────────────────────────────────────────────────────

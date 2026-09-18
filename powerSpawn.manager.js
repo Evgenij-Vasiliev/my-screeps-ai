@@ -6,8 +6,10 @@
  * Задача 16 «Экономика»: подсистема выключена флагом TASK_CONFIG.powerSpawn.
  * GPL в проекте не потребляется (power creeps не используются), снабжение
  * PowerSpawn тоже выключено (TASK_CONFIG.fillPowerSpawnPower/Energy = false),
- * поэтому power — «мёртвый» запас: он продаётся на рынке (MARKET.SELL_RESOURCES),
- * резерв оставлен в MARKET.SELL_RESERVE.power.
+ * поэтому power — складской запас под PowerSpawn/GPL. На рынке он НЕ продаётся:
+ * power защищён в market.manager (collectProtectedResources), а в
+ * MARKET.SELL_RESOURCES его нет — империя power закупает/запасает, не продаёт.
+ * Резерв на случай возврата в список продажи — MARKET.SELL_RESERVE.power.
  *
  * Пороги берутся из constants.POWER_SPAWN (раньше они были скопированы
  * магическими числами `> 0` и `>= 50` и не совпадали с конфигом).
