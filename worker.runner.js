@@ -62,11 +62,78 @@ function returnCargoToStorage(creep) {
   return true;
 }
 
-function run(creep) {
-  if (typeof creep.memory.taskIndex !== "number") {
-    creep.memory.taskIndex = 0;
+/**
+ * Ищет самую приоритетную доступную Task: скан TASK_CHAIN с индекса 0.
+ * Именно строгий скан с начала (а не с «текущего индекса» крипа) гарантирует,
+ * что refill спавнов/расширений не будет отложен задачами терминала, ремонта
+ * или стройки. Дедуп/резервация как раньше: одна Task — один воркер.
+ * @param {Creep} creep
+ * @param {string} roomName
+ * @returns {boolean} взята ли Task
+ */
+function selectTask(creep, roomName) {
+  // Найденная по приоритету Task требует ДРУГОЙ ресурс, чем уже лежит в
+  // рюкзаке. Груз сразу не выгружаем: сначала ищем совместимую Task ниже по
+  // цепочке — иначе получается лишний рейс в Storage.
+  let flushCargo = false;
+
+  for (let index = 0; index < TASK_CHAIN.length; index++) {
+    const taskType = TASK_CHAIN[index];
+    const task = taskManager.getNextTask(roomName, taskType);
+
+    if (!task) continue;
+
+    // Смешивать ресурсы нельзя: creep.withdraw() положит новый ресурс поверх
+    // остатка, и флаг memory.working начнёт путать фазы разных Task.
+    if (!cargoMatchesTask(creep, taskResourceType(task))) {
+      flushCargo = true;
+      continue;
+    }
+
+    if (!taskManager.reserveTask(roomName, taskType, task, creep.name)) {
+      // Защитный случай: не удалось зарезервировать (Task уже не в очереди) —
+      // пробуем следующую категорию.
+      continue;
+    }
+
+    creep.memory.task = task;
+    creep.memory.taskType = taskType;
+    return true;
   }
 
+  if (flushCargo) {
+    // Совместимой Task не нашлось — выгружаем остаток, чтобы освободить
+    // рюкзак под задачу другого ресурса (returnCargoToStorage работает по
+    // одному ресурсу за тик). Сама Task остаётся в FIFO незарезервированной.
+    returnCargoToStorage(creep);
+  }
+
+  return false;
+}
+
+/**
+ * Нужно ли прервать удерживаемую Task ради более приоритетной. Без этого
+ * «долгая» задача (executor ремонта держит воркера до полного восстановления
+ * структуры) могла бы занять всех воркеров и оставить спавны/расширения без
+ * подвоза — именно так комната может «погаснуть». Прерываем только при
+ * СОВМЕСТИМОМ грузе: если воркер везёт другой ресурс, он сначала довозит его.
+ * @param {Creep} creep
+ * @param {string} roomName
+ * @returns {boolean}
+ */
+function shouldPreempt(creep, roomName) {
+  const heldIndex = TASK_CHAIN.indexOf(creep.memory.taskType);
+  if (heldIndex <= 0) return false; // категории приоритетнее нет
+
+  for (let index = 0; index < heldIndex; index++) {
+    const task = taskManager.getNextTask(roomName, TASK_CHAIN[index]);
+    if (!task) continue;
+    if (cargoMatchesTask(creep, taskResourceType(task))) return true;
+  }
+  return false;
+}
+
+function run(creep) {
   // Комната очереди — homeRoom крипа (ТЗ №1, задача 11 роадмапа): задачи роли
   // создаются в домашней комнате, поэтому и брать/завершать их нужно там. Если
   // очередь домашней комнаты ещё не инициализирована, поведение прежнее —
@@ -78,82 +145,60 @@ function run(creep) {
       ? homeRoom
       : creep.room.name;
 
+  // Миграция со старой версии: категория хранилась как индекс TASK_CHAIN
+  // (memory.taskIndex), и после переупорядочивания цепочки он перестал ей
+  // соответствовать. Освобождаем задачу по taskId, чтобы она не «зависла»
+  // за живым крипом, и берём заново по новому приоритету.
+  if (creep.memory.task && !creep.memory.taskType) {
+    taskManager.releaseTaskById(roomName, creep.memory.task);
+    creep.memory.task = null;
+    delete creep.memory.working;
+    delete creep.memory.taskIndex;
+  }
+
+  // Прерывание удерживаемой Task ради более приоритетной (см. shouldPreempt).
+  if (
+    creep.memory.task &&
+    creep.memory.taskType &&
+    shouldPreempt(creep, roomName)
+  ) {
+    taskManager.releaseTask(
+      roomName,
+      creep.memory.taskType,
+      creep.memory.task,
+    );
+    creep.memory.task = null;
+    delete creep.memory.taskType;
+    delete creep.memory.working;
+  }
+
   if (!creep.memory.task) {
     // Холостой Worker: если в комнате нет НИ ОДНОЙ доступной Task, выходим сразу
     // — не обходим TASK_CHAIN и не просматриваем очереди. Ответ кешируется на тик
     // (task.manager), поэтому цена — один вызов на воркер, а не 11 getNextTask.
-    // Без этого каждый холостой воркер каждый тик заново сканировал все
-    // категории (в т.ч. очереди целиком, когда все Task зарезервированы).
     if (!taskManager.hasAvailableTask(roomName)) {
       return;
     }
 
-    // Поиск по всей цепочке за один тик (ТЗ №1, задача 2 роадмапа): старт с
-    // taskIndex, дальше по приоритетному порядку TASK_CHAIN с заворотом.
-    // taskIndex остаётся точкой старта — он не «перескакивает» пустые категории
-    // по одному типу за тик, а остаётся ближайшим приоритетным стартом.
-    let pickedIndex = -1;
-    let pickedTask = null;
-    // Найденная (ближайшая по приоритету) Task требует ДРУГОЙ ресурс, чем уже
-    // лежит в рюкзаке. Груз сразу не выгружаем: сначала ищем совместимую Task
-    // ниже по цепочке (см. цикл) — иначе получается лишний рейс в Storage,
-    // после которого энергию тут же приходится снова забирать.
-    let flushCargo = false;
-
-    for (let i = 0; i < TASK_CHAIN.length; i++) {
-      const index = (creep.memory.taskIndex + i) % TASK_CHAIN.length;
-      const taskType = TASK_CHAIN[index];
-      const task = taskManager.getNextTask(roomName, taskType);
-
-      if (!task) continue;
-
-      // Задача «чужого» ресурса, пока в рюкзаке остаток: не сбрасываем груз
-      // сразу — сначала доискиваем совместимую Task ниже по цепочке, чтобы не
-      // делать лишний рейс в Storage. Смешивать ресурсы всё равно нельзя:
-      // creep.withdraw() исполнителя положит новый ресурс поверх старого.
-      if (!cargoMatchesTask(creep, taskResourceType(task))) {
-        flushCargo = true;
-        continue;
-      }
-
-      if (!taskManager.reserveTask(roomName, taskType, task, creep.name)) {
-        // Защитный случай: не удалось зарезервировать (например, Task уже
-        // не в очереди) — пробуем следующую категорию.
-        continue;
-      }
-
-      pickedIndex = index;
-      pickedTask = task;
-      break;
-    }
-
-    if (flushCargo && !pickedTask) {
-      // Совместимой Task не нашлось — только тогда выгружаем остаток, чтобы
-      // освободить рюкзак под задачу другого ресурса (returnCargoToStorage
-      // работает по одному ресурсу за тик). Сама Task остаётся в FIFO
-      // незарезервированной и будет взята, когда рюкзак опустеет.
-      returnCargoToStorage(creep);
+    // Строгий приоритет: старт ВСЕГДА с индекса 0 (fillSpawnsExtensions).
+    if (!selectTask(creep, roomName)) {
       return;
     }
-
-    if (!pickedTask) {
-      // Вся цепочка пуста (или все Task зарезервированы).
-      return;
-    }
-
-    creep.memory.taskIndex = pickedIndex;
-    // Task остаётся в FIFO — только ссылка сохраняется в памяти Worker.
-    creep.memory.task = pickedTask;
   }
 
-  // Категория определяется через taskIndex (позицию в TASK_CHAIN),
-  // а не через task.type — это разные понятия.
-  const currentTaskType = TASK_CHAIN[creep.memory.taskIndex];
+  // Категория хранится строкой (memory.taskType), а не индексом TASK_CHAIN:
+  // порядок цепочки — конфиг приоритета, и его изменение не должно ломать
+  // незавершённые задачи живых крипов.
+  const currentTaskType = creep.memory.taskType;
   const executor = taskExecutors.executors[currentTaskType];
 
   if (!executor) {
-    // Executor для этой категории ещё не реализован.
-    // Task остаётся полученной, ждём соответствующий Executor.
+    // Executor для этой категории ещё не реализован: освобождаем Task, чтобы
+    // она не считалась занятой «немым» воркером (иначе потребность мёртвая).
+    taskManager.releaseTask(roomName, currentTaskType, creep.memory.task);
+    creep.memory.task = null;
+    delete creep.memory.taskType;
+    delete creep.memory.working;
     return;
   }
 
@@ -189,11 +234,11 @@ function run(creep) {
   }
 
   creep.memory.task = null;
+  delete creep.memory.taskType;
   // Флаг фазы (сбор/доставка) относится к конкретной Task. При переходе к
   // следующей категории он не должен «перетекать»: у другой Task другой
   // resourceType, и унаследованный working исказил бы выбор фазы.
   delete creep.memory.working;
-  creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
 }
 
 module.exports = {

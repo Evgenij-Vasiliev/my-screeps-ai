@@ -1,5 +1,10 @@
 const energySource = require("energySource");
-const { STORAGE, TERMINAL_SUPPLY, CONTROLLER } = require("./constants");
+const {
+  STORAGE,
+  TERMINAL_SUPPLY,
+  CONTROLLER,
+  BOOTSTRAP,
+} = require("./constants");
 
 function withdrawPower(creep) {
   const storage = creep.room.storage;
@@ -74,7 +79,12 @@ function executeFillSpawnsExtensions(creep, task) {
   }
 
   if (creep.store[RESOURCE_ENERGY] === 0) {
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    // «Погасшая» комната (спавны/расширения почти пусты) — резерв storage
+    // больше не защищаем: иначе аварийному воркеру нечем долить спавны, и
+    // комната не поднимается. В обычном режиме резерв работает как раньше.
+    const critical =
+      creep.room.energyAvailable < BOOTSTRAP.CRITICAL_ROOM_ENERGY;
+    const withdrawn = energySource.withdrawFromStorage(creep, critical);
 
     if (!withdrawn) {
       return "SKIP";

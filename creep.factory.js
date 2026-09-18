@@ -4,7 +4,12 @@
  * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
-const { PRESPAWN_THRESHOLD, CREEP_BODIES, HARVESTER } = require("./constants");
+const {
+  PRESPAWN_THRESHOLD,
+  CREEP_BODIES,
+  HARVESTER,
+  WORKER,
+} = require("./constants");
 
 const prepareBody = ({
   work = 0,
@@ -92,13 +97,27 @@ const factory = {
       };
     },
 
-    worker: spawn => ({
-      body: prepareBody(CREEP_BODIES.worker),
-      memory: {
-        homeRoom: spawn.room.name,
-        working: false,
-      },
-    }),
+    worker: (spawn, threshold, emergency) => {
+      const memory = { homeRoom: spawn.room.name, working: false };
+      const energy = spawn.room.energyAvailable;
+
+      // Штатное тело (2500, 40 частей, спавн 120 тиков) — если энергии
+      // хватает. Иначе обычный путь НЕ спавнит воркера вовсе (возвращает
+      // null): комната не в аварии, просто пул не дорос, а неполноценный
+      // воркер без WORK хуже, чем ожидание пары тиков.
+      if (energy >= WORKER.NORMAL_BODY_ENERGY) {
+        return { body: prepareBody(CREEP_BODIES.worker), memory };
+      }
+
+      // Аварийный путь (вызывает spawn.manager, когда воркеров не осталось):
+      // дешёвое тело-«спасатель», чтобы комнате было чем долить спавны из
+      // storage и раскрутить экономику (см. WORKER/BOOTSTRAP).
+      if (emergency) {
+        return { body: prepareBody(CREEP_BODIES.workerEmergency), memory };
+      }
+
+      return null;
+    },
 
     mineralMiner: () => ({
       body: prepareBody(CREEP_BODIES.mineralMiner),
@@ -151,16 +170,19 @@ const factory = {
    * @param {StructureSpawn} spawn
    * @param {string} role
    * @param {string} roomName
+   * @param {number} [threshold]
+   * @param {boolean} [emergency] аварийный режим (см. worker): спавнить
+   *                    дешёвое тело, даже если на штатное энергии не хватает
    * @returns {ScreepsReturnCode}
    */
-  run: function (spawn, role, roomName, threshold) {
+  run: function (spawn, role, roomName, threshold, emergency) {
     const blueprintFn = this.blueprints[role];
 
     if (!blueprintFn) {
       return ERR_INVALID_ARGS;
     }
 
-    const blueprint = blueprintFn(spawn, threshold);
+    const blueprint = blueprintFn(spawn, threshold, emergency);
 
     if (!blueprint || !blueprint.body || blueprint.body.length === 0) {
       return ERR_INVALID_ARGS;

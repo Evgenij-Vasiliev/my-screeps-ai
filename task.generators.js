@@ -164,7 +164,13 @@ function generateFillPowerSpawnEnergy(roomState) {
   const needed = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
   if (needed <= 0) return;
 
-  if (storage.store[RESOURCE_ENERGY] < needed) return;
+  // Резерв storage неприкосновенен: PowerSpawn — некритичная подсистема и не
+  // имеет права тянуть энергию из резерва комнаты (см. POWER_SPAWN). Здесь
+  // раньше была только проверка `storage < needed`, то есть при включённом
+  // PowerSpawn энергия вычерпывалась до нуля.
+  const reserveThreshold =
+    STORAGE.ENERGY_MIN * POWER_SPAWN.ENERGY_RESERVE_MULTIPLIER;
+  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold + needed) return;
 
   addIfNew(
     roomName,
@@ -271,6 +277,10 @@ function generateFillTerminalResources(roomState) {
     ? Object.keys(storage.store)
     : exportTypes;
   const keys = existingKeys(roomName, "fillTerminalResources");
+  // Базовая цель терминала — излишек под продажу на рынке (задача 16).
+  // Флаг её выключает: тогда терминал грузится только под явные экспортные
+  // заявки terminalNetwork.
+  const baseCap = TASK_CONFIG.fillTerminalResources ? RESOURCE_TERMINAL_MAX : 0;
 
   for (let i = 0; i < resourceTypes.length; i++) {
     const resourceType = resourceTypes[i];
@@ -280,7 +290,12 @@ function generateFillTerminalResources(roomState) {
 
     const currentInTerminal = terminal.store[resourceType] || 0;
     const exportNeed = exports[resourceType] || 0;
-    const cap = exportNeed || RESOURCE_TERMINAL_MAX;
+    // Цель терминала — максимум из базового лимита излишка и заявки экспорта.
+    // Раньше exportNeed ЗАМЕНЯЛ базовый лимит: заявка на 1454 K опускала цель
+    // до 1454 (ниже базовых 10000), и излишек не доезжал ни до сети, ни до
+    // рынка — терминал застревал на заявке (аудит, замечание 31).
+    const cap = Math.max(baseCap, exportNeed);
+    if (cap === 0) continue;
     if (currentInTerminal >= cap) continue;
 
     addIfNew(

@@ -1,15 +1,23 @@
+// ── ПОРЯДОК ПРИОРИТЕТА ───────────────────────────────────────────────────
+// TASK_CHAIN — это ИМЕННО приоритет, а не «список для ротации»:
+// worker.runner всегда берёт самую приоритетную доступную категорию
+// (скан с индекса 0) и прерывает удерживаемую задачу, если появилась более
+// приоритетная. Порядок ставит выживание комнаты выше её развития и выше
+// снабжения «необязательных» подсистем (терминал/маркет, PowerSpawn, фабрика).
+// ВАЖНО: спавны/расширения первыми — это единственная энергия, которой
+// комната создаёт крипов; пока они не полны, всё остальное ждёт.
 const TASK_CHAIN = [
-  "fillSpawnsExtensions",
-  "fillPowerSpawnPower",
-  "fillPowerSpawnEnergy",
-  "fillTerminalEnergy",
-  "fillTerminalResources",
-  "fillFactoryEnergy",
-  "collectFactoryBattery",
-  "repairStructures",
-  "buildStructures",
-  "fillTowers",
-  "upgradeController",
+  "fillSpawnsExtensions", // 0  жизнеобеспечение: спавн/расширения
+  "fillTowers", //           1  оборона (пустые башни = потеря комнаты)
+  "repairStructures", //     2  поддержание структур
+  "upgradeController", //    3  защита от даунгрейда
+  "fillTerminalEnergy", //   4  буфер энергии терминала (переживает аварию)
+  "fillPowerSpawnEnergy", // 5  снабжение PowerSpawn
+  "fillTerminalResources", //6  экспорт/логистика терминала
+  "fillPowerSpawnPower", //  7  снабжение PowerSpawn (power)
+  "fillFactoryEnergy", //    8  завод
+  "collectFactoryBattery", //9  завод (продукт)
+  "buildStructures", //      10 развитие (стройка) — последнее
 ];
 
 // Проверка «категория из цепочки» за O(1) вместо TASK_CHAIN.includes()
@@ -275,6 +283,35 @@ function releaseTask(roomName, taskType, task) {
   return true;
 }
 
+/**
+ * Освобождает Task по taskId, не зная категории (ищет по всем очередям
+ * TASK_CHAIN). Нужно для безопасной миграции: в старой версии worker.runner
+ * хранил категорию как индекс TASK_CHAIN (`memory.taskIndex`), и после
+ * переупорядочивания цепочки индекс перестал ей соответствовать. При первом
+ * запуске новой версии незавершённая задача освобождается по taskId, а не
+ * повисает на живом крипе (иначе потребность стала бы «мёртвой»).
+ * @param {string} roomName
+ * @param {Object} task
+ * @returns {boolean}
+ */
+function releaseTaskById(roomName, task) {
+  if (!task || typeof task.taskId === "undefined") return false;
+  if (!Memory.rooms || !Memory.rooms[roomName] || !Memory.rooms[roomName].tasks)
+    return false;
+
+  const tasks = Memory.rooms[roomName].tasks;
+  for (let i = 0; i < TASK_CHAIN.length; i++) {
+    const queue = tasks[TASK_CHAIN[i]];
+    if (!queue) continue;
+    const index = findIndexByTaskId(queue, task.taskId);
+    if (index === -1) continue;
+    delete queue[index].reservedBy;
+    invalidateScanCache(roomName);
+    return true;
+  }
+  return false;
+}
+
 function completeTask(roomName, taskType, task) {
   if (
     !Memory.rooms ||
@@ -311,6 +348,7 @@ module.exports = {
   hasAvailableTask,
   reserveTask,
   releaseTask,
+  releaseTaskById,
   completeTask,
   removeTask,
 };
