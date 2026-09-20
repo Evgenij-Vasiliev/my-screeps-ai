@@ -39,6 +39,7 @@
  */
 const { REMOTE } = require("./constants");
 const { harvestPlan } = require("./role.miner");
+const { roomScopedTarget } = require("./remote.targets");
 
 /**
  * @param {any} s
@@ -46,6 +47,31 @@ const { harvestPlan } = require("./role.miner");
  */
 function isContainer(s) {
   return s.structureType === STRUCTURE_CONTAINER;
+}
+
+/**
+ * Источник из памяти, пригодный в текущей targetRoom.
+ *
+ * Room-зависимая цель: после переназначения targetRoom (remote.manager лечит
+ * дубль, который оставляет pre-spawn) источник покинутой комнаты должен быть
+ * отброшен. Вместе с ним выбрасывается и план пачечной добычи
+ * (harvestInterval/harvestPerCall): он посчитан от источника, то есть от его
+ * capacity, и для источника другой комнаты недействителен.
+ *
+ * @param {Creep} creep
+ * @param {string} targetRoom
+ * @returns {any} источник или null
+ */
+function knownSource(creep, targetRoom) {
+  const hadCached = !!creep.memory.sourceId;
+  const source = roomScopedTarget(creep, "sourceId", targetRoom);
+
+  if (!source && hadCached) {
+    delete creep.memory.harvestInterval;
+    delete creep.memory.harvestPerCall;
+  }
+
+  return source;
 }
 
 /**
@@ -60,21 +86,37 @@ function isContainer(s) {
  * удалённой комнаты по «дешёвому» маршруту, снова разворачивался к центру —
  * и так по кругу на кромке: ни источника, ни контейнера.
  *
+ * ВАЖНО: и контейнер, и источник — room-зависимые цели. Они берутся только
+ * через roomScopedTarget, иначе переназначенный на другую комнату майнер ушёл
+ * бы по старой памяти обратно в покинутую комнату.
+ *
  * @param {Creep} creep
+ * @param {string} targetRoom
  * @returns {any} контейнер, источник или null
  */
-function knownWorkTarget(creep) {
-  if (creep.memory.containerId) {
-    const container = Game.getObjectById(creep.memory.containerId);
-    if (container) return container;
-  }
+function knownWorkTarget(creep, targetRoom) {
+  const container = roomScopedTarget(creep, "containerId", targetRoom);
+  if (container) return container;
 
-  if (creep.memory.sourceId) {
-    const source = Game.getObjectById(creep.memory.sourceId);
-    if (source) return source;
-  }
+  return knownSource(creep, targetRoom);
+}
 
-  return null;
+/**
+ * Забывает room-зависимые цели, оставшиеся в покинутой комнате.
+ *
+ * Проверка на месте использования уже не даёт уйти по чужому ID, но если в
+ * текущем тике он не понадобился, то так и лежал бы в памяти до следующего
+ * обращения. После переназначения targetRoom память о прежней комнате
+ * недействительна целиком, поэтому вычищаем её сразу.
+ *
+ * @param {Creep} creep
+ * @param {string} targetRoom
+ */
+function forgetForeignTargets(creep, targetRoom) {
+  roomScopedTarget(creep, "containerId", targetRoom);
+  roomScopedTarget(creep, "containerSiteId", targetRoom);
+  // knownSource сам сбросит и план пачечной добычи, если источник чужой.
+  knownSource(creep, targetRoom);
 }
 
 /**
@@ -84,31 +126,39 @@ function knownWorkTarget(creep) {
  * между проверками функция работает только по кэшу (getObjectById ≈0.001 мс
  * против ≈0.05–0.15 мс за findInRange по всей комнате). Поиск выполняется
  * заново, когда кэш устарел (≥REMOTE.STRUCTURE_CHECK_INTERVAL тиков) или
- * когда кэшированный объект пропал (контейнер снесли, площадку достроили).
+ * когда кэшированный объект пропал (контейнер снесли, площадку достроили) —
+ * в том числе если он остался в покинутой комнате.
  *
  * @param {Creep} creep
- * @param {any} source
+ * @param {any} source источник в текущей targetRoom
+ * @param {string} targetRoom
  * @returns {{container: any, site: any}}
  */
-function findContainerTargets(creep, source) {
-  let container = creep.memory.containerId
-    ? Game.getObjectById(creep.memory.containerId)
-    : null;
+function findContainerTargets(creep, source, targetRoom) {
+  const hadCached =
+    !!creep.memory.containerId || !!creep.memory.containerSiteId;
 
-  if (container && !isContainer(container)) container = null;
+  let container = roomScopedTarget(creep, "containerId", targetRoom);
+
+  if (container && !isContainer(container)) {
+    delete creep.memory.containerId;
+    container = null;
+  }
 
   let site = null;
   if (!container) {
-    site = creep.memory.containerSiteId
-      ? Game.getObjectById(creep.memory.containerSiteId)
-      : null;
+    site = roomScopedTarget(creep, "containerSiteId", targetRoom);
 
-    if (site && site.structureType !== STRUCTURE_CONTAINER) site = null;
+    if (site && site.structureType !== STRUCTURE_CONTAINER) {
+      delete creep.memory.containerSiteId;
+      site = null;
+    }
   }
 
-  const lostCached =
-    (creep.memory.containerId && !container) ||
-    (creep.memory.containerSiteId && !site);
+  // Кэш потерян, если он был, а цели в текущей комнате не нашлось: объект
+  // исчез, сменил тип или относится к покинутой комнате. Тогда ищем заново
+  // сразу, не дожидаясь STRUCTURE_CHECK_INTERVAL.
+  const lostCached = hadCached && !container && !site;
   const checkedAt = creep.memory.containerCheckedAt;
   const stale =
     checkedAt === undefined ||
@@ -164,6 +214,10 @@ module.exports = {
       return;
     }
 
+    // remote.manager мог переназначить комнату живому крипу (лечение дубля
+    // после pre-spawn) — память о прежней комнате недействительна целиком.
+    forgetForeignTargets(creep, targetRoom);
+
     // Целевая комната недостижима напрямую (крип вне неё) — идём к рабочей
     // цели, если она уже известна из прошлого захода; точка (25,25) — только
     // запасной вариант для первого захода.
@@ -184,7 +238,7 @@ module.exports = {
       creep.memory._lastRoom = creep.room.name;
 
       creep.travelTo(
-        knownWorkTarget(creep) || new RoomPosition(25, 25, targetRoom),
+        knownWorkTarget(creep, targetRoom) || new RoomPosition(25, 25, targetRoom),
       );
 
       return;
@@ -192,37 +246,29 @@ module.exports = {
 
     creep.memory._lastRoom = creep.room.name;
 
-    if (creep.memory.sourceId) {
-      const cachedSource = Game.getObjectById(creep.memory.sourceId);
-
-      if (!cachedSource || cachedSource.room.name !== targetRoom) {
-        delete creep.memory.sourceId;
-      }
-    }
-
-    // Источник кэшируется один раз за жизнь крипа: в комнате он не меняется.
+    // Источник кэшируется: в комнате он не меняется. Но remote.manager может
+    // ПЕРЕНАЗНАЧИТЬ комнату живому крипу (лечение дубля после pre-spawn),
+    // поэтому источник покинутой комнаты (вместе с посчитанным от него планом
+    // пачечной добычи) должен быть отброшен — иначе майнер уйдёт к старому
+    // источнику и останется в старой комнате.
     // (Ветка creep.room.memory.sources убрана — этот ключ никто не пишет,
     // см. docs/PROJECT_AUDIT_AND_ROADMAP.md, дефект №36.)
-    if (!creep.memory.sourceId) {
-      const source = creep.pos.findClosestByRange(
-        creep.room.find(FIND_SOURCES),
-      );
+    let source = knownSource(creep, targetRoom);
+
+    if (!source) {
+      source = creep.pos.findClosestByRange(creep.room.find(FIND_SOURCES));
 
       if (source) {
         creep.memory.sourceId = source.id;
       }
     }
 
-    const source = creep.memory.sourceId
-      ? Game.getObjectById(creep.memory.sourceId)
-      : null;
-
     if (!source) {
       delete creep.memory.sourceId;
       return;
     }
 
-    const targets = findContainerTargets(creep, source);
+    const targets = findContainerTargets(creep, source, targetRoom);
     const container = targets.container;
     const site = targets.site;
 

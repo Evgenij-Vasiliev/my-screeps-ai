@@ -10,8 +10,123 @@
  *  3. Прочие ресурсы — выравнивание излишков.
  */
 
-const { STORAGE, TERMINAL_SUPPLY, TERMINAL_NETWORK } = require("./constants");
+const {
+  STORAGE,
+  TERMINAL_SUPPLY,
+  TERMINAL_NETWORK,
+  CACHE,
+} = require("./constants");
 const labWorker = require("lab.worker");
+
+// ── КЕШИ НА ТИК (heap) ──────────────────────────────────────────────────
+// 1. Список своих комнат с терминалом. В Game.rooms лежат и чужие видимые
+//    комнаты (разведка, оборона), а состав этого объекта меняется редко:
+//    каждый тик перебирать все комнаты ради одного и того же подмножества —
+//    плата ни за что. Имена кэшируются в heap и пересобираются раз в
+//    CACHE.REFRESH_INTERVAL тиков (новый терминал входит в сеть с этой
+//    задержкой). Объекты room/terminal/storage разрешаются заново каждый тик и
+//    перепроверяются на принадлежность, поэтому устаревшая запись кэша
+//    (комната потеряна, терминал снесён) просто пропускается, а не ломает run.
+// 2. Конфиги троек лаб и разрешённые объекты лабораторий комнаты на текущий
+//    тик. resourceInLabs/roomUsesReagent вызываются на каждый реагент и внутри
+//    компараторов сортировки доноров, а Game.getObjectById и сборка массива
+//    конфигов — самая дорогая их часть (замер shard3: resourceInLabs 2.03 мкс,
+//    collectLabRequests 79 мкс за тик).
+
+/**
+ * Разрешённые лаборатории комнаты и её реагенты на текущий тик.
+ * `labs` идут по слотам конфигов (lab1, lab2, reactor) — ровно в том порядке и
+ * с той же кратностью, что и прежний обход, но каждый id разрешается один раз
+ * за тик. `reagentList` — упорядоченный список реагентов (порядок первого
+ * появления, как у прежнего Set), `reagents` — та же информация для O(1)
+ * проверки «комната использует этот реагент».
+ * @param {Room} room
+ * @returns {{labs: any[], reagentList: string[], reagents: Object<string, boolean>}}
+ */
+function getRoomLabInfo(room) {
+  let cache = global._terminalLabs;
+  if (!cache || cache.tick !== Game.time) {
+    cache = global._terminalLabs = { tick: Game.time, rooms: {} };
+  }
+
+  const cached = cache.rooms[room.name];
+  if (cached) return cached;
+
+  const labs = [];
+  const byId = /** @type {Object<string, any>} */ ({});
+  const reagents = /** @type {Object<string, boolean>} */ ({});
+  const reagentList = [];
+
+  const configs = labWorker.getConfigs(room);
+  for (let i = 0; i < configs.length; i++) {
+    const config = configs[i].config;
+
+    if (config.reagent1 && !reagents[config.reagent1]) {
+      reagents[config.reagent1] = true;
+      reagentList.push(config.reagent1);
+    }
+    if (config.reagent2 && !reagents[config.reagent2]) {
+      reagents[config.reagent2] = true;
+      reagentList.push(config.reagent2);
+    }
+
+    const ids = [config.lab1, config.lab2, config.reactor];
+    for (let j = 0; j < ids.length; j++) {
+      const id = ids[j];
+      if (!id) continue;
+      let lab = byId[id];
+      if (lab === undefined) {
+        lab = Game.getObjectById(id) || null;
+        byId[id] = lab;
+      }
+      if (lab) labs.push(lab);
+    }
+  }
+
+  const info = { labs, reagentList, reagents };
+  cache.rooms[room.name] = info;
+  return info;
+}
+
+/**
+ * Комнаты с терминалом, принадлежащие игроку (имена, heap-кеш на
+ * CACHE.REFRESH_INTERVAL тиков). Чужие видимые комнаты в список не попадают.
+ * @returns {string[]}
+ */
+function getTerminalRoomNames() {
+  const cached = global._terminalRoomNames;
+  if (cached && Game.time - cached.tick < CACHE.REFRESH_INTERVAL) {
+    return cached.names;
+  }
+
+  const names = [];
+  for (const roomName in Game.rooms) {
+    const room = Game.rooms[roomName];
+    if (!room.controller || !room.controller.my) continue;
+    if (!room.terminal) continue;
+    names.push(roomName);
+  }
+
+  global._terminalRoomNames = { tick: Game.time, names };
+  return names;
+}
+
+// ── ОШИБКИ Terminal.send ────────────────────────────────────────────────
+// Политика отправок не меняется: неудачная отправка возвращает false, и
+// вызывающая сторона продолжает обход (следующий донор/категория). Различаются
+// только причины: раньше все ошибки печатались одинаково («ошибка N»), и по
+// логу нельзя было понять, ждать ли перезарядки (ERR_TIRED), доливать ли
+// энергию под комиссию (ERR_NOT_ENOUGH_ENERGY), чинить ли аргументы
+// (ERR_INVALID_ARGS) или получатель уже полон (ERR_FULL).
+// Система backoff/повторов не вводится — коды различаются только в диагностике.
+/** @type {Object<number, string>} */
+const SEND_ERROR_MESSAGES = {
+  [ERR_FULL]: "ERR_FULL: терминал получателя полон",
+  [ERR_NOT_ENOUGH_ENERGY]:
+    "ERR_NOT_ENOUGH_ENERGY: не хватает энергии на комиссию",
+  [ERR_INVALID_ARGS]: "ERR_INVALID_ARGS: неверный ресурс/объём/комната",
+  [ERR_TIRED]: "ERR_TIRED: терминал на перезарядке (cooldown)",
+};
 
 class TerminalNetwork {
   run() {
@@ -38,9 +153,13 @@ class TerminalNetwork {
   }
 
   collectRoomStates() {
+    const names = getTerminalRoomNames();
     const states = [];
-    for (const roomName in Game.rooms) {
-      const room = Game.rooms[roomName];
+    for (let i = 0; i < names.length; i++) {
+      const room = Game.rooms[names[i]];
+      // Кеш имён пересобирается раз в CACHE.REFRESH_INTERVAL тиков, поэтому
+      // запись может устареть: комнату могли потерять, терминал — снести.
+      if (!room) continue;
       if (!room.controller || !room.controller.my) continue;
       if (!room.terminal) continue;
 
@@ -79,25 +198,27 @@ class TerminalNetwork {
     return inTerminal + inStorage;
   }
 
+  /**
+   * Суммарный запас ресурса в лабораториях комнаты.
+   * Лаборатории разрешаются один раз за тик (см. getRoomLabInfo) — прежний код
+   * вызывал Game.getObjectById на каждый слот каждой тройки при каждом
+   * обращении, а обращений на тик много: по одному на реагент комнаты плюс
+   * компараторы сортировки доноров.
+   * @param {Room} room
+   * @param {string} resourceType
+   * @returns {number}
+   */
   resourceInLabs(room, resourceType) {
+    const labs = getRoomLabInfo(room).labs;
     let total = 0;
-    for (const { config } of labWorker.getConfigs(room)) {
-      const ids = [config.lab1, config.lab2, config.reactor];
-      for (const id of ids) {
-        const lab = Game.getObjectById(id);
-        if (lab) total += lab.store[resourceType] || 0;
-      }
+    for (let i = 0; i < labs.length; i++) {
+      total += labs[i].store[resourceType] || 0;
     }
     return total;
   }
 
   roomUsesReagent(room, resourceType) {
-    for (const { config } of labWorker.getConfigs(room)) {
-      if (config.reagent1 === resourceType || config.reagent2 === resourceType) {
-        return true;
-      }
-    }
-    return false;
+    return getRoomLabInfo(room).reagents[resourceType] === true;
   }
 
   availableToGive(state, resourceType) {
@@ -110,13 +231,13 @@ class TerminalNetwork {
   collectLabRequests(states) {
     const requests = [];
     for (const state of states) {
-      const reagents = new Set();
-      for (const { config } of labWorker.getConfigs(state.room)) {
-        if (config.reagent1) reagents.add(config.reagent1);
-        if (config.reagent2) reagents.add(config.reagent2);
-      }
+      // Реагенты берутся из того же тикового кеша, что и лаборатории: порядок
+      // первого появления сохранён, поэтому порядок заявок (и их сортировка по
+      // запасу) не изменился, а getConfigs не собирается повторно.
+      const reagents = getRoomLabInfo(state.room).reagentList;
 
-      for (const resourceType of reagents) {
+      for (let i = 0; i < reagents.length; i++) {
+        const resourceType = reagents[i];
         const have =
           this.totalResource(state, resourceType) +
           this.resourceInLabs(state.room, resourceType);
@@ -133,11 +254,23 @@ class TerminalNetwork {
     return requests.sort((a, b) => a.have - b.have);
   }
 
+  /**
+   * Снимает заявки прошлого тика перед новым разбором (заявки текущего тика
+   * дописывает addExport — поведение не изменилось).
+   *
+   * Прежний код безусловно писал Memory.rooms[*].terminalExports = {} для каждой
+   * комнаты с терминалом КАЖДЫЙ тик. Запись в Memory помечает её «грязной», и
+   * движок сериализует её целиком (36 КБ на живом shard3) — в том числе в тики,
+   * когда заявок не было вовсе (замер: terminalExports пуст во всех 5 комнатах).
+   * Теперь объект трогается, только если в нём что-то есть; если заявок не было,
+   * Memory остаётся нетронутой.
+   */
   resetExports(states) {
-    for (const state of states) {
-      if (!Memory.rooms) Memory.rooms = {};
-      if (!Memory.rooms[state.room.name]) Memory.rooms[state.room.name] = {};
-      Memory.rooms[state.room.name].terminalExports = {};
+    for (let i = 0; i < states.length; i++) {
+      const roomMemory = Memory.rooms && Memory.rooms[states[i].room.name];
+      const exports = roomMemory && roomMemory.terminalExports;
+      if (!exports) continue;
+      for (const resourceType in exports) delete exports[resourceType];
     }
   }
 
@@ -276,9 +409,13 @@ class TerminalNetwork {
       return true;
     }
 
+    // Политика та же (false — вызывающая сторона продолжает обход), различается
+    // только причина отказа.
+    const reason =
+      SEND_ERROR_MESSAGES[result] || `неизвестная ошибка ${result}`;
     console.log(
-      `[TerminalNetwork] send ${resourceType} ${fromState.room.name} → ` +
-        `${toState.room.name} ошибка ${result}`,
+      `[TerminalNetwork] send ${resourceType} ${amount} ` +
+        `${fromState.room.name} → ${toState.room.name}: ${reason}`,
     );
     return false;
   }

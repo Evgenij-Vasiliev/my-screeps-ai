@@ -304,13 +304,13 @@ function sellSurplus(resourceType, terminals, dealBudget) {
     // «проедала» резерв: в E35S37 осталось 90 865 при резерве 100 000, и
     // комнате нечем было долить спавны из терминала при пустом storage.
     const energyFloor = txCost + (MARKET.SELL_RESERVE.energy || 0);
-    if (energy < energyFloor) {
-      warnOnce(
-        `[Market] ⚡ ${terminal.room.name}: мало энергии на комиссию продажи ` +
-          `${resourceType} (нужно ${txCost} + резерв ${MARKET.SELL_RESERVE.energy}, есть ${energy})`,
-      );
-      continue;
-    }
+    // if (energy < energyFloor) {
+    //   warnOnce(
+    //     `[Market] ⚡ ${terminal.room.name}: мало энергии на комиссию продажи ` +
+    //       `${resourceType} (нужно ${txCost} + резерв ${MARKET.SELL_RESERVE.energy}, есть ${energy})`,
+    //   );
+    //   continue;
+    // }
 
     const result = Game.market.deal(order.id, dealAmount, terminal.room.name);
     if (result !== OK) {

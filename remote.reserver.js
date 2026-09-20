@@ -10,11 +10,8 @@
  * (нейтральных) контроллерах, не на своих!
  * Максимум резервации: 5000 тиков.
  *
- * Управление через консоль:
- *   Memory.reserverConfig = {
- *     targetRooms: ["E35S38", "E36S37"]
- *   }
- * (по умолчанию используется список constants.REMOTE.ROOMS)
+ * Целевую комнату назначает remote.manager (assignTargetRoom) — единая точка
+ * назначения для всех дальних ролей; список комнат — constants.REMOTE.ROOMS.
  *
  * Память крипа (creep.memory):
  * - targetRoom {string} — целевая комната
@@ -26,44 +23,24 @@
  * только рядом стоящий крип реально резервирует.
  * ===================================================
  */
-const { REMOTE } = require("./constants");
-
-/**
- * Валидные имена комнат из Memory.reserverConfig.targetRooms.
- * Пустой/битый/не-массив конфиг → список дальней добычи constants.REMOTE.ROOMS.
- * Без этого пустой массив давал `hash % 0 === NaN` и targetRoom = undefined
- * (роль пересчитывала комнату каждый тик).
- * @param {any} raw
- * @returns {string[]}
- */
-function sanitizeTargetRooms(raw) {
-  const list = Array.isArray(raw)
-    ? raw.filter(name => typeof name === "string" && name.length > 0)
-    : [];
-  return list.length > 0 ? list : REMOTE.ROOMS;
-}
-
 module.exports = {
   run: function (creep) {
     /**
-     * 1. ОПРЕДЕЛЕНИЕ ЦЕЛЕВОЙ КОМНАТЫ
+     * 1. ЦЕЛЕВАЯ КОМНАТА
      *
-     * ИСПРАВЛЕНИЕ: читаем комнаты из Memory — можно менять через консоль.
-     * Хэш имени крипа распределяет резервистов по комнатам равномерно.
+     * Назначает ТОЛЬКО remote.manager (assignTargetRoom) — единая точка
+     * назначения для всех дальних ролей. Пока свободной комнаты нет
+     * (пре-спавн поставил замену раньше смерти предшественника, и обе комнаты
+     * ещё заняты), резервер ждёт и ничего не делает — так же, как remote.miner.
+     *
+     * Хэш-fallback по имени убран: он выдавал комнату вслепую и мог закрепить
+     * обе замены за одной и той же комнатой, а непустой targetRoom в
+     * remote.manager больше не пересматривается — ошибка оставалась на всю
+     * жизнь крипа, и вторая удалённая комната стояла без работника.
      */
-    if (!creep.memory.targetRoom) {
-      const config = Memory.reserverConfig || {};
-      const rooms = sanitizeTargetRooms(config.targetRooms);
-      if (rooms.length === 0) return;
-
-      let hash = 0;
-      for (let i = 0; i < creep.name.length; i++) {
-        hash += creep.name.charCodeAt(i);
-      }
-      creep.memory.targetRoom = rooms[hash % rooms.length];
-    }
-
     const targetRoom = creep.memory.targetRoom;
+
+    if (!targetRoom) return;
 
     /**
      * 2. ПЕРЕХОД В ЦЕЛЕВУЮ КОМНАТУ

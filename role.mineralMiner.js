@@ -36,7 +36,11 @@ const roleMineralMiner = {
 
     if (!roomState.mineral || !roomState.mineral.id) return;
 
-    const mineral = Game.getObjectById(roomState.mineral.id);
+    // Объект минерала уже разрешён для roomState на этот тик (mineral.manager
+    // кеширует его в heap) — повторный Game.getObjectById на каждого крипа не
+    // нужен. Фолбэк оставлен для состояния, собранного в обход кеша.
+    const mineral =
+      roomState.mineral.mineral || Game.getObjectById(roomState.mineral.id);
     if (!mineral || !roomState.mineral.extractorId) return;
 
     const harvestResult = creep.harvest(mineral);

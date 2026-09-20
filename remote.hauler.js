@@ -32,6 +32,28 @@
  *    (структуры и дропнутые ресурсы) шли на каждом тике ожидания.
  */
 const { REMOTE } = require("./constants");
+const { roomScopedTarget } = require("./remote.targets");
+
+// Room-зависимые цели хайлера: всё, что он помнит об удалённой комнате.
+const ROOM_TARGETS = ["containerId", "droppedId", "waitSourceId"];
+
+/**
+ * Забывает цели, оставшиеся в покинутой комнате.
+ *
+ * Проверка на месте использования (roomScopedTarget в knownHaulTarget и в
+ * ветке сбора) уже не даёт уйти по чужому ID, но если этот ID в текущем тике
+ * не понадобился, он так и лежал бы в памяти до следующего обращения. После
+ * переназначения targetRoom память о прежней комнате недействительна целиком,
+ * поэтому её вычищаем сразу.
+ *
+ * @param {Object} creep
+ * @param {string} targetRoom
+ */
+function forgetForeignTargets(creep, targetRoom) {
+  for (let i = 0; i < ROOM_TARGETS.length; i++) {
+    roomScopedTarget(creep, ROOM_TARGETS[i], targetRoom);
+  }
+}
 
 /**
  * Цель сбора в удалённой комнате, известная из прошлого рейса: контейнер,
@@ -40,33 +62,33 @@ const { REMOTE } = require("./constants");
  * цели на каждом переходе границы превращала рейс в пинг-понг на кромке
  * (разбор — docs/REMOTE-BORDER-PING-PONG.md).
  *
+ * ВАЖНО: все три ID — room-зависимые, поэтому берутся только через
+ * roomScopedTarget: объект годится, лишь если он существует И лежит в текущей
+ * targetRoom. Иначе хайлер, которому remote.manager переназначил комнату,
+ * ушёл бы по старой памяти в покинутую комнату и остался там (живой shard3,
+ * 19.09.2026: remoteHauler_E35S37_83084919 с targetRoom E35S38 стоял у
+ * источника E36S37 и в новую комнату не шёл).
+ *
  * @param {Creep} creep
  * @param {string} targetRoom
  * @returns {any} контейнер, ресурс, источник или null
  */
 function knownHaulTarget(creep, targetRoom) {
-  if (creep.memory.containerId) {
-    const container = Game.getObjectById(creep.memory.containerId);
+  const container = roomScopedTarget(creep, "containerId", targetRoom);
 
-    if (
-      container &&
-      container.structureType === STRUCTURE_CONTAINER &&
-      container.room.name === targetRoom &&
-      container.store[RESOURCE_ENERGY] > 0
-    ) {
-      return container;
-    }
+  if (
+    container &&
+    container.structureType === STRUCTURE_CONTAINER &&
+    container.store[RESOURCE_ENERGY] > 0
+  ) {
+    return container;
   }
 
-  if (creep.memory.droppedId) {
-    const dropped = Game.getObjectById(creep.memory.droppedId);
-    if (dropped && dropped.amount > 20) return dropped;
-  }
+  const dropped = roomScopedTarget(creep, "droppedId", targetRoom);
+  if (dropped && dropped.amount > 20) return dropped;
 
-  if (creep.memory.waitSourceId) {
-    const source = Game.getObjectById(creep.memory.waitSourceId);
-    if (source) return source;
-  }
+  const source = roomScopedTarget(creep, "waitSourceId", targetRoom);
+  if (source) return source;
 
   return null;
 }
@@ -93,17 +115,22 @@ module.exports = {
   run: function (creep) {
     const HOME_ROOM = REMOTE.HOME_ROOM;
 
-    // Целевую комнату назначает remote.manager (assignTargetRoom). Хэш по
-    // имени — только fallback для крипов, которым менеджер комнату не дал
-    // (например, дальних крипов больше, чем комнат).
-    if (!creep.memory.targetRoom) {
-      let sum = 0;
-      for (let i = 0; i < creep.name.length; i++)
-        sum += creep.name.charCodeAt(i);
-      creep.memory.targetRoom = REMOTE.ROOMS[sum % REMOTE.ROOMS.length];
-    }
-
+    // Целевую комнату назначает ТОЛЬКО remote.manager (assignTargetRoom) —
+    // единая точка назначения для всех дальних ролей. Пока свободной комнаты
+    // нет (пре-спавн поставил замену раньше смерти предшественника, и обе
+    // комнаты ещё заняты), хайлер просто ждёт — так же, как ждёт remote.miner.
+    //
+    // Хэш-fallback по имени убран: он выдавал комнату вслепую и мог закрепить
+    // обе замены за одной и той же комнатой, а непустой targetRoom в
+    // remote.manager больше не пересматривается — ошибка оставалась на всю
+    // жизнь крипа, и вторая удалённая комната стояла без работника.
     const targetRoom = creep.memory.targetRoom;
+
+    if (!targetRoom) return;
+
+    // remote.manager мог переназначить комнату живому крипу (лечение дубля
+    // после pre-spawn) — память о прежней комнате недействительна целиком.
+    forgetForeignTargets(creep, targetRoom);
 
     // Переключение режима
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0)
@@ -173,21 +200,19 @@ module.exports = {
     const canSearch =
       !creep.memory.nextHaulSearch || Game.time >= creep.memory.nextHaulSearch;
 
-    let container = null;
+    // Контейнер — room-зависимая цель: годится, только если ещё существует и
+    // лежит в текущей targetRoom (иначе после переназначения комнаты крип
+    // пошёл бы к контейнеру покинутой комнаты).
+    let container = roomScopedTarget(creep, "containerId", targetRoom);
 
-    if (creep.memory.containerId) {
-      container = Game.getObjectById(creep.memory.containerId);
-
-      if (
-        !container ||
-        container.structureType !== STRUCTURE_CONTAINER ||
-        container.room.name !== targetRoom ||
-        container.store[RESOURCE_ENERGY] <= 0
-      ) {
-        // Контейнер исчез, опустел или это уже не тот контейнер — ищем заново
-        container = null;
-        delete creep.memory.containerId;
-      }
+    if (
+      container &&
+      (container.structureType !== STRUCTURE_CONTAINER ||
+        container.store[RESOURCE_ENERGY] <= 0)
+    ) {
+      // Контейнер опустел или это уже не тот контейнер — ищем заново
+      container = null;
+      delete creep.memory.containerId;
     }
 
     if (!container && canSearch) {
@@ -214,15 +239,12 @@ module.exports = {
       return;
     }
 
-    // Контейнер пуст — подбираем выпавшую энергию
-    let dropped = null;
+    // Контейнер пуст — подбираем выпавшую энергию (тоже только в targetRoom)
+    let dropped = roomScopedTarget(creep, "droppedId", targetRoom);
 
-    if (creep.memory.droppedId) {
-      dropped = Game.getObjectById(creep.memory.droppedId);
-      if (!dropped || dropped.amount <= 20) {
-        dropped = null;
-        delete creep.memory.droppedId;
-      }
+    if (dropped && dropped.amount <= 20) {
+      dropped = null;
+      delete creep.memory.droppedId;
     }
 
     if (!dropped && canSearch) {
@@ -253,12 +275,10 @@ module.exports = {
       creep.memory.nextHaulSearch = Game.time + REMOTE.HAULER_SEARCH_INTERVAL;
     }
 
-    let source = null;
-
-    if (creep.memory.waitSourceId) {
-      source = Game.getObjectById(creep.memory.waitSourceId);
-      if (!source) delete creep.memory.waitSourceId;
-    }
+    // Источник ожидания — тоже room-зависимая цель: после переназначения
+    // комнаты он должен быть отброшен, иначе хайлер уйдёт к источнику
+    // покинутой комнаты и останется там.
+    let source = roomScopedTarget(creep, "waitSourceId", targetRoom);
 
     if (!source) {
       source = creep.pos.findClosestByRange(FIND_SOURCES);

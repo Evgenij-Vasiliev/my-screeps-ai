@@ -1,9 +1,13 @@
 const energySource = require("energySource");
+const scanner = require("scanner");
+const factoryManager = require("factory.manager");
+const powerSpawnManager = require("powerSpawn.manager");
 const {
   STORAGE,
   TERMINAL_SUPPLY,
   CONTROLLER,
   BOOTSTRAP,
+  FACTORY,
 } = require("./constants");
 
 function withdrawPower(creep) {
@@ -150,6 +154,14 @@ function executeFillFactoryEnergy(creep, task) {
       return "DONE"; // условие 1: фабрика уже полна
     }
 
+    // Снабжение закончено: сырьё набрано, а в store оставлен резерв под
+    // результат производства (см. factory.manager.isEnergySupplyComplete).
+    // Досыпать энергию «до 100 %» нельзя — продукту будет некуда лечь.
+    if (factoryManager.isEnergySupplyComplete(target)) {
+      delete creep.memory.working;
+      return "DONE";
+    }
+
     const withdrawn = energySource.withdrawFromStorage(creep);
     if (!withdrawn) {
       delete creep.memory.working;
@@ -165,7 +177,28 @@ function executeFillFactoryEnergy(creep, task) {
     return "DONE";
   }
 
-  const result = creep.transfer(target, RESOURCE_ENERGY);
+  // Тот же резерв, что и в фазе сбора: остаток груза остаётся у крипа и уедет
+  // со следующей задачей, а фабрика сохраняет место под продукт.
+  if (factoryManager.isEnergySupplyComplete(target)) {
+    delete creep.memory.working;
+    return "DONE";
+  }
+
+  // Партия ограничивается резервом под продукт: за один рейс воркер привозит
+  // больше, чем «до резерва», и свободное место под результат съедалось бы
+  // целиком (у воркера carry до нескольких сотен). Третий аргумент transfer —
+  // amount — поддерживается движком (screeps/engine, Creep.prototype.transfer).
+  // Если резерв уже съеден, а сырья не хватает (store забит другим ресурсом),
+  // amount не задаём: фабрике важнее получить сырьё, а движок всё равно
+  // ограничит перенос свободным местом.
+  const reserveRoom =
+    target.store.getFreeCapacity(RESOURCE_ENERGY) - FACTORY.PRODUCT_RESERVE;
+  const transferAmount =
+    reserveRoom > 0
+      ? Math.min(creep.store[RESOURCE_ENERGY], reserveRoom)
+      : undefined;
+
+  const result = creep.transfer(target, RESOURCE_ENERGY, transferAmount);
 
   switch (result) {
     case OK:
@@ -585,6 +618,15 @@ function executeFillPowerSpawnEnergy(creep, task) {
       return "DONE";
     }
 
+    // Энергии в комнате больше нет (storage на резерве, терминал ниже своего
+    // порога) — рейс за энергией бессмыслен: крип вернулся бы с пустым
+    // рюкзаком, а PowerSpawn всё равно нечего обрабатывать. Та же проверка,
+    // что у генератора задачи, — один источник правды на всю цепочку.
+    if (!powerSpawnManager.hasEnergySupply(creep.room)) {
+      delete creep.memory.working;
+      return "DONE";
+    }
+
     const result = creep.withdraw(source, RESOURCE_ENERGY);
 
     if (result === ERR_NOT_IN_RANGE) {
@@ -706,6 +748,24 @@ function isValidBuildTask(task) {
   return !!task && task.type === "build" && !!task.targetId;
 }
 
+/**
+ * Состав структур комнаты изменился — сбрасываем heap-кэш scanner этой комнаты.
+ *
+ * Кэш живёт до scanner.STRUCTURE_CACHE_TTL (1000 тиков) и пересобирается
+ * только по этому таймеру либо вручную, поэтому построенное здание (расширение,
+ * линк, лаба, башня) не попадало в roomState — а значит, и в задачи
+ * fillSpawnsExtensions/fillTowers и в ремонт башен — до 1000 тиков.
+ * Единственный момент появления нового здания — исчезновение стройплощадки,
+ * которую строил этот крип (стройка в своих комнатах идёт только через
+ * buildStructures этого же Task System), поэтому инвалидация вешается именно
+ * на этот переход. Стоимость — один пересбор кэша на завершённую стройку
+ * (room.find по структурам комнаты), а не на каждый тик.
+ * @param {Creep} creep
+ */
+function invalidateStructureCache(creep) {
+  scanner.clearStructureCache(creep.room.name);
+}
+
 function executeBuildStructures(creep, task) {
   if (!isValidBuildTask(task)) {
     return "SKIP";
@@ -716,6 +776,7 @@ function executeBuildStructures(creep, task) {
   if (!target) {
     // Стройплощадка исчезла — значит либо достроена, либо снесена.
     // В любом случае задача больше не актуальна.
+    invalidateStructureCache(creep);
     return "DONE";
   }
 
@@ -752,7 +813,9 @@ function executeBuildStructures(creep, task) {
 
     case ERR_INVALID_TARGET:
       delete creep.memory.working;
-      return "DONE"; // стройплощадка, вероятно, уже достроена
+      // Стройплощадка, вероятно, уже достроена — состав структур изменился.
+      invalidateStructureCache(creep);
+      return "DONE";
 
     case ERR_NOT_ENOUGH_RESOURCES:
       delete creep.memory.working;

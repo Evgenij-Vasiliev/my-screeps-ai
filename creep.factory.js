@@ -175,6 +175,10 @@ const factory = {
         homeRoom: spawn.room.name,
         working: false,
         targetRoom: null,
+        // Связку «уходящий → замена» заполняет spawn.manager (remote.handoff)
+        // ровно в тике запуска спавна: без неё замена — обычный новый крип.
+        handoffFrom: null,
+        handoffAt: null,
       },
     }),
 
@@ -184,6 +188,8 @@ const factory = {
         homeRoom: spawn.room.name,
         working: false,
         targetRoom: null,
+        handoffFrom: null,
+        handoffAt: null,
       },
     }),
 
@@ -193,8 +199,24 @@ const factory = {
         homeRoom: spawn.room.name,
         working: false,
         targetRoom: null,
+        handoffFrom: null,
+        handoffAt: null,
       },
     }),
+  },
+
+  /**
+   * Имя, под которым будет создан крип. Вынесено отдельной функцией: имя
+   * нужно ЗАРАНЕЕ — spawn.manager записывает его уходящему крипу в
+   * memory.handoffTo ещё до вызова spawnCreep (replacement handoff,
+   * remote.handoff.js).
+   *
+   * @param {string} role
+   * @param {string} roomName
+   * @returns {string}
+   */
+  creepName: function (role, roomName) {
+    return `${role}_${roomName}_${Game.time}`;
   },
 
   /**
@@ -204,9 +226,10 @@ const factory = {
    * @param {number} [threshold]
    * @param {boolean} [emergency] аварийный режим (см. worker): спавнить
    *                    дешёвое тело, даже если на штатное энергии не хватает
+   * @param {string} [handoffFrom] имя уходящего крипа, если это его замена
    * @returns {ScreepsReturnCode}
    */
-  run: function (spawn, role, roomName, threshold, emergency) {
+  run: function (spawn, role, roomName, threshold, emergency, handoffFrom) {
     const blueprintFn = this.blueprints[role];
 
     if (!blueprintFn) {
@@ -221,7 +244,12 @@ const factory = {
 
     const memory = Object.assign({ role }, blueprint.memory);
 
-    const name = `${role}_${roomName}_${Game.time}`;
+    // Память дальних ролей создаётся с handoffFrom: null, но объект из
+    // blueprint общий для всех вызовов, поэтому пишем связку только когда она
+    // есть, и всегда поверх копии (Object.assign выше).
+    if (handoffFrom) memory.handoffFrom = handoffFrom;
+
+    const name = this.creepName(role, roomName);
 
     return spawn.spawnCreep(blueprint.body, name, { memory });
   },

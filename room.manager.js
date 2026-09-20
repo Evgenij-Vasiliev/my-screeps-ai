@@ -136,6 +136,61 @@ function scanWallsAndRamparts(roomState) {
 }
 
 /**
+ * Разыменовывает список id из heap-кэша scanner в массив объектов.
+ *
+ * Прежний код делал это через `ids.map(id => Game.getObjectById(id)).filter(Boolean)`
+ * — тот же результат, но с двумя массивами и двумя замыканиями на каждую группу
+ * (в комнате RCL8 это расширения, дороги, линки, лаборатории). Здесь один массив
+ * и один цикл.
+ *
+ * Почему НЕ собираем группы одним `room.find(FIND_STRUCTURES)`: это было
+ * замерено и отклонено. В консоли shard3 `room.find(FIND_STRUCTURES)` по 334
+ * структурам стоит 1.2 мкс, а разыменование 270 id — 11-35 мкс, поэтому замена
+ * выглядела выгодной, но в живом тике она оказалась хуже: полный
+ * `buildAllRoomStates()` с find-вариантом = 177 мкс (min из 20), а живой профиль
+ * roomState после деплоя не улучшился (0.7265 -> 0.7549 CPU/тик), при том что
+ * find трогает больше объектов, чем нужно roomState (все стены, валы и
+ * контейнеры комнаты — двигатель материализует их объекты при первом обращении),
+ * а прежний путь через id разыменовывает только нужные ~270.
+ *
+ * @param {string[]} ids
+ * @returns {any[]}
+ */
+function resolveIds(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i++) {
+    const obj = Game.getObjectById(ids[i]);
+    if (obj) out.push(obj);
+  }
+  return out;
+}
+
+/**
+ * Добавляет повреждённые структуры одной группы в общий список.
+ * Прежний filter(s => s.hits < s.hitsMax) заменён обычным циклом: без
+ * замыкания и без промежуточного массива allStructuresForRepair, который
+ * собирался шестью concat'ами (каждый concat копировал весь накопленный массив).
+ * @param {Array} group
+ * @param {Array} out
+ */
+function collectDamaged(group, out) {
+  for (let i = 0; i < group.length; i++) {
+    const s = group[i];
+    if (s.hits < s.hitsMax) out.push(s);
+  }
+}
+
+/**
+ * То же для одиночных структур (фабрика, PowerSpawn, storage, терминал,
+ * обсервер, экстрактор, нюкер): отсутствующая структура — null.
+ * @param {Object|null} s
+ * @param {Array} out
+ */
+function collectDamagedSingle(s, out) {
+  if (s && s.hits < s.hitsMax) out.push(s);
+}
+
+/**
  * Список вражеских лекарей (их башни убивают первыми). Считается один раз на
  * комнату за тик, а не внутри roleTower.run для каждой башни: раньше
  * body.some(HEAL) прогонялся N_башен × N_врагов раз за тик.
@@ -303,94 +358,101 @@ function runLinkLogic(roomState) {
 module.exports = {
   /**
    * Возвращает массив всех комнат, принадлежащих игроку.
+   * for..in вместо Object.values(Game.rooms).filter(): не создаётся
+   * промежуточный массив со всеми комнатами; порядок обхода тот же.
    * @returns {Room[]}
    */
   getOwnedRooms: function () {
-    return Object.values(Game.rooms).filter(
-      room => room.controller && room.controller.my,
-    );
+    const rooms = [];
+    for (const name in Game.rooms) {
+      const room = Game.rooms[name];
+      if (room.controller && room.controller.my) rooms.push(room);
+    }
+    return rooms;
   },
 
   /**
    * Строит объект состояния для одной комнаты.
    * @param {Room} room
+   * @param {Creep[]} [precomputedCreeps]
    * @returns {Object} roomState
    */
   buildRoomState: function (room, precomputedCreeps) {
+    // Группы структур — по id из heap-кэша scanner, одним циклом на группу
+    // (см. resolveIds: почему не room.find и почему без map/filter).
     const cache = scanner.getStructureCache(room);
 
-    const grouped = {
-      spawns: cache.spawnIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      towers: cache.towerIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      links: cache.linkIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      labs: cache.labIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      extensions: cache.extensionIds
-        .map(id => Game.getObjectById(id))
-        .filter(Boolean),
-      roads: cache.roadIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      // walls/ramparts здесь НЕ разыменовываются: их читает только
-      // runTowerLogic, и только раз в TOWER.WALL_SCAN_INTERVAL тиков —
-      // напрямую по id из scanner-кэша (см. scanWallsAndRamparts).
-      // Раньше на каждый тик в каждой комнате уходило ~190 Game.getObjectById
-      // плюс два массива map/filter только ради башенного скана.
-      factories: cache.factoryId
-        ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
-        : [],
-      powerSpawns: cache.powerSpawnId
-        ? [Game.getObjectById(cache.powerSpawnId)].filter(Boolean)
-        : [],
-      observers: cache.observerId
-        ? [Game.getObjectById(cache.observerId)].filter(Boolean)
-        : [],
-      extractors: cache.extractorId
-        ? [Game.getObjectById(cache.extractorId)].filter(Boolean)
-        : [],
-      nukers: cache.nukerId
-        ? [Game.getObjectById(cache.nukerId)].filter(Boolean)
-        : [],
-    };
+    const spawns = resolveIds(cache.spawnIds);
+    const towers = resolveIds(cache.towerIds);
+    const links = resolveIds(cache.linkIds);
+    const labs = resolveIds(cache.labIds);
+    const extensions = resolveIds(cache.extensionIds);
+    const roads = resolveIds(cache.roadIds);
 
-    const allStructuresForRepair = []
-      .concat(grouped.spawns)
-      .concat(grouped.towers)
-      .concat(grouped.extensions)
-      .concat(grouped.links)
-      .concat(grouped.labs)
-      .concat(grouped.roads);
+    // Одиночные структуры разыменовываются напрямую: раньше каждая собиралась
+    // как [Game.getObjectById(id)].filter(Boolean) — лишний массив и замыкание
+    // на каждую структуру каждый тик.
+    const factory = cache.factoryId
+      ? Game.getObjectById(cache.factoryId)
+      : null;
+    const powerSpawn = cache.powerSpawnId
+      ? Game.getObjectById(cache.powerSpawnId)
+      : null;
+    const observer = cache.observerId
+      ? Game.getObjectById(cache.observerId)
+      : null;
+    const extractor = cache.extractorId
+      ? Game.getObjectById(cache.extractorId)
+      : null;
+    const nuker = cache.nukerId ? Game.getObjectById(cache.nukerId) : null;
 
-    if (grouped.factories[0]) allStructuresForRepair.push(grouped.factories[0]);
-    if (grouped.powerSpawns[0])
-      allStructuresForRepair.push(grouped.powerSpawns[0]);
-    if (cache.storageId) {
-      const s = Game.getObjectById(cache.storageId);
-      if (s) allStructuresForRepair.push(s);
-    }
-    if (cache.terminalId) {
-      const t = Game.getObjectById(cache.terminalId);
-      if (t) allStructuresForRepair.push(t);
-    }
-    if (grouped.observers[0]) allStructuresForRepair.push(grouped.observers[0]);
-    if (grouped.extractors[0])
-      allStructuresForRepair.push(grouped.extractors[0]);
-    if (grouped.nukers[0]) allStructuresForRepair.push(grouped.nukers[0]);
+    // storage/terminal — ровно один раз на комнату за тик. Раньше они
+    // разыменовывались дважды: в списке структур на ремонт и в самом roomState.
+    const storage = cache.storageId
+      ? Game.getObjectById(cache.storageId)
+      : null;
+    const terminal = cache.terminalId
+      ? Game.getObjectById(cache.terminalId)
+      : null;
 
-    const damagedStructures = allStructuresForRepair.filter(
-      s => s.hits < s.hitsMax,
-    );
+    // Порядок ровно как в прежней сборке allStructuresForRepair + filter:
+    // спавны, башни, расширения, линки, лаборатории, дороги, затем одиночные
+    // (фабрика, PowerSpawn, storage, терминал, обсервер, экстрактор, нюкер).
+    // Порядок значим: task.generators.generateRepairStructures создаёт задачи
+    // на ремонт в этом порядке, а воркеры разбирают очередь FIFO.
+    const damagedStructures = [];
+    collectDamaged(spawns, damagedStructures);
+    collectDamaged(towers, damagedStructures);
+    collectDamaged(extensions, damagedStructures);
+    collectDamaged(links, damagedStructures);
+    collectDamaged(labs, damagedStructures);
+    collectDamaged(roads, damagedStructures);
+    collectDamagedSingle(factory, damagedStructures);
+    collectDamagedSingle(powerSpawn, damagedStructures);
+    collectDamagedSingle(storage, damagedStructures);
+    collectDamagedSingle(terminal, damagedStructures);
+    collectDamagedSingle(observer, damagedStructures);
+    collectDamagedSingle(extractor, damagedStructures);
+    collectDamagedSingle(nuker, damagedStructures);
 
-    // Источники энергии — статичны, резолвятся из кэша
-    const sources = cache.sourceIds
-      .map(id => Game.getObjectById(id))
-      .filter(Boolean);
+    // Источники энергии — статичны, резолвятся из кэша (без map/filter).
+    const sources = resolveIds(cache.sourceIds);
 
     // Крипы, приписанные к данной комнате — если список уже собран заранее
     // (buildAllRoomStates группирует всех крипов за один проход, а не за N),
     // используем его; иначе (прямой вызов buildRoomState) считаем сами.
-    const creeps =
-      precomputedCreeps ||
-      Object.values(Game.creeps).filter(
-        c => c.memory.homeRoom === room.name || c.room.name === room.name,
-      );
+    // for..in вместо Object.values(Game.creeps): без промежуточного массива
+    // со всеми крипами империи.
+    let creeps = precomputedCreeps;
+    if (!creeps) {
+      creeps = [];
+      for (const name in Game.creeps) {
+        const c = Game.creeps[name];
+        if (c.memory.homeRoom === room.name || c.room.name === room.name) {
+          creeps.push(c);
+        }
+      }
+    }
 
     return {
       room,
@@ -399,24 +461,24 @@ module.exports = {
       // а getRoomRole() тратил время на каждой комнате каждый тик. Реестр
       // roomRoles.js оставлен как есть — он не подключён ни к одному
       // потребителю (см. отчёт/аудит, п. 37).
-      spawn: grouped.spawns[0] || null,
-      spawns: grouped.spawns,
+      spawn: spawns[0] || null,
+      spawns,
       controller: room.controller,
-      storage: cache.storageId ? Game.getObjectById(cache.storageId) : null,
-      terminal: cache.terminalId ? Game.getObjectById(cache.terminalId) : null,
-      towers: grouped.towers,
-      extensions: grouped.extensions,
-      roads: grouped.roads,
+      storage,
+      terminal,
+      towers,
+      extensions,
+      roads,
       damagedStructures,
       creeps,
       sources,
-      links: grouped.links,
-      labs: grouped.labs,
-      factory: grouped.factories[0] || null,
-      powerSpawn: grouped.powerSpawns[0] || null,
-      observer: grouped.observers[0] || null,
-      extractor: grouped.extractors[0] || null,
-      nuker: grouped.nukers[0] || null,
+      links,
+      labs,
+      factory,
+      powerSpawn,
+      observer,
+      extractor,
+      nuker,
       mineral: mineralManager.buildMineralState(room),
     };
   },
@@ -427,14 +489,18 @@ module.exports = {
    */
   buildAllRoomStates: function () {
     const rooms = this.getOwnedRooms();
-    const roomNames = new Set(rooms.map(r => r.name));
+
+    // Set имён своих комнат — без промежуточного rooms.map(r => r.name).
+    const roomNames = new Set();
+    for (let i = 0; i < rooms.length; i++) roomNames.add(rooms[i].name);
 
     // Один проход по всем крипам империи вместо повторного
     // Object.values(Game.creeps).filter() внутри buildRoomState на каждую комнату.
     // Сохраняем оригинальное поведение: крип может попасть в список и своей
     // homeRoom, и текущей физической комнаты, если они различаются.
     const creepsByRoom = {};
-    for (const c of Object.values(Game.creeps)) {
+    for (const name in Game.creeps) {
+      const c = Game.creeps[name];
       const homeRoom = c.memory.homeRoom;
       const currentRoom = c.room.name;
 
@@ -446,9 +512,12 @@ module.exports = {
       }
     }
 
-    return rooms.map(room =>
-      this.buildRoomState(room, creepsByRoom[room.name] || []),
-    );
+    const roomStates = [];
+    for (let i = 0; i < rooms.length; i++) {
+      const room = rooms[i];
+      roomStates.push(this.buildRoomState(room, creepsByRoom[room.name] || []));
+    }
+    return roomStates;
   },
 
   /**
@@ -474,10 +543,12 @@ module.exports = {
     safe("creeps", () => runCreepLogic(roomState));
     safe("towers", () => runTowerLogic(roomState));
     safe("links", () => runLinkLogic(roomState));
-    // Задача 16 «Экономика»: фабрика и PowerSpawn выключены флагами
-    // TASK_CONFIG (нет снабжения: fillFactoryEnergy/fillPowerSpawn* = false).
-    // Когда флаг false, вызов менеджера не делается вовсе — раньше структуры
-    // «дёргались» каждый тик вхолостую (produce/processPower без сырья).
+    // Задача 16 «Экономика»: структурные подсистемы включаются флагами
+    // TASK_CONFIG; при false вызов менеджера не делается вовсе — раньше
+    // структуры «дёргались» каждый тик вхолостую (produce/processPower без
+    // сырья). Фабрика включена: снабжение fillFactoryEnergy оставляет в store
+    // резерв под результат производства (FACTORY.PRODUCT_RESERVE), а менеджер
+    // проверяет место по правилу движка — см. factory.manager.
     if (TASK_CONFIG.factory) {
       safe("factoryManager", () =>
         cpuMonitor.trackRole("factoryManager", () =>

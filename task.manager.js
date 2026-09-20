@@ -119,16 +119,62 @@ function getRoomScan(roomName) {
 }
 
 /**
- * Сбрасывает кеш комнаты после любого изменения очередей. Без этого воркеры
- * этого же тика увидели бы устаревший результат (например, только что
- * зарезервированную Task как свободную).
+ * Сбрасывает закешированный результат просмотра очередей после изменения
+ * очередей. Без этого воркеры этого же тика увидели бы устаревший результат
+ * (например, только что зарезервированную Task как свободную).
+ *
+ * Инвалидация точечная: прежняя версия удаляла запись комнаты целиком, поэтому
+ * добавление Task в fillSpawnsExtensions заставляло заново просканировать
+ * очереди всех остальных десяти категорий, а reserve/complete делали это по
+ * несколько раз за тик (на каждого взявшего и завершившего Task воркера).
+ * Теперь сбрасывается только очередь изменившейся категории, и только если её
+ * результат просмотра действительно мог измениться:
+ *   added    — новая Task встаёт в конец очереди: первая доступная меняется,
+ *              лишь если доступных в категории не было (кешированный null);
+ *   reserved — первая доступная меняется, только если заняли именно её;
+ *   released — освобождённая Task стоит в очереди раньше любой закешированной
+ *              (до освобождения её держал живой крип), поэтому результат
+ *              просмотра категории устаревает всегда;
+ *   removed  — первая доступная меняется, только если удалили именно её.
+ *
+ * Признак «в комнате есть доступные Task» (hasAny) переводится в -1 (неизвестно)
+ * только там, где он может устареть: он либо разрешает холостому воркеру не
+ * обходить TASK_CHAIN, либо, будучи нулём, запрещает это делать.
  * @param {string} roomName
+ * @param {string} taskType
+ * @param {"added"|"reserved"|"released"|"removed"} change
+ * @param {Object} [task] изменённая Task (нужна для reserved/removed)
  */
-function invalidateScanCache(roomName) {
+function invalidateScanCache(roomName, taskType, change, task) {
   const cache = global._taskScan;
-  if (cache && cache.tick === Game.time && cache.memory === Memory) {
-    delete cache.rooms[roomName];
+  if (!cache || cache.tick !== Game.time || cache.memory !== Memory) return;
+
+  const room = cache.rooms[roomName];
+  if (!room) return;
+
+  const computed = Object.prototype.hasOwnProperty.call(
+    room.categories,
+    taskType,
+  );
+  const cached = computed ? room.categories[taskType] : null;
+
+  if (change === "reserved" || change === "removed") {
+    if (computed && cached !== null && cached.taskId === task.taskId) {
+      delete room.categories[taskType];
+      if (room.hasAny === 1) room.hasAny = -1;
+    }
+    return;
   }
+
+  if (change === "released") {
+    if (computed) delete room.categories[taskType];
+    if (room.hasAny === 0) room.hasAny = -1;
+    return;
+  }
+
+  // added: доступность категории могла появиться только «из ничего».
+  if (computed && cached === null) delete room.categories[taskType];
+  if (room.hasAny === 0) room.hasAny = -1;
 }
 
 /**
@@ -191,16 +237,16 @@ function addTask(roomName, taskType, task) {
   }
 
   queue.push(task);
-  // Новая Task меняет доступность — кеш просмотра комнаты недействителен.
-  invalidateScanCache(roomName);
+  // Новая Task меняет доступность — кеш просмотра категории недействителен.
+  invalidateScanCache(roomName, taskType, "added");
   return true;
 }
 
 /**
  * Первая доступная Task категории: не зарезервированная либо зарезервированная
  * крипом, которого уже нет. Результат (включая null) кешируется на тик, поэтому
- * повторные вызовы из цикла Worker'ов очередь не сканируют. Кеш сбрасывается
- * при любом изменении очереди (см. invalidateScanCache).
+ * повторные вызовы из цикла Worker'ов очередь не сканируют. Кеш категории
+ * сбрасывается при изменении её очереди (см. invalidateScanCache).
  * @param {string} roomName
  * @param {string} taskType
  * @returns {any|null}
@@ -255,8 +301,8 @@ function reserveTask(roomName, taskType, task, creepName) {
   // переданном параметре — после сериализации Memory между тиками это
   // могут быть разные объекты с одинаковым taskId.
   queue[index].reservedBy = creepName;
-  // Task занята — пер-тиковый кеш комнаты больше не отражает реальность.
-  invalidateScanCache(roomName);
+  // Task занята — кеш просмотра этой категории больше не отражает реальность.
+  invalidateScanCache(roomName, taskType, "reserved", task);
   return true;
 }
 
@@ -279,7 +325,7 @@ function releaseTask(roomName, taskType, task) {
   }
 
   delete queue[index].reservedBy;
-  invalidateScanCache(roomName);
+  invalidateScanCache(roomName, taskType, "released");
   return true;
 }
 
@@ -306,7 +352,7 @@ function releaseTaskById(roomName, task) {
     const index = findIndexByTaskId(queue, task.taskId);
     if (index === -1) continue;
     delete queue[index].reservedBy;
-    invalidateScanCache(roomName);
+    invalidateScanCache(roomName, TASK_CHAIN[i], "released");
     return true;
   }
   return false;
@@ -332,7 +378,7 @@ function completeTask(roomName, taskType, task) {
 
   delete queue[index].reservedBy;
   queue.splice(index, 1);
-  invalidateScanCache(roomName);
+  invalidateScanCache(roomName, taskType, "removed", task);
   return true;
 }
 

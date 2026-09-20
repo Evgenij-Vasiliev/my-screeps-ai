@@ -9,7 +9,10 @@
  * Этот модуль:
  * - Считает CPU за тик и по ролям/подсистемам
  * - Ведёт скользящее среднее за последние CPU.AVERAGE_WINDOW тиков
- * - Выводит отчёт каждые CPU.REPORT_INTERVAL тиков
+ * - Выводит однострочный отчёт каждые CPU.REPORT_INTERVAL тиков
+ * - Выводит разбор по ролям/подсистемам/комнатам каждые
+ *   CPU.PROFILE_REPORT_INTERVAL тиков (средние за окно; замер идёт один тик из
+ *   CPU.SAMPLE_INTERVAL — см. ниже)
  *
  * Управление через консоль игры:
  *   Memory.cpuMonitorEnabled = false  — выключить мониторинг
@@ -41,12 +44,30 @@ const { CPU } = require("./constants");
 //   room:<имя комнаты>   — полная обработка одной комнаты (runRoom)
 //   <роль>               — ролевая логика крипов (уже существующие бакеты)
 //
-// Нагрузка на CPU: каждый тик значения roleCPU складываются в heap-окно
-// (только сложение чисел, без обращений к Memory). Раз в
-// CPU.PROFILE_REPORT_INTERVAL тиков окно переносится в
-// Memory.cpuStats.profile и один раз печатается короткая сводка в консоль.
+// Нагрузка на CPU:
+//  * Замер ролей и подсистем идёт не каждый тик, а один тик из
+//    CPU.SAMPLE_INTERVAL (см. constants.js): Game.cpu.getUsed() сам стоит
+//    ~0.2 мкс, а trackRole на живом shard3 вызывается ~80 раз за тик
+//    (47-50 крипов + подсистемы 5 комнат) — это ~0.034 CPU/тик постоянного
+//    налога. На «незамерных» тиках trackRole только вызывает callback.
+//    Интервал 7 взаимно прост со всеми TASK_GEN_INTERVAL (1/2/3/5) и с
+//    интервалами отчётов (10/100), поэтому периодические блоки попадают в
+//    выборку равномерно и средние в профиле остаются несмещёнными.
+//  * Значения roleCPU складываются в heap-окно (только сложение чисел, без
+//    обращений к Memory). Раз в CPU.PROFILE_REPORT_INTERVAL тиков окно
+//    переносится в Memory.cpuStats.profile и один раз печатается короткая
+//    сводка в консоль.
+//  * Memory.cpuStats (total/count/average) обновляется раз в
+//    CPU.REPORT_INTERVAL тиков, а не каждый тик: запись в Memory помечает её
+//    «грязной» и заставляет движок сериализовать её целиком (36 КБ на живом
+//    shard3). Тиковый отчёт — одна строка консоли вместо восьми.
 const PROFILE_ROOM_PREFIX = "room:";
 const PROFILE_REPORT_INTERVAL = CPU.PROFILE_REPORT_INTERVAL || 100;
+// PROFILE_ENABLED === false — измерительный слой выключен целиком: ни замеров
+// getUsed, ни накопителей, ни профиля.
+const PROFILE_ENABLED = CPU.PROFILE_ENABLED !== false;
+// Один замерный тик на столько. 1 — «как раньше»: замер каждый тик.
+const SAMPLE_INTERVAL = Math.max(1, CPU.SAMPLE_INTERVAL || 1);
 
 // Блоки, которые в сводке печатаются отдельными колонками.
 // Всё остальное (бакеты ролей) печатается как «роли».
@@ -125,12 +146,21 @@ module.exports = {
       this.enabled = false;
       return;
     }
+    this.enabled = true;
+    // Замерный ли это тик (см. CPU.SAMPLE_INTERVAL). roleCPU заполняется
+    // только на замерных тиках, но обнуляется каждый тик — иначе значения
+    // прошлого замера попали бы в окно профиля ещё раз.
+    this.sampling = PROFILE_ENABLED && Game.time % SAMPLE_INTERVAL === 0;
     this.startCPU = Game.cpu.getUsed();
     this.roleCPU = {};
-    this.enabled = true;
   },
+  /**
+   * Измеряет блок и складывает его CPU в бакет роли/подсистемы. На «незамерных»
+   * тиках (или при выключенном профиле) не трогает Game.cpu.getUsed вовсе —
+   * callback вызывается как обычно, результат возвращается как есть.
+   */
   trackRole(role, callback) {
-    if (!this.enabled) {
+    if (!this.enabled || !this.sampling) {
       return callback();
     }
     const before = Game.cpu.getUsed();
@@ -144,61 +174,80 @@ module.exports = {
   endTick() {
     if (!this.enabled) return;
     const totalUsed = Game.cpu.getUsed() - this.startCPU;
-    const bucket = Game.cpu.bucket;
-    const creepCount = Object.keys(Game.creeps).length;
-    if (!Memory.cpuStats) {
-      Memory.cpuStats = { total: 0, count: 0, average: 0 };
-    }
-    Memory.cpuStats.total += totalUsed;
-    Memory.cpuStats.count++;
-    Memory.cpuStats.average = Memory.cpuStats.total / Memory.cpuStats.count;
-    if (Memory.cpuStats.count >= CPU.AVERAGE_WINDOW) {
-      Memory.cpuStats.total = 0;
-      Memory.cpuStats.count = 0;
-    }
+
+    // Накопитель тикового CPU в heap: в Memory он переносится раз в
+    // CPU.REPORT_INTERVAL тиков (см. flushStats). После Global Reset
+    // накопитель пуст — окно продолжается от значений в Memory.
+    this.windowTotal = (this.windowTotal || 0) + totalUsed;
+    this.windowCount = (this.windowCount || 0) + 1;
+
     if (Game.time % CPU.REPORT_INTERVAL === 0) {
+      this.flushStats();
+      const creepCount = Object.keys(Game.creeps).length;
+      const bucket = Game.cpu.bucket;
       const perCreep =
         creepCount > 0 ? (totalUsed / creepCount).toFixed(3) : "n/a";
       const bucketStatus =
         bucket < CPU.BUCKET_CRITICAL
           ? `⚠️ КРИТИЧНО: ${bucket}`
           : String(bucket);
-      console.log(`================ [ TICK: ${Game.time} ] ================`);
+      const stats = /** @type {any} */ (Memory.cpuStats);
+      const average = stats && stats.average ? stats.average : totalUsed;
+      // Одна строка вместо восьми: console.log сам стоит CPU, а разбор по
+      // ролям/подсистемам печатает профиль (раз в PROFILE_REPORT_INTERVAL).
       console.log(
-        `CPU: ${totalUsed.toFixed(2)} | AVG(${
-          CPU.AVERAGE_WINDOW
-        }): ${Memory.cpuStats.average.toFixed(2)} | BKT: ${bucketStatus}`,
+        `[CPU] tick ${Game.time}: ${totalUsed.toFixed(2)} | AVG(${CPU.AVERAGE_WINDOW}): ` +
+          `${average.toFixed(2)} | BKT: ${bucketStatus} | крипов: ${creepCount} | ` +
+          `CPU/крип: ${perCreep}`,
       );
-      console.log(`Крипов: ${creepCount} | CPU/крип: ${perCreep}`);
-      const sortedRoles = Object.entries(this.roleCPU)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
-      console.log(`--- TOP РОЛИ/ПОДСИСТЕМЫ ---`);
-      for (const [role, used] of sortedRoles) {
-        console.log(` ${role.padEnd(20)} ${used.toFixed(3)}`);
-      }
-      console.log(`-------------------------------------------------`);
     }
 
-    // Профилирование Room Manager (ТЗ №0): копим замеры в heap каждый тик,
-    // в Memory и в консоль сбрасываем раз в CPU.PROFILE_REPORT_INTERVAL тиков.
+    // Профилирование Room Manager (ТЗ №0): копим замеры в heap на замерных
+    // тиках, в Memory и в консоль сбрасываем раз в CPU.PROFILE_REPORT_INTERVAL
+    // тиков.
     this.accumulateProfile();
-    if (
-      CPU.PROFILE_ENABLED !== false &&
-      Game.time % PROFILE_REPORT_INTERVAL === 0
-    ) {
+    if (PROFILE_ENABLED && Game.time % PROFILE_REPORT_INTERVAL === 0) {
       this.flushProfile();
       this.reportProfile();
     }
   },
 
   /**
+   * Переносит накопленные за тики значения тикового CPU в Memory.cpuStats.
+   * Интерфейс полей не изменился (total/count/average — скользящее окно
+   * CPU.AVERAGE_WINDOW тиков); изменилась только частота записи в Memory:
+   * раз в CPU.REPORT_INTERVAL тиков вместо каждого тика.
+   */
+  flushStats() {
+    const count = this.windowCount || 0;
+    if (count === 0) return;
+
+    if (!Memory.cpuStats) {
+      Memory.cpuStats = { total: 0, count: 0, average: 0 };
+    }
+    const stats = /** @type {any} */ (Memory.cpuStats);
+    stats.total += this.windowTotal;
+    stats.count += count;
+    stats.average = stats.total / stats.count;
+    if (stats.count >= CPU.AVERAGE_WINDOW) {
+      stats.total = 0;
+      stats.count = 0;
+    }
+    this.windowTotal = 0;
+    this.windowCount = 0;
+  },
+
+  /**
    * Складывает замеры текущего тика (this.roleCPU) в heap-окно профиля.
    * Обращений к Memory нет — стоимость близка к нулю.
    * Блоки вида "room:<имя>" учитываются отдельно (по комнатам).
+   *
+   * На «незамерных» тиках замеров нет вовсе, и такой тик в окно не попадает:
+   * иначе средние (sum / samples) упали бы ровно в SAMPLE_INTERVAL раз.
    */
   accumulateProfile() {
-    if (CPU.PROFILE_ENABLED === false) return;
+    if (!PROFILE_ENABLED) return;
+    if (!this.sampling) return;
 
     if (!this.profileWindow) this.profileWindow = emptyWindow(Game.time);
 

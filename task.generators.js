@@ -1,4 +1,6 @@
 const taskManager = require("task.manager");
+const factoryManager = require("factory.manager");
+const powerSpawnManager = require("powerSpawn.manager");
 const {
   POWER_SPAWN,
   STORAGE,
@@ -129,6 +131,10 @@ function generateFillPowerSpawnPower(roomState) {
 
   if (!powerSpawn) return;
 
+  // Цель производства GPL достигнута — возить power в PowerSpawn незачем:
+  // бессмысленное «постоянное заполнение» (см. powerSpawn.manager).
+  if (powerSpawnManager.isProductionComplete()) return;
+
   if (powerSpawn.store[RESOURCE_POWER] >= POWER_SPAWN.POWER_MIN) return;
 
   const needed = powerSpawn.store.getFreeCapacity(RESOURCE_POWER);
@@ -159,18 +165,24 @@ function generateFillPowerSpawnEnergy(roomState) {
 
   if (!powerSpawn) return;
 
+  // Та же цель производства, что и у power: пока GPL не нужен, энергия в
+  // PowerSpawn не возится (иначе включённая подсистема вечно тянет 50 энергии
+  // за тик «на всякий случай»).
+  if (powerSpawnManager.isProductionComplete()) return;
+
   if (powerSpawn.store[RESOURCE_ENERGY] >= POWER_SPAWN.ENERGY_MIN) return;
 
   const needed = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
   if (needed <= 0) return;
 
-  // Резерв storage неприкосновенен: PowerSpawn — некритичная подсистема и не
-  // имеет права тянуть энергию из резерва комнаты (см. POWER_SPAWN). Здесь
-  // раньше была только проверка `storage < needed`, то есть при включённом
-  // PowerSpawn энергия вычерпывалась до нуля.
-  const reserveThreshold =
-    STORAGE.ENERGY_MIN * POWER_SPAWN.ENERGY_RESERVE_MULTIPLIER;
-  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold + needed) return;
+  // Резерв комнаты неприкосновенен, но и снабжение не должно вставать: пока
+  // storage выше резерва — берём из него, при storage на резерве — из
+  // терминала (у него собственный порог). Раньше здесь стояла надбавка 10 % к
+  // резерву (storage > 165 000): в живых RCL8-комнатах shard3 storage держится
+  // на 162–167k, задача не создавалась, и PowerSpawn застывал недозаправленным
+  // (453/500) — processPower() переставал вызываться. Условие одно на
+  // генератор (здесь) и исполнителя (task.executors): powerSpawn.manager.
+  if (!powerSpawnManager.hasEnergySupply(roomState)) return;
 
   addIfNew(
     roomName,
@@ -194,6 +206,13 @@ function generateFillFactoryEnergy(roomState) {
   if (!factory) return;
 
   if (factory.store.getFreeCapacity(RESOURCE_ENERGY) === 0) return;
+
+  // Снабжение останавливается ДО заполнения store под 100 %: под результат
+  // производства обязан остаться резерв (FACTORY.PRODUCT_RESERVE — см.
+  // factory.manager.isEnergySupplyComplete). Раньше условием было только «нет
+  // места под энергию», поэтому фабрика заливалась под завязку, и продукту
+  // было некуда лечь.
+  if (factoryManager.isEnergySupplyComplete(factory)) return;
 
   const reserveThreshold =
     STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
@@ -343,6 +362,35 @@ function generateFillTowers(roomState) {
 
 const REPAIR_THRESHOLD_RATIO = 0.5;
 
+// ── ПЕР-ТИКОВЫЙ КЕШ СТРОЙПЛОЩАДОК ───────────────────────────────────────
+// generateBuildStructures вызывается на каждую комнату (раз в
+// TASK_GEN_INTERVAL.buildStructures тиков), а Object.values(Game.constructionSites)
+// перебирает стройплощадки ВСЕЙ империи и создаёт промежуточный массив.
+// Кеш в heap собирает площадки один раз за тик и раскладывает по комнатам:
+// N комнат × M площадок превращаются в M обращений вместо N × M, а на комнату
+// больше не создаётся ни массива, ни массива после filter (см. ТЗ №1, счётчик).
+const EMPTY_SITES = [];
+
+/**
+ * Стройплощадки империи, сгруппированные по имени комнаты (кеш на тик).
+ * @returns {Object<string, Array>}
+ */
+function getSitesByRoom() {
+  const cached = global._sitesByRoom;
+  if (cached && cached.tick === Game.time) return cached.map;
+
+  const map = /** @type {Object<string, Array>} */ ({});
+  for (const id in Game.constructionSites) {
+    const site = Game.constructionSites[id];
+    const roomName = site.pos.roomName;
+    const list = map[roomName] || (map[roomName] = []);
+    list.push(site);
+  }
+
+  global._sitesByRoom = { tick: Game.time, map };
+  return map;
+}
+
 function generateRepairStructures(roomState) {
   if (!TASK_CONFIG.repairStructures) return;
 
@@ -369,10 +417,11 @@ function generateBuildStructures(roomState) {
 
   const { roomName } = roomState;
 
-  // ТЗ №1 (счётчик): Object.values(Game.constructionSites) проходит по всем
-  // стройплощадкам империи на каждую комнату за тик — измеряем их число.
-  const allSites = Object.values(Game.constructionSites);
-  const sites = allSites.filter(site => site.pos.roomName === roomName);
+  // ТЗ №1 (счётчик): прежний код вызывал Object.values(Game.constructionSites)
+  // (обход всех стройплощадок империи) НА КАЖДУЮ комнату и фильтровал список по
+  // имени комнаты. Теперь площадки группируются один раз за тик (см.
+  // getSitesByRoom): N комнат × M площадок → M обращений.
+  const sites = getSitesByRoom()[roomName] || EMPTY_SITES;
   const keys = existingKeys(roomName, "buildStructures");
   for (let i = 0; i < sites.length; i++) {
     addIfNew(
