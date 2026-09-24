@@ -9,25 +9,20 @@
  *
  * В самом коде токен не хранится. Файл лежит вне каталога деплоя,
  * чтобы grunt-screeps не выгружал его на сервер.
+ *
+ * Отдельно отслеживается источник: библиотека screeps-api при `token: null`
+ * сама подхватывает ~/.screeps.json, и это может оказаться скомпрометированный
+ * токен. resolveTokenSource() позволяет такие случаи обнаружить.
  */
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const ENV_KEYS = ["SCREEPS_TOKEN", "SCREEPS_AUTH_TOKEN"];
+const PROJECT_FILE = path.join(__dirname, ".screeps.json");
 
-function fromEnv() {
-  for (const key of ENV_KEYS) {
-    const value = process.env[key];
-    if (typeof value === "string" && value.trim() !== "") {
-      return value.trim();
-    }
-  }
-  return null;
-}
-
-function fromScreepsJson() {
-  const file = path.join(__dirname, ".screeps.json");
+function readTokenFile(file) {
   let raw;
   try {
     raw = fs.readFileSync(file, "utf8");
@@ -39,9 +34,7 @@ function fromScreepsJson() {
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    throw new Error(
-      "Не удалось разобрать " + file + ": " + error.message
-    );
+    throw new Error("Не удалось разобрать " + file + ": " + error.message);
   }
 
   for (const key of ["token", "SCREEPS_TOKEN", "authToken"]) {
@@ -54,11 +47,41 @@ function fromScreepsJson() {
 }
 
 /**
+ * Возвращает { token, source } или { token: null, source: null }.
+ * source: "env" | "project-file" | "home-file" | null
+ * @returns {{token: string|null, source: string|null}}
+ */
+function resolveTokenSource() {
+  for (const key of ENV_KEYS) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return { token: value.trim(), source: "env" };
+    }
+  }
+
+  const fromProject = readTokenFile(PROJECT_FILE);
+  if (fromProject) return { token: fromProject, source: "project-file" };
+
+  const homeFile = path.join(os.homedir(), ".screeps.json");
+  const fromHome = readTokenFile(homeFile);
+  if (fromHome) {
+    process.stderr.write(
+      "[screeps.token] ВНИМАНИЕ: токен взят из " + homeFile + ". " +
+        "Это резервный источник и потенциальная утечка вне репозитория. " +
+        "Перенесите токен в SCREEPS_TOKEN или в .screeps.json корня проекта.\n"
+    );
+    return { token: fromHome, source: "home-file" };
+  }
+
+  return { token: null, source: null };
+}
+
+/**
  * Возвращает токен или null, если он нигде не задан.
  * @returns {string|null}
  */
 function resolveToken() {
-  return fromEnv() || fromScreepsJson();
+  return resolveTokenSource().token;
 }
 
 /**
@@ -66,7 +89,7 @@ function resolveToken() {
  * @returns {string}
  */
 function requireToken() {
-  const token = resolveToken();
+  const { token } = resolveTokenSource();
   if (!token) {
     throw new Error(
       "Screeps-токен не задан. Укажите SCREEPS_TOKEN в окружении " +
@@ -76,4 +99,4 @@ function requireToken() {
   return token;
 }
 
-module.exports = { resolveToken, requireToken };
+module.exports = { resolveToken, resolveTokenSource, requireToken };
