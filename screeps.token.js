@@ -31,7 +31,7 @@ function fromScreepsJson() {
   let raw;
   try {
     raw = fs.readFileSync(file, "utf8");
-  } catch (error) {
+  } catch {
     return null;
   }
 
