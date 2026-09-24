@@ -20,4 +20,16 @@ module.exports = [
       'no-unused-vars': 'warn',
     },
   },
+  {
+    // .mjs-файлы (проверка пресета DSH) — ES-модули: общий sourceType 'script'
+    // давал на них "Parsing error: 'import' and 'export' may appear only with
+    // 'sourceType: module'", из-за чего `npx eslint .` не был чистым.
+    files: ['**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
 ];

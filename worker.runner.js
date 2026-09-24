@@ -98,6 +98,7 @@ function selectTask(creep, roomName) {
 
     creep.memory.task = task;
     creep.memory.taskType = taskType;
+    taskManager.noteTaskEvent(taskType, "pickup");
     return true;
   }
 
@@ -162,6 +163,7 @@ function run(creep) {
     creep.memory.taskType &&
     shouldPreempt(creep, roomName)
   ) {
+    taskManager.noteTaskEvent(creep.memory.taskType, "preempt");
     taskManager.releaseTask(
       roomName,
       creep.memory.taskType,
@@ -209,6 +211,10 @@ function run(creep) {
   }
 
   if (result === "DONE" || result === "SKIP") {
+    taskManager.noteTaskEvent(
+      currentTaskType,
+      result === "DONE" ? "done" : "skip",
+    );
     const removed =
       result === "DONE"
         ? taskManager.completeTask(roomName, currentTaskType, creep.memory.task)

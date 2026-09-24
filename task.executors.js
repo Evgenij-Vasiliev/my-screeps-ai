@@ -8,6 +8,7 @@ const {
   CONTROLLER,
   BOOTSTRAP,
   FACTORY,
+  TASK_CONFIG,
 } = require("./constants");
 
 function withdrawPower(creep) {
@@ -122,6 +123,12 @@ function executeFillSpawnsExtensions(creep, task) {
 }
 
 function executeFillFactoryEnergy(creep, task) {
+  // Флаг подсистемы авторитетен и для ИСПОЛНИТЕЛЯ, а не только для генератора:
+  // очередь Memory чистится лишь по DONE/SKIP, поэтому уже стоящие в ней задачи
+  // фабрики продолжали бы возить энергию после выключения генератора. SKIP
+  // снимает такую задачу (worker.runner.js:213-221).
+  if (!TASK_CONFIG.fillFactoryEnergy) return "SKIP";
+
   if (!isValidTask(task)) {
     return "SKIP";
   }
@@ -236,6 +243,10 @@ function isValidBatteryTask(task) {
 }
 
 function executeCollectFactoryBattery(creep, task) {
+  // См. комментарий в executeFillFactoryEnergy: флаг авторитетен и для
+  // исполнителя, иначе вывоз батареек продолжится из уже стоящих задач.
+  if (!TASK_CONFIG.collectFactoryBattery) return "SKIP";
+
   if (!isValidBatteryTask(task)) {
     return "SKIP";
   }
@@ -394,12 +405,27 @@ function executeFillTerminalEnergy(creep, task) {
     return "SKIP";
   }
 
-  // Полнота цели — до снятия энергии (см. executeFillSpawnsExtensions).
+  // ЦЕЛЬ, А НЕ ЁМКОСТЬ (правка по разбору приоритетов).
+  // Раньше здесь была только проверка полноты (isTargetFull): задача,
+  // сгенерированная генератором ради разницы до TERMINAL_SUPPLY.ENERGY_TARGET
+  // (task.generators.js: если энергия терминала < ENERGY_TARGET и storage выше
+  // 195000), уходила «в работу» и лила терминал ДО ПОЛНОЙ ЁМКОСТИ 300k.
+  // Пока storage держится выше 195000 — а он держится ровно настолько, насколько
+  // его отпускает резерв, — воркеры вычерпывали из storage сотни тысяч энергии
+  // в терминал, вытесняя снабжение фабрики (600 энергии → 50 battery по 650).
+  // Теперь обе стороны согласованы: генератор считает дефицит до ENERGY_TARGET,
+  // исполнитель останавливается ровно на нём.
   if (isTargetFull(target)) {
+    return "DONE";
+  }
+  const energyTarget = TERMINAL_SUPPLY.ENERGY_TARGET;
+  if ((target.store[RESOURCE_ENERGY] || 0) >= energyTarget) {
     return "DONE";
   }
 
   if (creep.store[RESOURCE_ENERGY] === 0) {
+    // Тот же порог, что в генераторе: склад отдаёт энергию терминалу только из
+    // излишка выше 195000 (STORAGE.ENERGY_MIN × STORAGE_RESERVE_MULTIPLIER).
     const reserveThreshold =
       STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
     if (source.store[RESOURCE_ENERGY] <= reserveThreshold) {
@@ -419,7 +445,12 @@ function executeFillTerminalEnergy(creep, task) {
 
   switch (result) {
     case OK:
-      return isTargetFull(target) ? "DONE" : "CONTINUE";
+      // Тот же критерий цели, что и до переноса: иначе воркер с полным
+      // рюкзаком «продолжает» заливать терминал выше ENERGY_TARGET.
+      return isTargetFull(target) ||
+        (target.store[RESOURCE_ENERGY] || 0) >= energyTarget
+        ? "DONE"
+        : "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
       creep.travelTo(target);
@@ -686,6 +717,14 @@ function executeRepairStructures(creep, task) {
   const target = Game.getObjectById(task.targetId);
 
   if (!target) {
+    return "SKIP";
+  }
+
+  // ДОРОГИ РЕМОНТЯТ БАШНИ, НЕ ВОРКЕРЫ (решение владельца, C2).
+  // Генератор такие задачи больше не создаёт (task.generators.js), но очередь
+  // Memory чистится только по DONE/SKIP — без этого гейта 80 уже стоящих
+  // дорожных задач E35S37 продолжали бы водить воркеров по дорогам.
+  if (target.structureType === STRUCTURE_ROAD) {
     return "SKIP";
   }
 

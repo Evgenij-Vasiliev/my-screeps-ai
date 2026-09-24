@@ -38,7 +38,7 @@
  *    каждый раз разворачивался к её центру).
  */
 const { REMOTE } = require("./constants");
-const { harvestPlan } = require("./role.miner");
+const { harvestPlan, harvestBoostedWork } = require("./role.miner");
 const { roomScopedTarget } = require("./remote.targets");
 
 /**
@@ -317,17 +317,25 @@ module.exports = {
     }
 
     // План пачечной добычи (размер пачки и интервал) считается один раз:
-    // тело и источник дальнего майнера не меняются.
+    // тело и источник дальнего майнера не меняются. Пересчёт — при смене
+    // состояния буста: XUHO2 (harvest ×7) увеличивает пачку, и без пересчёта
+    // интервал остался бы «небустнутым» (буст потрачен, экономии вызовов нет).
+    const boosted = harvestBoostedWork(creep);
     let interval = creep.memory.harvestInterval;
     let perCall = creep.memory.harvestPerCall;
 
-    if (interval === undefined || perCall === undefined) {
+    if (
+      interval === undefined ||
+      perCall === undefined ||
+      (creep.memory.harvestBoosted | 0) !== boosted
+    ) {
       const plan = harvestPlan(creep, source);
 
       interval = plan.interval;
       perCall = plan.perCall;
       creep.memory.harvestInterval = interval;
       creep.memory.harvestPerCall = perCall;
+      creep.memory.harvestBoosted = boosted;
     }
 
     // Пачка не влезает в рюкзак: вместо «пустого» вызова harvest (ERR_FULL)

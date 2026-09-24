@@ -63,9 +63,10 @@ const { REMOTE } = require("./constants");
  *     вытесненный дубль), достаются свободные комнаты — по одной на комнату.
  *     Кому не хватило, targetRoom остаётся null: крип ждёт освобождения.
  *
- * Инвариант: одну комнату держит не больше одного крипа, кроме подтверждённой
- * пары «уходящий + его замена». Живых крипов в роли не больше, чем «число
- * комнат + число пар»; лишние ждут без комнаты.
+ * Инвариант: одну комнату держат не больше слотов роли (REMOTE.HAULERS_PER_ROOM
+ * для хаулера, 1 для остальных), где подтверждённая пара «уходящий + замена»
+ * занимает ОДИН слот. Живых крипов в роли не больше, чем «число комнат × слоты
+ * + число пар»; лишние ждут без комнаты.
  *
  * @param {string} role
  * @param {Object[]} creeps живые крипы роли
@@ -83,6 +84,33 @@ function assignTargetRoom(role, creeps) {
     inPair[pairs[i].leaving.name] = true;
     inPair[pairs[i].successor.name] = true;
   }
+
+  // Сколько крипов роли держат одну комнату. Остальные роли — по одному, как
+  // раньше; у хаулера слотов REMOTE.HAULERS_PER_ROOM, потому что вывоз за рейс
+  // упирается в ёмкость линка-приёмника (800) и один хаулер удалённый источник
+  // (10/тик) не покрывает (расчёт — в константе).
+  const maxHolders = role === "remoteHauler" ? REMOTE.HAULERS_PER_ROOM : 1;
+
+  // Раскладка по комнатам: пока крипов не больше, чем комнат, держим по одному на
+  // комнату (пустая удалённая комната без вывоза — хуже, чем недобор второго
+  // слота); вторые слоты включаются только когда крипов больше, чем комнат.
+  // Иначе два хаулера садились бы в одну комнату, оставляя вторую без хаулера.
+  const perRoom = Math.min(
+    maxHolders,
+    Math.max(1, Math.ceil(creeps.length / REMOTE.ROOMS.length)),
+  );
+
+  // Слоты комнаты: обычный держатель — слот, пара «уходящий + замена» — один
+  // слот на двоих (как и раньше в подсчёте хозяев).
+  const slotsUsed = list => {
+    let hasPair = false;
+    let count = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (inPair[list[i].name]) hasPair = true;
+      else count++;
+    }
+    return count + (hasPair ? 1 : 0);
+  };
 
   // 1. Битая память (комната не из REMOTE.ROOMS) — снимаем.
   for (let i = 0; i < creeps.length; i++) {
@@ -131,18 +159,24 @@ function assignTargetRoom(role, creeps) {
       continue;
     }
 
-    // Обычный крип: комнату держит первый, остальные — в очередь на разбор.
+    // Обычный крип: занимает слот, если он есть (у хаулера слотов больше одного).
     if (!holders[room]) holders[room] = [];
-    if (holders[room].length === 0) holders[room].push(creep);
+    if (slotsUsed(holders[room]) < perRoom) holders[room].push(creep);
     else unassigned.push(creep);
   }
 
-  for (let i = 0; i < REMOTE.ROOMS.length; i++) {
-    if (!holders[REMOTE.ROOMS[i]]) freeRooms.push(REMOTE.ROOMS[i]);
+  // 5. Свободные слоты комнат, порядок «по слотам»: сначала по одному слоту в
+  // каждую комнату, затем вторые. Иначе оба свободных места достались бы первой
+  // комнате (у хаулера слотов HAULERS_PER_ROOM).
+  for (let slot = 0; slot < perRoom; slot++) {
+    for (let i = 0; i < REMOTE.ROOMS.length; i++) {
+      const room = REMOTE.ROOMS[i];
+      if (slotsUsed(holders[room] || []) <= slot) freeRooms.push(room);
+    }
   }
 
   /**
-   * Отдаёт свободную комнату, если она есть; иначе сбрасывает targetRoom.
+   * Отдаёт свободный слот, если он есть; иначе сбрасывает targetRoom.
    * @param {Object} creep
    * @returns {boolean}
    */
@@ -156,34 +190,38 @@ function assignTargetRoom(role, creeps) {
     return true;
   };
 
-  // 4. Вытеснение из общих комнат: комнату оставляем одному по приоритету —
-  // уходящему (он передаёт её замене) либо тому, кому раньше умирать.
-  const displacedRooms = [];
-
+  // 4. Вытеснение из общих комнат: у комнаты maxHolders слотов. Держат их
+  // первыми по приоритету — уходящий (он передаёт комнату замене) либо тот,
+  // кому раньше умирать; лишние освобождаются и ждут. Вытесненные сразу
+  // убираются из holders, иначе шаг 6 не увидел бы освободившийся слот.
   for (let i = 0; i < REMOTE.ROOMS.length; i++) {
     const room = REMOTE.ROOMS[i];
     const list = holders[room] || [];
-    if (list.length <= 1) continue;
+    if (slotsUsed(list) <= perRoom) continue;
 
     list.sort(byRoomOwnerPriority);
-    for (let k = 1; k < list.length; k++) {
+    let free = perRoom - (list.some(c => inPair[c.name]) ? 1 : 0);
+    const kept = [];
+
+    for (let k = 0; k < list.length; k++) {
       const creep = list[k];
-      if (inPair[creep.name]) continue; // пара из своей комнаты не выселяется
+      if (inPair[creep.name]) {
+        kept.push(creep); // пара «уходящий + замена» не выселяется
+        continue;
+      }
+      if (free > 0) {
+        free--;
+        kept.push(creep);
+        continue;
+      }
       creep.memory.targetRoom = null;
       unassigned.push(creep);
-      if (displacedRooms.indexOf(room) === -1) displacedRooms.push(room);
     }
+
+    holders[room] = kept;
   }
 
-  // 5. Комната, чей держатель был заменой и уехал в комнату уходящего, снова
-  // свободна: её прежний хозяин остался без комнаты (шаг 3).
-  for (let i = 0; i < displacedRooms.length; i++) {
-    if (freeRooms.indexOf(displacedRooms[i]) === -1) {
-      freeRooms.push(displacedRooms[i]);
-    }
-  }
-
-  // 6. Раздача свободных комнат: сначала тем, кто ждал назначения, потом
+  // 5. Раздача свободных слотов: сначала тем, кто ждал назначения, потом
   // вытесненным. Кому не хватило — targetRoom = null, крип ждёт освобождения.
   for (let i = 0; i < unassigned.length; i++) {
     takeFreeRoom(unassigned[i]);

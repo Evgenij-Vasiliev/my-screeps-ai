@@ -262,6 +262,11 @@ function generateFillTerminalEnergy(roomState) {
 
   if (terminal.store[RESOURCE_ENERGY] >= TERMINAL_SUPPLY.ENERGY_TARGET) return;
 
+  // ПРАВИЛО ВЛАДЕЛЬЦА: склад отдаёт энергию терминалу ТОЛЬКО из излишка выше
+  // STORAGE.ENERGY_MIN × 1.3 (195000), то есть после резерва комнаты (150000) и
+  // 45k буфера фабрики. Тот же порог проверяет исполнитель (task.executors.js),
+  // поэтому склад ниже ~195k не опускается. Понижать этот гейт нельзя: он и есть
+  // защита склада, а не «недостижимый порог».
   const reserveThreshold =
     STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
   if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) return;
@@ -391,14 +396,63 @@ function getSitesByRoom() {
   return map;
 }
 
+/**
+ * Достаёт ли структуру хотя бы одна башня комнаты.
+ *
+ * Зачем: башня действует только в пределах TOWER_FALLOFF_RANGE (20 тайлов) от
+ * себя, а комната — 50×50. Структуры, до которых не достаёт НИ ОДНА башня
+ * (крайние контейнеры/расширения/линки), не будут отремонтированы башнями
+ * никогда, сколько бы их ни было. Именно они и остаются работой воркеров.
+ *
+ * Расстояние — Чебышёва (как в движке: max(|dx|,|dy|) ≤ range), без создания
+ * объектов Pos: вызывается на единицы не-дорожных структур за генерацию.
+ * @param {StructureTower[]} towers
+ * @param {{x: number, y: number}} pos
+ * @returns {boolean}
+ */
+function isInTowerRange(towers, pos) {
+  for (let i = 0; i < towers.length; i++) {
+    const towerPos = towers[i].pos;
+    if (
+      Math.max(Math.abs(towerPos.x - pos.x), Math.abs(towerPos.y - pos.y)) <=
+      TOWER_FALLOFF_RANGE
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function generateRepairStructures(roomState) {
   if (!TASK_CONFIG.repairStructures) return;
 
-  const { roomName, damagedStructures } = roomState;
+  const { roomName, damagedStructures, towers } = roomState;
   const keys = existingKeys(roomName, "repairStructures");
   for (let i = 0; i < damagedStructures.length; i++) {
     const structure = damagedStructures[i];
     if (structure.hits >= structure.hitsMax * REPAIR_THRESHOLD_RATIO) continue;
+
+    // ДОРОГИ — ЗАДАЧА БАШЕН, А НЕ ВОРКЕРОВ (решение владельца, C2).
+    // Замер shard3 (tick ~83161815): из 80 задач ремонта ВСЕ 80 были дороги
+    // E35S37, и весь их долг (258k хитов) стоил ~2.6k энергии при REPAIR_COST
+    // 0.01 — то есть воркеры (тело 1300) ездили по дорогам вместо подвоза
+    // энергии. Башни дороги видят (room.manager.js:457 включает их в
+    // damagedStructures) и теперь выбирают цель по ДОЛЕ остатка хитов, так что
+    // дорога в 51 % обгоняет лабу в 80 %; цена — 10 энергии и 600 хитов за
+    // ремонт при интервале 15 тиков на башню (role.tower.js:73).
+    if (structure.structureType === STRUCTURE_ROAD) continue;
+
+    // ВОРКЕР — ФОЛБЭК ДЛЯ ТОГО, ЧЕГО НЕ ДОСТАЁТ БАШНЯ.
+    // Правило вместо ручного «включить/выключить ремонт воркерами»: если
+    // структура в радиусе башни (TOWER_FALLOFF_RANGE), задача не создаётся —
+    // её ремонтирует башня (сначала — самые повреждённые, каждый тик, см.
+    // room.manager.runTowerLogic). Если не достаёт НИ ОДНА башня (или башен в
+    // комнате нет) — задача создаётся, иначе эта структура не ремонтируется
+    // вообще никем. Именно так закрывается вопрос «а справятся ли башни сами»:
+    // воркеры делают ровно то, что башни физически не могут.
+    if (towers && towers.length > 0 && isInTowerRange(towers, structure.pos)) {
+      continue;
+    }
 
     addIfNew(
       roomName,

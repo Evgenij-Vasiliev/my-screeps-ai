@@ -81,6 +81,9 @@ const PROFILE_MAIN_BLOCKS = [
   "linkManager",
   "factoryManager",
   "powerSpawnManager",
+  // Бустирование крипов (boost.manager) — своя колонка, потому что это
+  // единственная подсистема, которая подавляет действия крипов (см. room.manager).
+  "boostManager",
 ];
 
 // Блоки уровня империи (ставятся в empire.js) — не роли, в топ ролей не идут.
@@ -349,7 +352,7 @@ module.exports = {
     console.log(
       `=== CPU PROFILE (ТЗ №0) | tick ${Game.time} | замеров: ${samples} | период: ${Game.time - profile.startTick + 1} тиков (с ${profile.startTick}) ===\n` +
         `roomManager ${at("roomManager")} | roomState ${at("roomState")}${roomStateShare}\n` +
-        `taskGen ${at("taskManager")} | TaskSystem ${at("worker")} | spawn ${at("spawnManager")} | lab ${at("labManager")} | towers ${at("towers")} | link ${at("linkManager")} | factory ${at("factoryManager")} | powerSpawn ${at("powerSpawnManager")}\n` +
+        `taskGen ${at("taskManager")} | TaskSystem ${at("worker")} | spawn ${at("spawnManager")} | lab ${at("labManager")} | boost ${at("boostManager")} | towers ${at("towers")} | link ${at("linkManager")} | factory ${at("factoryManager")} | powerSpawn ${at("powerSpawnManager")}\n` +
         `роли (топ-5): ${roleList || "нет данных"}\n` +
         `комнаты: ${roomList || "нет данных"}`,
     );

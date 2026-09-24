@@ -37,7 +37,8 @@
  * ===================================================
  */
 
-const { LAB_WORKER } = require("./constants");
+const { LAB_WORKER, LAB_BOOST, STORAGE } = require("./constants");
+const recipes = require("./lab.recipes");
 
 const LAB_CAPACITY = LAB_WORKER.CAPACITY;
 const MIN_UNLOAD = LAB_WORKER.PRODUCT_UNLOAD_AT;
@@ -52,6 +53,35 @@ function heap() {
     global._labWorker = { idx: {}, scanAt: {}, noCfgAt: {} };
   }
   return global._labWorker;
+}
+
+/**
+ * Ресурсы, которые империя вообще использует как бусты (LAB_BOOST.BOOST_POLICY).
+ * Нужны буст-лабе как «зарезервированные» ресурсы: запас буста в буст-лабе
+ * учитывается в local-запасе комнаты (terminalNetwork.resourceInLabs) и не
+ * считается её излишком. Список вычисляется один раз за тик.
+ * @returns {string[]}
+ */
+function boostResources() {
+  const cached = global._labBoostResources;
+  if (cached && cached.tick === Game.time) return cached.list;
+
+  const list = [];
+  const seen = /** @type {Object<string, boolean>} */ ({});
+  const policy = LAB_BOOST.BOOST_POLICY || {};
+  for (const role in policy) {
+    const rows = policy[role];
+    for (let i = 0; i < rows.length; i++) {
+      const resource = rows[i].resource;
+      if (resource && !seen[resource]) {
+        seen[resource] = true;
+        list.push(resource);
+      }
+    }
+  }
+
+  global._labBoostResources = { tick: Game.time, list };
+  return list;
 }
 
 /**
@@ -72,11 +102,62 @@ function actIfNear(creep, target, fn) {
 }
 
 module.exports = {
-  findSource: function (room, resource) {
+  /**
+   * Откуда крип берёт реагент: Terminal → Storage → ЛАБОРАТОРИЯ комнаты.
+   *
+   * Третий источник — лаборатории: тройки одной комнаты делят реагенты
+   * (например, X лежит в лабе финальной тройки E35S37 и в лабе её второй
+   * тройки; KH2O/KHO2 производятся здесь же и нужны сразу нескольким тройкам).
+   * Без этого правила реагент, уже находящийся в комнате, но «не в своей»
+   * лаборатории, для labWorker не существовал: тройка стояла пустой, хотя
+   * сырьё лежало в двух клетках от неё, а единственным транспортом между
+   * лабораториями был межкомнатный терминал. Регулярно это даёт не перенос
+   * (оба источника живут в одной комнате), а именно отсутствие простоя.
+   *
+   * За один рейс берём не больше рюкзака, поэтому источник-лаборатория
+   * опустошается постепенно, а внутрикомнатный перенос не конкурирует с
+   * межкомнатным: терминал и storage проверяются первыми.
+   *
+   * @param {Room} room
+   * @param {string} resource
+   * @param {StructureLab} [targetLab] лаборатория-получатель; её собственная
+   *   лаборатория исключается из поиска, чтобы задача не превратилась в
+   *   «выгрузи реагент из цели обратно в неё же»
+   * @returns {Object|null}
+   */
+  findSource: function (room, resource, targetLab) {
     const terminal = room.terminal;
     const storage = room.storage;
+
+    // ЭНЕРГИЯ — ТОЛЬКО ИЗ ХРАНИЛИЩА (правило владельца: единый источник энергии
+    // для всех крипов — storage). Раньше энергия бралась из терминала ПЕРВЫМ
+    // (строка стояла выше склада), и заправка буст-лабораторий вычерпывала
+    // терминал: в живом замере терминал E35S39 потерял 4495 энергии за 43 тика.
+    // Подвоза у терминала нет, пока склад ниже 195000 (гейт
+    // TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER), поэтому энергия, ушедшая в
+    // лабы, не возвращалась — и её не оставалось на комиссии отправок и сделок.
+    // Резерв склада неприкосновенен: ниже STORAGE.ENERGY_MIN энергия не берётся.
+    if (resource === RESOURCE_ENERGY) {
+      if (storage && (storage.store[RESOURCE_ENERGY] || 0) > STORAGE.ENERGY_MIN) {
+        return storage;
+      }
+      return null;
+    }
+
     if (terminal && terminal.store[resource] > 0) return terminal;
     if (storage && storage.store[resource] > 0) return storage;
+
+    const configs = this.getConfigs(room);
+    for (let i = 0; i < configs.length; i++) {
+      const config = configs[i].config;
+      const lab = recipes.labById(room, config.lab1);
+      if (!lab || lab === targetLab) continue;
+      if ((lab.store[resource] || 0) > 0) return lab;
+
+      const lab2 = recipes.labById(room, config.lab2);
+      if (!lab2 || lab2 === targetLab) continue;
+      if ((lab2.store[resource] || 0) > 0) return lab2;
+    }
     return null;
   },
 
@@ -91,7 +172,14 @@ module.exports = {
   /**
    * Все конфиги троек в комнате в порядке по умолчанию.
    * getRotatedConfigs применяет round-robin смещение.
-   * Используется также terminalNetwork.js — сигнатура не меняется.
+   *
+   * Используется также terminalNetwork.js и market.manager.js — сигнатура не
+   * меняется (массив {key, config}). Дополнительно в список попадает буст-лаба
+   * комнаты (Memory.rooms[].boostLab) как отдельная «тройка» из одной лабы:
+   * так её ресурсы автоматически учитываются в reagentList/resourceInLabs
+   * терминальной сети, то есть готовый буст довозится до неё существующим
+   * транспортом и защищён от продажи рынком. Реакций в буст-лабе нет —
+   * labManager её конфиг не читает (нет lab1/lab2/reactor в паре с product).
    */
   getConfigs: function (room) {
     const mem = room.memory;
@@ -101,6 +189,11 @@ module.exports = {
     if (mem.labs3) configs.push({ key: "labs3", config: mem.labs3 });
     if (mem.labs4) configs.push({ key: "labs4", config: mem.labs4 });
     if (mem.labs5) configs.push({ key: "labs5", config: mem.labs5 });
+    if (mem.boostLab)
+      configs.push({
+        key: "boostLab",
+        config: { lab1: mem.boostLab, boost: boostResources() },
+      });
     return configs;
   },
 
@@ -175,13 +268,115 @@ module.exports = {
       // места в рюкзаке крипа (см. п.1 в шапке файла).
       const freeCapacity = creep.store.getFreeCapacity();
 
+      // ── БУСТ-ЛАБА: ЭНЕРГИЯ — ПЕРВЫМ ПРИОРИТЕТОМ ──────────────────────────
+      // Буст одной части тела стоит LAB_BOOST_MINERAL = 30 единиц буста И
+      // LAB_BOOST_ENERGY = 20 энергии, причём энергия списывается ИЗ ЛАБЫ.
+      // Буст-минерал привозит сам бустуемый крип (boost.manager.runDelivery),
+      // а энергию не привозил НИКТО: у конфига буст-лабы нет lab2/reactor,
+      // поэтому он пропускался в цикле ниже, а задачи fill* для буст-лабы в
+      // Task System не существует. Живой shard3: буст-лаба стояла с бустом
+      // (XZHO2 240) и нулём энергии — creep.boost возвращал
+      // ERR_NOT_ENOUGH_ENERGY, boost.manager молча стирал процедуру, и ни один
+      // обычный крип не получил ни одной бустнутой части.
+      //
+      // Почему ПЕРЕД циклом, а не внутри него: внутри рейс за энергией
+      // проигрывал очистке лабораторий (clear_lab) от реагентов прежнего плана
+      // и откладывался на много сканов — на живом shard3 буст-лаба простояла
+      // без энергии всё время, пока labWorker разбирал ZHO2/KH2O. Рейс нужен
+      // РЕДКО (500 энергии = 25 бустнутых частей), поэтому отдельный приоритет
+      // реагентам не мешает.
+      for (let i = 0; i < configs.length; i++) {
+        const boostConfig = configs[i].config;
+        if (!boostConfig.boost) continue;
+        const boostLab = recipes.labById(creep.room, boostConfig.lab1);
+        if (!boostLab) continue;
+
+        // ЭНЕРГОКРИЗИС: пока спавны/расширения не набраны хотя бы наполовину,
+        // энергию в буст-лабу не возим — она нужна комнате (та же логика, что в
+        // boost.manager.ENERGY_PAUSE_RATIO). Буст оппортунистический: он не имеет
+        // права отбирать энергию у спавнов.
+        const roomCap = creep.room.energyCapacityAvailable;
+        if (
+          typeof creep.room.energyAvailable === "number" &&
+          typeof roomCap === "number" &&
+          roomCap > 0 &&
+          creep.room.energyAvailable < roomCap * LAB_BOOST.ENERGY_PAUSE_RATIO
+        ) {
+          break;
+        }
+
+        const curEnergy = boostLab.store[RESOURCE_ENERGY] || 0;
+        const target = LAB_BOOST.ENERGY_TARGET;
+        const carriesEnergy = (creep.store[RESOURCE_ENERGY] || 0) > 0;
+
+        // ОСТАТОК ПРОШЛОГО БУСТА. Лаборатория держит энергию и ОДИН тип минерала
+        // за раз (StructureLab.mineralType), поэтому после частичной выдачи в ней
+        // может остаться меньше LAB_BOOST_MINERAL = 30 единиц старого буста: на
+        // целую часть тела этого не хватает, а залить новый буст мешает
+        // (transfer вернул бы ERR_INVALID_ARGS, и кип ждал бы вечно). Убираем
+        // остаток тем же механизмом, что и чужие реагенты тройки (clear_lab →
+        // терминал или склад комнаты).
+        const curMineral = boostLab.mineralType;
+        const leftover = curMineral ? boostLab.store[curMineral] || 0 : 0;
+        if (curMineral && leftover > 0 && leftover < 30) {
+          creep.memory.task = "clear_lab";
+          creep.memory.resource = curMineral;
+          creep.memory.targetId = boostConfig.lab1;
+          creep.memory.labKey = configs[i].key;
+          break;
+        }
+
+        if (
+          curEnergy >= target ||
+          (!carriesEnergy && target - curEnergy < freeCapacity)
+        )
+          continue;
+
+        const energySrc = this.findSource(
+          creep.room,
+          RESOURCE_ENERGY,
+          boostLab,
+        );
+        if (!energySrc) continue;
+
+        creep.memory.task = "load_lab1";
+        creep.memory.resource = RESOURCE_ENERGY;
+        creep.memory.sourceId = energySrc.id;
+        creep.memory.targetId = boostConfig.lab1;
+        creep.memory.labKey = configs[i].key;
+        creep.memory.amount = Math.min(
+          target - curEnergy,
+          energySrc.store[RESOURCE_ENERGY] || 0,
+          creep.store.getFreeCapacity(),
+        );
+        break;
+      }
+
+      // ДВА ПРОХОДА, А НЕ ОДИН (ТЗ владельца «ЗАПУСТИТЬ ЛАБЫ — ВСЕ»).
+      // Приоритеты 1–4.5 (расчистить и ЗАПУСТИТЬ каждую тройку) обрабатываются
+      // для ВСЕХ троек раньше, чем буферная доливка 5/6 хотя бы одной. Прежний
+      // одиночный проход останавливался на первой тройке с ЛЮБОЙ задачей: живой
+      // shard3 (tick 83195239) — оба labWorker E35S37 возили доливку X в
+      // активную labs, пока labs3 стояла ПУСТОЙ, а UHO2 300 лежал в терминале
+      // той же комнаты. Из-за этого «простаивающие» тройки не запускались
+      // никогда, хотя реагент для них уже был в комнате.
+      for (let pass = 1; pass <= 2 && !creep.memory.task; pass++) {
       for (const { key, config } of configs) {
-        const lab1 = Game.getObjectById(config.lab1);
-        const lab2 = Game.getObjectById(config.lab2);
-        const reactor = Game.getObjectById(config.reactor);
+        if (creep.memory.task) break;
+        // Разрешение объектов идёт через tick-кэш lab.recipes (он же использует
+        // lab.manager): один Game.getObjectById на id за тик на комнату вместо
+        // повторных разыменований теми же подсистемами.
+        const lab1 = recipes.labById(creep.room, config.lab1);
+        const lab2 = recipes.labById(creep.room, config.lab2);
+        const reactor = recipes.labById(creep.room, config.reactor);
+
+        // Конфиг буст-лабы обслуживается выше (энергия первым приоритетом),
+        // в логику троек он не попадает: у него нет lab2/reactor.
+        if (config.boost) continue;
 
         if (!lab1 || !lab2 || !reactor) continue;
 
+        if (pass === 1) {
         // Приоритет 1: чужой ресурс в lab1
         for (const res in lab1.store) {
           if (res !== config.reagent1 && lab1.store[res] > 0) {
@@ -227,16 +422,69 @@ module.exports = {
           break;
         }
 
+        // Приоритет 4.5 — КРИТИЧЕСКИЙ РЕАГЕНТ (ТЗ владельца «ЗАПУСТИТЬ ЛАБЫ —
+        // ВСЕ»). Тройка варит ТОЛЬКО когда ОБА реагента ≥ LAB_REACTION_AMOUNT
+        // (lab.recipes.reactionReady). Прежний порядок (сначала буферная доливка
+        // lab1 до LAB_CAPACITY, затем lab2) означал, что курьер возит «доливку» в
+        // одну лабу, пока вторая стоит ПУСТОЙ, — и тройка не варит вовсе. Живой
+        // shard3 25.09.2026 (tick 83194866): E37S38.labs — U 600 в lab1, O 0 в
+        // lab2 при O 3400 в терминале ТОЙ ЖЕ комнаты, а курьер вёз доливку U;
+        // E37S37.labs — O 600, H 0; E36S38.labs3 — O 2107, H 0; E37S38.labs2 —
+        // Z 0, O 0. Теперь первым везём то, чего не хватает ДЛЯ РЕАКЦИИ, а
+        // буферная доливка (приоритеты 5/6) остаётся ниже.
+        const reactionNeed = recipes.reactionAmount();
+        if ((lab1.store[config.reagent1] || 0) < reactionNeed) {
+          const critSrc1 = this.findSource(creep.room, config.reagent1, lab1);
+          if (critSrc1) {
+            creep.memory.task = "load_lab1";
+            creep.memory.resource = config.reagent1;
+            creep.memory.sourceId = critSrc1.id;
+            creep.memory.targetId = config.lab1;
+            creep.memory.labKey = key;
+            creep.memory.amount = Math.min(
+              LAB_CAPACITY - (lab1.store[config.reagent1] || 0),
+              critSrc1.store[config.reagent1],
+              creep.store.getFreeCapacity(),
+            );
+            break;
+          }
+        }
+        if ((lab2.store[config.reagent2] || 0) < reactionNeed) {
+          const critSrc2 = this.findSource(creep.room, config.reagent2, lab2);
+          if (critSrc2) {
+            creep.memory.task = "load_lab2";
+            creep.memory.resource = config.reagent2;
+            creep.memory.sourceId = critSrc2.id;
+            creep.memory.targetId = config.lab2;
+            creep.memory.labKey = key;
+            creep.memory.amount = Math.min(
+              LAB_CAPACITY - (lab2.store[config.reagent2] || 0),
+              critSrc2.store[config.reagent2],
+              creep.store.getFreeCapacity(),
+            );
+            break;
+          }
+        }
+
+        } else {
         // Приоритет 5: загрузить реагент1 в lab1.
         // Гистерезис (см. п.1 в шапке): новый рейс начинаем, только если
         // дефицит не меньше рюкзака. Если крип уже везёт этот реагент — задачу
         // даём всегда, чтобы он сдал привезённое.
+        //
+        // ВАЖНО ПРО ПРОСТОЙ (config.paused). Простаивающую тройку НЕЛЬЗЯ
+        // исключать из загрузки: простой означает «не варим», а не «тройка
+        // выключена». Если тройка ушла в простой, ожидая первый подвоз реагента
+        // (продукт ниже LOW), то именно эта загрузка и есть условие выхода из
+        // простоя: lab.recipes.selectRecipe возобновляет работу только по
+        // canRun(slot) — «реагенты реально лежат в lab1/lab2». Запрет загрузки
+        // навсегда запирал бы тройку в простое (проверено и откачено).
         const cur1 = lab1.store[config.reagent1] || 0;
         if (cur1 < LAB_CAPACITY) {
           const needed1 = LAB_CAPACITY - cur1;
           const carries1 = (creep.store[config.reagent1] || 0) > 0;
           if (carries1 || needed1 >= freeCapacity) {
-            const src = this.findSource(creep.room, config.reagent1);
+            const src = this.findSource(creep.room, config.reagent1, lab1);
             if (src) {
               creep.memory.task = "load_lab1";
               creep.memory.resource = config.reagent1;
@@ -259,7 +507,7 @@ module.exports = {
           const needed2 = LAB_CAPACITY - cur2;
           const carries2 = (creep.store[config.reagent2] || 0) > 0;
           if (carries2 || needed2 >= freeCapacity) {
-            const src = this.findSource(creep.room, config.reagent2);
+            const src = this.findSource(creep.room, config.reagent2, lab2);
             if (src) {
               creep.memory.task = "load_lab2";
               creep.memory.resource = config.reagent2;
@@ -275,6 +523,8 @@ module.exports = {
             }
           }
         }
+        }
+      }
       }
 
       // Перебор не дал задачи — не повторяем его каждый тик.

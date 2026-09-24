@@ -288,7 +288,7 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 38. **Unused imports/vars (eslint warnings):** `room.manager.js:13` (`taskManager`), `factory.manager.js:2,9`, `powerSpawn.manager.js:7`, `lab.manager.js:27`.
 39. **ESLint красный из-за устаревших глобалов конфига:** `RESOURCE_BATTERY`, `STRUCTURE_FACTORY`, `STRUCTURE_INVADER_CORE` не объявлены в globals (`eslint.config.js` из `eslint-config-screeps`) → 12 `no-undef` «ошибок» на валидном API. Настоящие ошибки тонут в шуме.
 40. **`types.d.ts` отстал:** `Memory.remoteRoleCache/towerState` — остатки от переезда кэшей в `global`; `Memory.cpuStats`/`cpuMonitorEnabled` объявлены, но нет `Memory.empire` (см. п. 14) и почти нет полей `CreepMemory` (`task`, `taskIndex`, `working`, `targetRoom`, `_travel`, `_lastRoom` — используются в коде). `tsc` при этом чист (exit 0) — но только потому, что типы слишком широкие (`_HasId.store?: any`).
-41. **Секрет в репозитории:** `Gruntfile.js:9` содержит token деплоя Screeps (`65d562cb-…`), файл в git (`git ls-files` подтверждает). Это не архитектура, но это утечка, и она уже в истории коммитов.
+41. **Утечка секрета устранена (2026-09-24).** Токен деплоя Screeps больше не хранится в репозитории: `Gruntfile.js` и 69 файлов `tests/*` читают его из `process.env.SCREEPS_TOKEN` или `.screeps.json` через общий `screeps.token.js`; старый токен отозван и перевыпущен, git-история перезаписана `git filter-repo --replace-text`.
 
 ---
 
@@ -539,7 +539,8 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 
 - **Цель:** зелёные проверки и отсутствие утечки.
 - **Файлы:** `eslint.config.js`, `Gruntfile.js`, unused vars в 4 файлах.
-- **Что менять:** добавить недостающие глобалы Screeps; отозвать/перевыпустить token деплоя и хранить его вне репозитория (`.screeps.json` уже в `.gitignore`); убрать unused imports/vars.
+- **Что менять:** добавить недостающие глобалы Screeps; убрать unused imports/vars.
+- **Статус утечки (сделано 2026-09-24):** токен деплоя отозван и перевыпущен, хранится вне репозитория (`.screeps.json` в `.gitignore` или `SCREEPS_TOKEN` в окружении); хардкод убран из `Gruntfile.js` и 69 файлов `tests/*`; git-история очищена `git filter-repo --replace-text`. Осталось: глобалы и unused vars.
 - **Эффект:** `npm`-проверки снова информативны; закрыт секрет.
 - **Риск:** низкий (ротация токена — организационное действие).
 - **Приоритет:** высокий по факту утечки, работа — минимальная.

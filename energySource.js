@@ -28,7 +28,6 @@ module.exports = {
    */
   withdrawFromStorage: function (creep, ignoreReserve = false, move) {
     const storage = creep.room.storage;
-    const terminal = creep.room.terminal;
     const storageEnergy = storage ? storage.store[RESOURCE_ENERGY] || 0 : 0;
     const moveFn = move || function (c, target) { return c.travelTo(target); };
 
@@ -43,14 +42,16 @@ module.exports = {
       return true;
     }
 
-    // Storage на резерве или пуст — забираем энергию, пришедшую сетью в терминал.
-    if (terminal && (terminal.store[RESOURCE_ENERGY] || 0) > 0) {
-      if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        moveFn(creep, terminal);
-      }
-      return true;
-    }
-
+    // ТЕРМИНАЛ КАК ИСТОЧНИК ЭНЕРГИИ НЕ ИСПОЛЬЗУЕТСЯ.
+    // Правило владельца: единый источник энергии для всех крипов — ХРАНИЛИЩЕ.
+    // Здесь стояла ветка `withdraw(terminal, ENERGY)` «когда storage на резерве»,
+    // и она была единственным стоком, который опустошал терминал в ноль: подвоза
+    // у терминала нет, пока склад ниже 195000 (гейт TERMINAL_SUPPLY.
+    // STORAGE_RESERVE_MULTIPLIER в task.generators.js), а брали из него все —
+    // спавны, расширения, башни, ремонт, стройка, апгрейд. Энергия терминала
+    // предназначена комиссиям отправок (terminalNetwork) и сделок (market).
+    // Аварийные потребители берут из склада с ignoreReserve=true (вызов
+    // fillSpawnsExtensions при room.energyAvailable < 400, constants.js BOOTSTRAP).
     return false;
   },
 };

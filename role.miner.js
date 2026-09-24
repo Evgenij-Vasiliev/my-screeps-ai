@@ -21,7 +21,44 @@
  *    энергии, но стоит как продуктивный (сначала слив в линк, потом добыча).
  */
 
-const { MINER } = require("./constants");
+const { MINER, LAB_BOOST } = require("./constants");
+
+/**
+ * Множитель добычи, который даёт буст части тела: BOOSTS.work[XUHO2].harvest = 7
+ * (+600 % к harvest, docs.screeps.com/resources.html). Берём из движковой
+ * таблицы, а не из константы проекта: список бустов и их силы определяет движок.
+ * @param {string|undefined} boost
+ * @returns {number}
+ */
+function harvestMultiplier(boost) {
+  if (!boost) return 1;
+  // Тестовая среда: движковых таблиц нет (BOOSTS объявляет только живой шард).
+  if (typeof BOOSTS === "undefined") return 1;
+
+  const table = BOOSTS[WORK];
+  const effect = table && table[boost];
+  const multiplier = effect && effect.harvest;
+  return typeof multiplier === "number" ? multiplier : 1;
+}
+
+/**
+ * Сколько WORK-частей крипа уже несут добычный буст. Служит ключом кэша плана
+ * пачечной добычи: буст выдаётся ПОСЛЕ первого расчёта, и без пересчёта
+ * интервал остался бы «небустнутым» — буст потрачен, а экономии вызовов
+ * harvest() нет. Ноль у небустнутого крипа (а не единица), чтобы отсутствие
+ * записи в памяти читалось как «бустов нет».
+ * @param {Object} creep
+ * @returns {number}
+ */
+function harvestBoostedWork(creep) {
+  const body = creep.body;
+  let count = 0;
+  for (let i = 0; i < body.length; i++) {
+    const part = body[i];
+    if (part.type === WORK && harvestMultiplier(part.boost) > 1) count++;
+  }
+  return count;
+}
 
 /**
  * План пачечной добычи: сколько энергии крип берёт за один вызов harvest и
@@ -29,8 +66,16 @@ const { MINER } = require("./constants");
  *
  * Источник восстанавливает energyCapacity / ENERGY_REGEN_TIME энергии в тик
  * (для 3000-источника — 10/тик), а минёр за один вызов берёт
- * HARVEST_POWER × WORK. Интервал — во столько раз пачка больше тикового
- * восстановления. Для 3000-источника: 5 WORK → 1, 10 WORK → 2, 15 WORK → 3.
+ * HARVEST_POWER × WORK × буст. Интервал — во столько раз пачка больше тикового
+ * восстановления. Для 3000-источника: 5 WORK → 1, 10 WORK → 2, 10 WORK с XUHO2
+ * (×7) → 10 (потолок MINER.MAX_INTERVAL), то есть вызовов в пять раз меньше при
+ * той же добыче.
+ *
+ * ПАЧКА НЕ МОЖЕТ БЫТЬ БОЛЬШЕ РЮКЗАКА. Без этого ограничения буст ломал дальнего
+ * майнера: его рюкзак — 2 CARRY = 100, а с XUHO2 «пачка» стала бы 140, и проверка
+ * «пачка не влезает» (remote.miner: getFreeCapacity < perCall) сделалась бы
+ * истинной ВСЕГДА — крип бесконечно отдавал бы энергию в контейнер и не сделал
+ * ни одного вызова harvest.
  *
  * Функция экспортируется: remote.miner использует ТУ ЖЕ формулу (пачечная
  * добыча — одна точка правды, второй копии формулы в проекте нет).
@@ -40,16 +85,22 @@ const { MINER } = require("./constants");
  * @returns {{perCall: number, interval: number}}
  */
 function harvestPlan(creep, source) {
-  let work = 0;
   const body = creep.body;
+  let power = 0;
 
   for (let i = 0; i < body.length; i++) {
-    if (body[i].type === WORK) work++;
+    const part = body[i];
+    if (part.type === WORK) power += HARVEST_POWER * harvestMultiplier(part.boost);
   }
 
-  const perCall = HARVEST_POWER * work; // энергия за один вызов
+  const store =
+    creep.store && typeof creep.store.getCapacity === "function"
+      ? creep.store.getCapacity(RESOURCE_ENERGY)
+      : 0;
+  const perCall = store > 0 ? Math.min(power, store) : power;
+
   const capacity = source.energyCapacity;
-  if (work === 0 || !capacity) return { perCall: perCall, interval: 1 };
+  if (perCall <= 0 || !capacity) return { perCall: perCall, interval: 1 };
 
   const perTick = capacity / ENERGY_REGEN_TIME; // восстановление источника
   const interval = Math.floor(perCall / perTick);
@@ -62,6 +113,7 @@ function harvestPlan(creep, source) {
 
 module.exports = {
   harvestPlan,
+  harvestBoostedWork,
   run: function (creep) {
     const spot = creep.memory.spot;
     if (!spot) return;
@@ -108,12 +160,43 @@ module.exports = {
     if (!source) return;
 
     // Интервал считается один раз (тело и источник у минёра не меняются)
-    // и живёт в memory, чтобы не проходить по body каждый тик.
+    // и живёт в memory, чтобы не проходить по body каждый тик. Пересчитывается,
+    // если у крипа появился добычный буст (XUHO2): сила WORK изменилась, а план
+    // остался бы прежним — и буст не дал бы ни одного сэкономленного вызова.
+    //
+    // СКАНИРОВАНИЕ ТЕЛА ОТКЛЮЧЕНО ПРИ ВЫКЛЮЧЕННЫХ БУСТАХ (Memory.labBoostOff).
+    // Флаг читает и boost.manager (boost.manager.js:723) — при нём буст не
+    // выдаётся НИКОМУ, значит harvestBoosted у крипа меняться не может, и обход
+    // тела (20 частей у нового тела 10 WORK, с обращением к таблице BOOSTS на
+    // каждую часть) каждый тик каждым майнером — чистая трата. Значение берётся
+    // из памяти: у небустнутого крипа там 0 (см. harvestBoostedWork).
+    const boosted =
+      typeof Memory !== "undefined" && Memory && Memory[LAB_BOOST.OFF_FLAG]
+        ? creep.memory.harvestBoosted | 0
+        : harvestBoostedWork(creep);
     let interval = creep.memory.harvestInterval;
-    if (interval === undefined) {
+    if (interval === undefined || (creep.memory.harvestBoosted | 0) !== boosted) {
       interval = harvestPlan(creep, source).interval;
       creep.memory.harvestInterval = interval;
+      creep.memory.harvestBoosted = boosted;
     }
+
+    // ПУСТОЙ ИСТОЧНИК — НЕ ВЫЗЫВАТЬ harvest.
+    //
+    // Живой замер shard3 (окно 1200 тиков, старт 83175900): бакет `miner`
+    // 2.313 мс/тик (max 6.34) при ~11 майнерах — это ровно цена «по одному
+    // вызову creep.harvest() на майнера в тик» (0.21 мс за вызов, замер из
+    // docs/CPU-PROFILE-ROOM-MANAGER.md). Источник восстанавливает
+    // energyCapacity / ENERGY_REGEN_TIME (10/тик для 3000), поэтому при двух
+    // майнерах на источнике значительная часть вызовов уходит в
+    // ERR_NOT_ENOUGH_RESOURCES: энергии не даёт, а стоит как продуктивный.
+    //
+    // Гейт стоит ТОЛЬКО для поштучных майнеров (interval === 1): у пачечных
+    // (interval > 1) пропуск вызова стоил бы целого интервала ожидания и
+    // потерянной добычи, а у поштучных — максимум один тик. Проверка —
+    // чтение свойства source.energy, без игрового действия. Порядок важен:
+    // гейт стоит ПОСЛЕ расчёта interval (иначе interval ещё не определён).
+    if (interval === 1 && source.energy === 0) return;
 
     // Пачечная добыча: между вызовами минёр просто стоит на источнике.
     if (interval > 1 && Game.time % interval !== 0) return;

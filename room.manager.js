@@ -16,6 +16,7 @@ const factoryManager = require("factory.manager");
 const powerSpawnManager = require("powerSpawn.manager");
 const linkManager = require("linkManager");
 const labManager = require("lab.manager");
+const boostManager = require("boost.manager");
 const roleTower = require("role.tower");
 
 const roleHarvester = require("role.harvester");
@@ -68,9 +69,36 @@ function runCreepLogic(roomState) {
     // конца спавна (десятки тиков для больших тел). Роль для него не выполняется.
     if (creep.spawning) continue;
 
+    // БУСТИРОВАНИЕ ИДЁТ ПЕРВЫМ, РОЛЬ — ТОЛЬКО ЕСЛИ КРИП НЕ ЗАНЯТ БУСТОМ.
+    //
+    // Почему порядок принципиален. У крипа в Screeps ровно ОДНО действие за тик:
+    // если роль уже сходила (travelTo/withdraw/transfer), то travelTo и boost из
+    // boost.manager в ЭТОМ ЖЕ тике движок игнорирует. Прежний порядок (роль, потом
+    // буст) означал, что крип с активной задачей — а Worker едет почти каждый тик —
+    // физически не мог ни дойти до буст-лабы, ни бустироваться: живой shard3
+    // показал двух Worker'ов с boostTask = XZHO2, которые метались вокруг лабы,
+    // полной буста (XZHO2 240) и энергии (1000), и не получили ни одной
+    // бустнутой части, а Memory.__boostMetric так и остался "no stock".
+    //
+    // Резервация Task при этом не теряется: worker.runner хранит выбранную задачу
+    // в памяти крипа и перепроверяет её каждый тик, поэтому пропуск тика роли —
+    // это пауза, а не отказ от задачи.
+    //
     // ВАЖНО (ТЗ №0): бакет роли "worker" — это и есть выполнение Task System
     // (worker.runner: выбор задачи из FIFO Memory.rooms[].tasks + executor).
     // Отдельного бакета ему не нужно — имя бакета совпадает с ролью.
+    let boosting = false;
+    cpuMonitor.trackRole("boostManager", () => {
+      try {
+        boosting = boostManager.run(roomState, creep) === true;
+      } catch (e) {
+        console.log(
+          `[RoomManager] Ошибка буста у крипа ${creep.name}: ${e.stack || e}`,
+        );
+      }
+    });
+    if (boosting) continue;
+
     cpuMonitor.trackRole(creep.memory.role, () => {
       try {
         roleModule.run(creep, roomState);
@@ -244,6 +272,23 @@ function findWoundedCreep(roomState, roomName) {
   return wounded;
 }
 
+/**
+ * Сколько башен комнаты реально могут ремонтировать в этом тике: у остальных
+ * энергии не больше TOWER.REPAIR_ENERGY_MIN, и role.tower в ремонт не пойдёт
+ * (в атаку/лечение — пойдёт). Нужно, чтобы не собирать цели для башен, которые
+ * всё равно простаивают, и чтобы нулевой случай (все башни пусты или в комнате
+ * бой) не гонял проход по сотням повреждённых структур.
+ * @param {StructureTower[]} towers
+ * @returns {number}
+ */
+function countRepairCapableTowers(towers) {
+  let count = 0;
+  for (let i = 0; i < towers.length; i++) {
+    if (towers[i].store[RESOURCE_ENERGY] > TOWER.REPAIR_ENERGY_MIN) count++;
+  }
+  return count;
+}
+
 function runTowerLogic(roomState) {
   cpuMonitor.trackRole("towers", () => {
     const towers = roomState.towers;
@@ -284,9 +329,9 @@ function runTowerLogic(roomState) {
     };
 
     // Тяжёлая часть (стены/валы) выполняется только раз в
-    // TOWER.WALL_SCAN_INTERVAL тиков — в тот же тик, в который башни
-    // ремонтируют (REPAIR_INTERVAL), поэтому цели ремонта считаются тогда,
-    // когда нужны, и ни один интент ремонта не теряется.
+    // TOWER.WALL_SCAN_INTERVAL тиков — разыменование стен и валов по id и
+    // проход по ним. Цели ремонта СТРУКТУР/ДОРОГ считаются КАЖДЫЙ тик
+    // (см. блок ниже): скана раз в 15 тиков для них недостаточно.
     let hitsDropped = false;
 
     if (Game.time % TOWER.WALL_SCAN_INTERVAL === 0) {
@@ -310,21 +355,99 @@ function runTowerLogic(roomState) {
         previousTotalHits !== undefined &&
         previousTotalHits - scan.totalHits >
           TOWER.HITS_DROP_THRESHOLD * TOWER.WALL_SCAN_INTERVAL;
+    }
 
-      // Поиск самого повреждённого здания одним проходом, без sort
-      let weakestDamagedStructure = null;
-      const damagedStructures = roomState.damagedStructures;
+    // ── ЦЕЛИ РЕМОНТА СТРУКТУР И ДОРОГ — КАЖДЫЙ ТИК ──────────────────────
+    // Поиск самых повреждённых зданий одним проходом, без sort.
+    // Критерий — ДОЛЯ остатка хитов (hits/hitsMax), а не абсолютные хиты:
+    // дороги отданы башням (воркеры их больше не ремонтируют, C2), а у дороги
+    // hitsMax 5000 — по абсолютным хитам она проигрывала любой раненой лабе
+    // (1500) или линку (1000) и до башен не доходила вовсе. По доле дорога в
+    // 51 % обгоняет лабу в 80 % именно тогда, когда она действительно хуже.
+    //
+    // ПОЧЕМУ ЦЕЛИ ПЕРЕСОБИРАЮТСЯ КАЖДЫЙ ТИК (правка по разрушению дорог
+    // E35S37, 4 башни). Было две ошибки, и обе били по пропускной способности:
+    //   1) ОДНА цель на всю комнату — все башни били в один тайл (800 хитов
+    //      каждая в цель с hitsMax 5000), излишек сгорал, так как действие
+    //      башни стоит TOWER_ENERGY_COST независимо от числа восстановленных
+    //      хитов;
+    //   2) цели выбирались раз в 15 тиков (в тик скана стен), а ремонт шёл
+    //      только в тот же тик. Но у большинства повреждённых структур дефицит
+    //      МЕНЬШЕ мощности башни (800 хитов), поэтому цель добивалась за один
+    //      интент и башня простаивала остальные 14 тиков: комната восстанавливала
+    //      4 тайла за 15 тиков вместо 4 тайлов КАЖДЫЙ тик.
+    // Теперь тот же ОДИН проход выполняется каждый тик и собирает до
+    // TOWER.REPAIR_ACTIONS_PER_TICK самых повреждённых структур, а комната
+    // раздаёт их башням по одной (см. цикл ниже): одна башня — один тайл —
+    // 800 хитов за тик, цели не дублируются. Проход по damagedStructures — та
+    // же работа, что и раньше, только чаще (замер в node: 6.3 мкс на 670
+    // структур, то есть ~0.03 мс/тик на 5 комнат), плюс бюджет действий
+    // ограничивает трату энергии башен и вместе с ней логистические задачи
+    // fillTowers (см. TOWER.REPAIR_ACTIONS_PER_TICK).
+    const damagedStructures = roomState.damagedStructures;
+    const capable = countRepairCapableTowers(towers);
+    const maxTargets =
+      capable < TOWER.REPAIR_ACTIONS_PER_TICK
+        ? capable
+        : TOWER.REPAIR_ACTIONS_PER_TICK;
+    const picked = [];
+    const pickedRatios = [];
+
+    if (maxTargets > 0) {
       for (let i = 0; i < damagedStructures.length; i++) {
         const s = damagedStructures[i];
+        const ratio = s.hits / s.hitsMax;
+
+        if (picked.length === maxTargets) {
+          // Список полон: подавляющее большинство структур отсекается здесь,
+          // без вставки (сравнение с худшей из выбранных).
+          if (ratio >= pickedRatios[maxTargets - 1]) continue;
+          picked.pop();
+          pickedRatios.pop();
+        }
+
+        // Вставка по возрастанию доли; элементов не больше бюджета (2).
+        let pos = picked.length;
+        while (pos > 0 && pickedRatios[pos - 1] > ratio) pos--;
+        picked.splice(pos, 0, s);
+        pickedRatios.splice(pos, 0, ratio);
+      }
+    }
+
+    // РАЗДАЧА ЦЕЛЕЙ: цель получает башня, которая её ДОСТАЁТ и ещё не занята.
+    // Без этой проверки слот тратится впустую: башня шлёт интент по тайлу вне
+    // TOWER_FALLOFF_RANGE (ERR_NOT_IN_RANGE, энергия не тратится, хиты не
+    // растут), а цель остаётся в списке и выбирается снова и снова — при
+    // бюджете в 2 действия это остановило бы весь ремонт комнаты.
+    const assigned = [];
+    const busy = [];
+    for (let i = 0; i < towers.length; i++) {
+      assigned.push(null);
+      busy.push(false);
+    }
+
+    for (let t = 0; t < picked.length; t++) {
+      const target = picked[t];
+      for (let i = 0; i < towers.length; i++) {
+        if (busy[i]) continue;
+        if (towers[i].store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) continue;
+        const towerPos = towers[i].pos;
+        const targetPos = target.pos;
         if (
-          weakestDamagedStructure === null ||
-          s.hits < weakestDamagedStructure.hits
+          Math.max(
+            Math.abs(towerPos.x - targetPos.x),
+            Math.abs(towerPos.y - targetPos.y),
+          ) <= TOWER_FALLOFF_RANGE
         ) {
-          weakestDamagedStructure = s;
+          busy[i] = true;
+          assigned[i] = target;
+          break;
         }
       }
-      roomData.damagedTarget = weakestDamagedStructure;
     }
+
+    roomData.repairTargets = assigned;
+    roomData.damagedTarget = picked.length > 0 ? picked[0] : null;
 
     // Пишем только при изменении: одно и то же значение каждый тик — лишний
     // нагрев Memory (её сериализация + парсинг в начале следующего тика).
@@ -334,9 +457,17 @@ function runTowerLogic(roomState) {
     if (roomMemory.underAttack !== underAttack) {
       roomMemory.underAttack = underAttack;
     }
+    // Флаг нужен roleTower: ремонт (особенно дорог — их теперь ремонтируют
+    // каждый тик) не должен высасывать энергию башен в бою, где она нужна на
+    // атаку и лечение. Атака/лечение в role.tower этот гейт игнорируют.
+    roomData.underAttack = underAttack;
 
-    for (const tower of towers) {
-      roleTower.run(tower, roomData);
+    // Каждой башне — СВОЯ цель этого тика (см. блок выше: раньше все башни били
+    // в одну структуру, и действие тратилось на уже добитый тайл). Целей ровно
+    // столько, сколько башен с достаточной энергией, поэтому они не дублируются.
+    const towerTargets = roomData.repairTargets;
+    for (let i = 0; i < towers.length; i++) {
+      roleTower.run(towers[i], roomData, towerTargets[i]);
     }
   });
 }

@@ -9,9 +9,13 @@ module.exports = {
    * в комнате это N_башен × N_врагов лишних проходов за тик.
    * @param {StructureTower} tower
    * @param {Object} roomData
-   *   { hostiles, healers, woundedCreep, wallTarget, damagedTarget }
+   *   { hostiles, healers, woundedCreep, wallTarget, damagedTarget,
+   *     repairTargets, underAttack }
+   * @param {Structure} [repairTarget] цель ремонта именно этой башни
+   *   (room.manager раздаёт цели из скана по одной на башню; без аргумента
+   *   используется общая roomData.damagedTarget — как было раньше)
    */
-  run: function (tower, roomData) {
+  run: function (tower, roomData, repairTarget) {
     if (!tower) return;
 
     // ── 1. АТАКА ─────────────────────────────────────────────────────────
@@ -66,25 +70,51 @@ module.exports = {
     }
 
     // ── 3. РЕМОНТ ────────────────────────────────────────────────────────
-    // Только раз в REPAIR_INTERVAL и при достаточном запасе энергии.
-    // Цели ремонта приходят готовыми: они посчитаны в том же тике
-    // (TOWER.WALL_SCAN_INTERVAL == TOWER.REPAIR_INTERVAL).
+    // Общий гейт по энергии для ОБЕИХ веток ремонта: и стены, и структуры
+    // ремонтируются только при запасе выше TOWER.REPAIR_ENERGY_MIN.
     if (tower.store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) return;
-    if (Game.time % TOWER.REPAIR_INTERVAL !== 0) return;
 
     const wallTarget = roomData.wallTarget;
 
-    // Ремонт стен и валов (самая слабая стена ниже порога)
-    if (wallTarget && tower.pos.inRangeTo(wallTarget, TOWER_FALLOFF_RANGE)) {
-      tower.repair(wallTarget);
-      return;
+    // Стены и валы — как раньше: одна цель на комнату и только в тик скана
+    // (TOWER.WALL_SCAN_INTERVAL == TOWER.REPAIR_INTERVAL). Ветка сохраняет
+    // приоритет стен и работает в том числе в бою: стену под атакой чинить надо.
+    if (Game.time % TOWER.REPAIR_INTERVAL === 0) {
+      // ВНИМАНИЕ: дальность башни — ГЛОБАЛЬНАЯ константа движка
+      // TOWER_FALLOFF_RANGE (в TOWER из constants.js её нет: TOWER.FALLOFF_RANGE
+      // === undefined, и интент не проходил бы проверку никогда).
+      if (wallTarget && tower.pos.inRangeTo(wallTarget, TOWER_FALLOFF_RANGE)) {
+        tower.repair(wallTarget);
+        return;
+      }
     }
 
-    // Ремонт повреждённых зданий. Проверяется и когда стена вне дальности
-    // башни: раньше такой тик целиком уходил в неудачный интент по стене.
-    const damagedTarget = roomData.damagedTarget;
+    // Структуры и ДОРОГИ — КАЖДЫЙ тик и по СВОЕЙ цели на башню (третий
+    // аргумент от room.manager.runTowerLogic; цели пересобираются каждый тик:
+    // у большинства повреждённых структур дефицит меньше 800 хитов, поэтому
+    // цель, выбранная раз в 15 тиков, добивалась за один интент и башня
+    // простаивала до следующего скана).
+    //
+    // ЧТО БЫЛО НЕ ТАК (разрушение дорог E35S37). Раньше на комнату была ОДНА
+    // цель `roomData.damagedTarget` и один интент ремонта за
+    // TOWER.REPAIR_INTERVAL = 15 тиков на башню: все башни били в один и тот же
+    // тайл (излишек над его дефицитом сгорал — действие башни стоит
+    // TOWER_ENERGY_COST независимо от числа реально восстановленных хитов), а
+    // остальные повреждённые тайлы ждали очереди. При сотнях дорожных тайлов
+    // оборот очереди доходил до тысяч тиков, и дорога разрушалась раньше, чем до
+    // неё доходили башни: ёмкости (800 хитов за действие) хватало — не хватало
+    // РАСПРЕДЕЛЕНИЯ и ЧАСТОТЫ. Теперь ремонт идёт каждый тик, у каждой башни
+    // свой тайл, а проверка hits < hitsMax не даёт тратить действие на уже
+    // полную структуру (цель могла быть добита другой башней между сканами).
+    //
+    // В БОЮ ВЕТКА ОТКЛЮЧЕНА (roomData.underAttack): энергия башен нужна на атаку
+    // и лечение, а ремонт дорог/зданий иначе высасывал бы её каждый тик.
+    if (roomData.underAttack) return;
+
+    const damagedTarget = repairTarget || roomData.damagedTarget;
     if (
       damagedTarget &&
+      damagedTarget.hits < damagedTarget.hitsMax &&
       tower.pos.inRangeTo(damagedTarget, TOWER_FALLOFF_RANGE)
     ) {
       tower.repair(damagedTarget);
