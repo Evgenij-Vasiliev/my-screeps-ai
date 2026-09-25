@@ -4,6 +4,11 @@
 // @ts-ignore
 const { ScreepsAPI } = require("screeps-api");
 const { requireToken } = require("./screeps.token");
+const {
+  collectModules,
+  buildModules,
+  findUnresolvedRequires,
+} = require("./scripts/deploy.modules");
 
 // ── Выгрузка кода ────────────────────────────────────────────────────────
 // Почему не grunt-screeps: он берёт ИМЯ МОДУЛЯ из basename файла, поэтому
@@ -13,14 +18,13 @@ const { requireToken } = require("./screeps.token");
 // смысл разбиения constants/* теряется. Выгружаем сами через screeps-api
 // (он уже в зависимостях) и сохраняем путь файла без расширения как имя
 // модуля — так же, как это делает require на шарде.
+//
+// ВАЖНО: require на шарде НЕ разрешает относительные пути — движок лишь
+// отбрасывает ведущий "./" и ищет имя от корня. Поэтому из constants/* сосед
+// по папке находится только по корневому имени ("constants/logistics"), и
+// scripts/deploy.modules.js переводит такие спецификаторы при выгрузке.
+// Подробности и разбор живого падения — в шапке этого модуля.
 const BRANCH = "test";
-const SRC = [
-  "*.js",
-  "constants/*.js",
-  // Служебные файлы: Gruntfile и модуль чтения токена на сервере не нужны.
-  "!Gruntfile.js",
-  "!screeps.token.js",
-];
 
 module.exports = function (grunt) {
   grunt.registerTask(
@@ -29,12 +33,24 @@ module.exports = function (grunt) {
     function () {
       const done = this.async();
 
-      const modules = {};
-      for (const file of grunt.file.expand(SRC)) {
-        modules[file.replace(/\.js$/, "")] = grunt.file.read(file);
-      }
+      const modules = buildModules(collectModules(__dirname));
       if (Object.keys(modules).length === 0) {
         grunt.log.error("Не найдено ни одного файла для выгрузки.");
+        done(false);
+        return;
+      }
+
+      // Страховка от "Unknown module '…'" на шарде: каждый require("<литерал>")
+      // в том, что уедет, обязан указывать на выгружаемое имя модуля по
+      // правилам движка. Лучше упасть здесь, чем на живом шарде.
+      const problems = findUnresolvedRequires(modules);
+      if (problems.length > 0) {
+        grunt.log.error("Неразрешимые require — выгрузка отменена:");
+        for (const { module, spec, target } of problems) {
+          grunt.log.error(
+            `  ${module}: require("${spec}") → модуль "${target}" не выгружается`,
+          );
+        }
         done(false);
         return;
       }

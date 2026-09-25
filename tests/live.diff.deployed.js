@@ -1,9 +1,15 @@
 "use strict";
 /**
- * Что реально лежит на шарде в ветке `test` и чем это отличается от локальных
- * файлов рабочей копии. Нужен перед `npx grunt screeps`: деплой публикует ВСЕ
- * *.js из корня и constants/*.js, в том числе незакоммиченные правки, и полезно
- * видеть, что именно уедет (docs/REMOTE-BORDER-PING-PONG.md, раздел про деплой).
+ * Что реально лежит на шарде в ветке `test` и чем это отличается от того, что
+ * уедет из рабочей копии. Нужен перед `npx grunt screeps`: деплой публикует
+ * ВСЕ *.js из корня и constants/*.js, в том числе незакоммиченные правки, и
+ * полезно видеть, что именно уедет.
+ *
+ * Сравнивается не сырой локальный файл, а результат сборки выгрузки
+ * (scripts/deploy.modules.js): она переводит относительные require файлов из
+ * constants/* в корневые имена, потому что require на шарде НЕ разрешает
+ * относительные пути (см. шапку модуля). Без этого constants/spawn.js и
+ * constants/powerSpawn.js всегда висели бы в «отличаются от шарда».
  *
  * Имена модулей на шарде — это путь файла без расширения (constants/market),
  * поэтому сравнение идёт по относительному пути, а не по basename.
@@ -12,12 +18,14 @@
  * Запуск: node tests/live.diff.deployed.js
  */
 
-const fs = require("fs");
+const path = require("path");
 const { ScreepsAPI } = require("screeps-api");
 const { resolveToken } = require("../screeps.token");
+const { collectModules, buildModules } = require("../scripts/deploy.modules");
 
 const TOKEN = resolveToken();
 const BRANCH = process.env.BRANCH || "test";
+const ROOT = path.join(__dirname, "..");
 
 const api = new ScreepsAPI({ token: TOKEN });
 const norm = s => s.replace(/\r\n/g, "\n").replace(/\s+$/, "");
@@ -26,32 +34,27 @@ const norm = s => s.replace(/\r\n/g, "\n").replace(/\s+$/, "");
   const code = await api.raw.user.code.get(BRANCH);
   const modules = code.modules || {};
 
+  const local = buildModules(collectModules(ROOT));
+
   const same = [];
   const diffs = [];
   const onlyDeployed = [];
 
   for (const [name, src] of Object.entries(modules)) {
-    const file = `${name}.js`;
-    if (!fs.existsSync(file)) {
-      onlyDeployed.push(file);
+    if (!(name in local)) {
+      onlyDeployed.push(`${name}.js`);
       continue;
     }
-    const local = fs.readFileSync(file, "utf8");
-    if (norm(local) === norm(src)) same.push(file);
-    else diffs.push(`${file} (на шарде ${src.length}, локально ${local.length} симв.)`);
+    if (norm(local[name]) === norm(src)) same.push(`${name}.js`);
+    else
+      diffs.push(
+        `${name}.js (на шарде ${src.length}, уедет ${local[name].length} симв.)`,
+      );
   }
 
-  // Локальные модули: корень + constants/ (см. Gruntfile SRC). Имя модуля —
-  // путь без .js, поэтому constants/labs.js сравнивается с модулем
-  // "constants/labs", а не с "labs".
-  const localFiles = [
-    ...fs.readdirSync("."),
-    ...fs.readdirSync("constants").map(f => `constants/${f}`),
-  ].filter(
-    f =>
-      f.endsWith(".js") && f !== "Gruntfile.js" && f !== "screeps.token.js",
-  );
-  const onlyLocal = localFiles.filter(f => !(f.slice(0, -3) in modules));
+  const onlyLocal = Object.keys(local)
+    .filter(name => !(name in modules))
+    .map(name => `${name}.js`);
 
   console.log(`Ветка ${BRANCH}: модулей ${Object.keys(modules).length}`);
   console.log(`\nОТЛИЧАЮТСЯ от шарда (уедут при деплое):\n  ${diffs.join("\n  ") || "нет"}`);
