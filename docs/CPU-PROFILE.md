@@ -4,8 +4,17 @@
 (секция `CPU`) — только чтение. Профиль `Memory.cpuStats.profile` — скользящее
 окно `samples` тиков; «мс/тик» = `sum / count` по бакету.
 
+> **Важно при сравнении (2026-09-24).** В снимке ниже бакеты-РОЛИ (`miner`,
+> `labWorker`, `worker`, `linkWorker`, `mineralMiner`) и подсистемы лежат в одном
+> окне `Memory.cpuStats.profile.blocks` — тогда роли замерялись всегда. С
+> 2026-09-24 ролевой замер opt-in (`Memory.cpuMonitorRoles = true`) и пишется в
+> `Memory.cpuStats.roles`, а в `profile.blocks` остаются только подсистемы и
+> комнаты. Чтобы сравнить с этой базой, включите флаг и смотрите оба окна
+> (`node tests/live.cpu.profile.js` печатает и то, и другое).
+
 **Как перемерить:** `node tests/live.tower.coverage.js` → секция `CPU`.
-**Как сбросить окно:** `delete Memory.cpuStats.profile` (см. `cpuMonitor.js`).
+**Как сбросить окно:** `delete Memory.cpuStats.profile` (подсистемы) и
+`delete Memory.cpuStats.roles` (роли) — см. `cpuMonitor.js`.
 
 ## Снимок 1 — tick ~83184217 (окно 1200 тиков, старт 83175900)
 

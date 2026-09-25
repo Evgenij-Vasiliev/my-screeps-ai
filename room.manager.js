@@ -87,6 +87,11 @@ function runCreepLogic(roomState) {
     // ВАЖНО (ТЗ №0): бакет роли "worker" — это и есть выполнение Task System
     // (worker.runner: выбор задачи из FIFO Memory.rooms[].tasks + executor).
     // Отдельного бакета ему не нужно — имя бакета совпадает с ролью.
+    //
+    // Третий аргумент trackRole (isRole = true) — ролевой замер: он opt-in
+    // (Memory.cpuMonitorRoles) и при выключенном флаге не вызывает
+    // Game.cpu.getUsed вовсе. Явный признак нужен именно здесь: по имени
+    // "worker" роль не отличить от подсистемы (см. cpuMonitor.isSubsystemBlock).
     let boosting = false;
     cpuMonitor.trackRole("boostManager", () => {
       try {
@@ -99,15 +104,19 @@ function runCreepLogic(roomState) {
     });
     if (boosting) continue;
 
-    cpuMonitor.trackRole(creep.memory.role, () => {
-      try {
-        roleModule.run(creep, roomState);
-      } catch (e) {
-        console.log(
-          `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
-        );
-      }
-    });
+    cpuMonitor.trackRole(
+      creep.memory.role,
+      () => {
+        try {
+          roleModule.run(creep, roomState);
+        } catch (e) {
+          console.log(
+            `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
+          );
+        }
+      },
+      true,
+    );
   }
 }
 

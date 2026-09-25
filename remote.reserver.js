@@ -11,7 +11,7 @@
  * Максимум резервации: 5000 тиков.
  *
  * Целевую комнату назначает remote.manager (assignTargetRoom) — единая точка
- * назначения для всех дальних ролей; список комнат — constants.REMOTE.ROOMS.
+ * назначения для всех дальних ролей; список комнат — Memory.empire.remoteRooms.
  *
  * Память крипа (creep.memory):
  * - targetRoom {string} — целевая комната

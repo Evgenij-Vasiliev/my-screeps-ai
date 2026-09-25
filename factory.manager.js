@@ -25,7 +25,7 @@
  * продаж решает market.manager (battery входит в MARKET.SELL_RESOURCES), а не
  * эта подсистема.
  */
-const { FACTORY, STORAGE } = require("./constants");
+const { FACTORY } = require("./constants");
 
 /**
  * Рецепт, который фабрика варит сейчас.
@@ -75,7 +75,7 @@ function isEnergySupplyComplete(factory) {
  * @param {Object} roomState
  */
 function run(roomState) {
-  const { factory, storage, roomName } = roomState;
+  const { factory, roomName } = roomState;
 
   if (!factory) return;
 
@@ -99,14 +99,15 @@ function run(roomState) {
     return;
   }
 
-  // Энергию фабрика имеет право брать только из излишка storage — тот же
-  // порог, что у генератора задач fillFactoryEnergy (FACTORY.ENERGY_RESERVE_
-  // MULTIPLIER), иначе она съест резерв комнаты.
-  if (storage) {
-    const reserve = STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
-    if (storage.store[RESOURCE_ENERGY] <= reserve) return;
-  }
-
+  // ГЕЙТА СКЛАДА ЗДЕСЬ НЕТ НАМЕРЕННО. produce() расходует энергию, УЖЕ лежащую
+  // в store фабрики, а не со склада, поэтому проверка `storage > reserve` ничего
+  // не защищала: она лишь запирала доставленную энергию, пока склад не поднимется
+  // выше порога. Живой случай (24.09.2026, docs/INCOME-AND-PREEMPTION-CHECK.md):
+  // E37S38 держала 40 731 энергии и не варила 956 тиков, потому что склад стоял
+  // на 164 361–164 898 ≤ 165 000. Резерв склада защищают ДРУГИЕ места: генератор
+  // generateFillFactoryEnergy не создаёт задачу выше порога, а
+  // energySource.withdrawFromStorage не даёт опустить склад ниже
+  // STORAGE.ENERGY_MIN.
   const result = factory.produce(FACTORY.ACTIVE_RECIPE);
   if (result !== OK) {
     console.log(
@@ -115,4 +116,33 @@ function run(roomState) {
   }
 }
 
-module.exports = { run, isEnergySupplyComplete };
+/**
+ * Ресурсы, которые фабрика обязана отдать в storage: продукт активного рецепта
+ * (battery) и «чужие» ресурсы — всё, что не компонент рецепта и не продукт.
+ *
+ * Зачем чужие. Живой случай (24.09.2026): в фабрике E35S39 лежало 8850 H. Они
+ * занимают место, производству не нужны, а для H это ещё и замороженные
+ * кредиты — рынок покупал H, пока свой стоял мёртвым грузом. Вывозит их та же
+ * задача `collectFactoryBattery`, что и продукт: identity Task включает
+ * resourceType, поэтому задачи на battery и на H не конфликтуют.
+ * @param {Object} factory
+ * @returns {string[]}
+ */
+function collectableResources(factory) {
+  const recipe = getActiveRecipe();
+  if (!recipe) return [];
+
+  const product = FACTORY.ACTIVE_RECIPE;
+  const out = [];
+  if ((factory.store[product] || 0) > 0) out.push(product);
+
+  for (const resourceType in factory.store) {
+    if ((factory.store[resourceType] || 0) <= 0) continue;
+    if (resourceType === product) continue;
+    if (recipe.components[resourceType]) continue;
+    out.push(resourceType);
+  }
+  return out;
+}
+
+module.exports = { run, isEnergySupplyComplete, collectableResources };

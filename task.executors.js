@@ -232,24 +232,36 @@ function executeFillFactoryEnergy(creep, task) {
       return "SKIP";
   }
 }
-function isValidBatteryTask(task) {
+/**
+ * Задача вывоза из фабрики: продукт (battery) или «чужой» ресурс. Ресурс
+ * конкретной задачи лежит в `task.resourceType`, поэтому валидатор не привязан
+ * к battery — иначе посторонний ресурс (живой случай: 8850 H в E35S39) было бы
+ * нечем вывезти.
+ * @param {Object} task
+ * @returns {boolean}
+ */
+function isValidFactoryCollectTask(task) {
   return (
     !!task &&
     task.type === "transfer" &&
     !!task.sourceId &&
     !!task.targetId &&
-    task.resourceType === RESOURCE_BATTERY
+    typeof task.resourceType === "string" &&
+    task.resourceType.length > 0
   );
 }
 
 function executeCollectFactoryBattery(creep, task) {
   // См. комментарий в executeFillFactoryEnergy: флаг авторитетен и для
-  // исполнителя, иначе вывоз батареек продолжится из уже стоящих задач.
+  // исполнителя, иначе вывоз продолжится из уже стоящих задач.
   if (!TASK_CONFIG.collectFactoryBattery) return "SKIP";
 
-  if (!isValidBatteryTask(task)) {
+  if (!isValidFactoryCollectTask(task)) {
     return "SKIP";
   }
+
+  // Ресурс рейса: battery (продукт) либо чужой ресурс фабрики.
+  const resourceType = task.resourceType;
 
   const source = Game.getObjectById(task.sourceId);
   const target = Game.getObjectById(task.targetId);
@@ -263,18 +275,18 @@ function executeCollectFactoryBattery(creep, task) {
   }
 
   // Переключение фазы — читаем store в начале тика, до собственных действий
-  if (!creep.memory.working && creep.store[RESOURCE_BATTERY] > 0) {
+  if (!creep.memory.working && creep.store[resourceType] > 0) {
     creep.memory.working = true;
-  } else if (creep.memory.working && creep.store[RESOURCE_BATTERY] === 0) {
+  } else if (creep.memory.working && creep.store[resourceType] === 0) {
     delete creep.memory.working;
     return "DONE";
   }
 
   if (!creep.memory.working) {
-    // Фаза сбора батареек с фабрики
-    if (source.store[RESOURCE_BATTERY] === 0) {
+    // Фаза сбора ресурса с фабрики
+    if ((source.store[resourceType] || 0) === 0) {
       delete creep.memory.working;
-      return "DONE"; // условие 1: батареек на фабрике больше нет
+      return "DONE"; // условие 1: ресурса на фабрике больше нет
     }
 
     if (creep.store.getFreeCapacity() === 0) {
@@ -282,7 +294,7 @@ function executeCollectFactoryBattery(creep, task) {
       return "DONE"; // условие 3: рюкзак уже полон (защитный случай)
     }
 
-    const result = creep.withdraw(source, RESOURCE_BATTERY);
+    const result = creep.withdraw(source, resourceType);
 
     if (result === ERR_NOT_IN_RANGE) {
       creep.travelTo(source);
@@ -298,7 +310,7 @@ function executeCollectFactoryBattery(creep, task) {
   }
 
   // Фаза доставки в storage
-  const result = creep.transfer(target, RESOURCE_BATTERY);
+  const result = creep.transfer(target, resourceType);
 
   switch (result) {
     case OK:

@@ -70,6 +70,25 @@ declare global {
     boostSince?: number;
   }
 
+  // ── Состояние шарда в Memory (shard.state.js) ──────────────────────────
+  // Рантайм-источник правды для комнат/линков/маршрутов/точки сбора. Значения
+  // по умолчанию — constants.REMOTE и constants.EMPIRE; ensure() заполняет
+  // только отсутствующие ключи и не перезаписывает правки владельца.
+  interface EmpireState {
+    version?: number;
+    homeRoom?: string;
+    remoteRooms?: string[];
+    remoteLinks?: Record<string, string>;
+    remoteContainerPos?: Record<string, { x: number; y: number }>;
+    remoteRouteTicks?: Record<string, Record<string, number>>;
+    observerScanRooms?: string[];
+    highRiskRooms?: string[];
+    remoteScanRooms?: string[];
+    rally?: { room: string; x: number; y: number };
+    // Ведёт Traveler (traveler.js) — не конфиг shard.state.
+    hostileRooms?: Record<string, number>;
+  }
+
   interface Memory {
     _taskIdSeq?: number;
     remoteRoleCache?: any;
@@ -78,7 +97,30 @@ declare global {
     reserverConfig?: any;
     towerState?: Record<string, any>;
     cpuMonitorEnabled?: boolean;
-    cpuStats?: { total: number; count: number; average: number };
+    // Ролевой замер CPU — opt-in (cpuMonitor.js): undefined/false — роли не
+    // замеряются вовсе (значение по умолчанию из CPU.ROLE_ENABLED).
+    cpuMonitorRoles?: boolean;
+    cpuStats?: {
+      total: number;
+      count: number;
+      average: number;
+      // Замеры по подсистемам и комнатам (cpuMonitor.reportProfile), окно до
+      // CPU.PROFILE_MAX_SAMPLES замерных тиков.
+      profile?: {
+        startTick: number;
+        samples: number;
+        blocks: Record<string, { sum: number; max: number; count: number }>;
+        rooms: Record<string, { sum: number; max: number; count: number }>;
+      };
+      // Замеры по ролям (cpuMonitor.reportRoles) — отдельное окно до
+      // CPU.ROLE_MAX_SAMPLES замерных тиков, пишется только при включённом
+      // Memory.cpuMonitorRoles.
+      roles?: {
+        startTick: number;
+        samples: number;
+        roles: Record<string, { sum: number; max: number; count: number }>;
+      };
+    };
     rallyOverride?: any;
     attackAlert?: { room: string; time: number };
     // Диагностика бустирования (boost.manager.mark) — по комнате строка
@@ -111,6 +153,8 @@ declare global {
     // Диагностика автозакупки лаб: ресурсы, признанные дефицитом на последнем
     // запуске рынка, строками "РЕСУРС:запас/порог". Пишется только при дефиците.
     __labImport?: { t: number; need: string[] };
+    // Состояние шарда (shard.state.js): комнаты, линки, маршруты, точка сбора.
+    empire?: EmpireState;
   }
 
   interface _HasId {

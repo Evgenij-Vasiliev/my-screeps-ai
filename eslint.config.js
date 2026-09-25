@@ -11,6 +11,7 @@ module.exports = [
         // Глобалы движка, которых нет в eslint-config-screeps (аудит, п. 39):
         // без них eslint выдавал 12 ложных no-undef на валидном API.
         RESOURCE_BATTERY: "readonly",
+        RESOURCE_H: "readonly",
         STRUCTURE_FACTORY: "readonly",
         STRUCTURE_INVADER_CORE: "readonly",
       },

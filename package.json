@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/run-all.js"
   },
   "keywords": [],
   "author": "",
@@ -16,8 +16,8 @@
     "eslint": "^10.10.0",
     "eslint-config-screeps": "^1.1.1",
     "globals": "^17.12.0",
-    "grunt-screeps": "^1.5.0",
-    "typescript": "5.7"
+    "typescript": "5.7",
+    "grunt": "^1.6.1"
   },
   "dependencies": {
     "screeps-api": "^1.16.1"

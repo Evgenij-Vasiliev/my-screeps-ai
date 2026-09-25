@@ -10,6 +10,8 @@ const cpuMonitor = require("cpuMonitor");
 const terminalNetwork = require("terminalNetwork");
 const defenseManager = require("defense.manager");
 const remoteManager = require("remote.manager");
+const shardState = require("./shard.state");
+const { CPU } = require("./constants");
 
 // ── ИНИЦИАЛИЗАЦИЯ ГЛОБАЛЬНЫХ КЭШЕВ (heap) ─────────────────────────────────
 // Все кэши живут в global (не сериализуются в Memory, переживают тик).
@@ -51,7 +53,34 @@ module.exports.run = function () {
   // 2. Инициализация глобальных кэшей (самопосборка после Global Reset)
   initGlobalCaches();
 
-  // 3. Уровень комнат — вся комнатная логика внутри roomManager
+  // 2.5. Состояние шарда в Memory (аудит п. 10 / задача 12): комнаты, ID
+  // линков, клетки контейнеров, маршруты, обход обсервера, комнаты риска и
+  // точка сбора. ensure() заполняет только ОТСУТСТВУЮЩИЕ ключи текущими
+  // значениями из constants, поэтому правки владельца в Memory не затираются,
+  // а первый тик после Global Reset восстанавливает прежнее поведение.
+  try {
+    shardState.ensure();
+  } catch (error) {
+    console.log(`[shardState.ensure] Ошибка: ${error.message}`);
+    console.log(error.stack);
+  }
+
+  // 3. Гейт по bucket: при критически низком запасе CPU необязательные
+  // подсистемы (разведка, межкомнатная логистика, рынок) в этом тике не
+  // запускаются. Их работу можно отложить, а ядро (комнаты, оборона,
+  // ремоут) обязано отработать: иначе скрипт упрётся в CPU-лимит движка,
+  // итерация оборвётся, а bucket просядет ещё глубже. Порог — существующая
+  // константа CPU.BUCKET_CRITICAL (constants.js), по ней же cpuMonitor
+  // помечает bucket как критичный.
+  const bucketLow = Game.cpu.bucket < CPU.BUCKET_CRITICAL;
+  if (bucketLow && Game.time % CPU.REPORT_INTERVAL === 0) {
+    console.log(
+      `[empire] bucket ${Game.cpu.bucket} < ${CPU.BUCKET_CRITICAL}: ` +
+        "пропущены observerManager, terminalNetwork, marketManager",
+    );
+  }
+
+  // 4. Уровень комнат — вся комнатная логика внутри roomManager
   try {
     cpuMonitor.trackRole("roomManager", () => roomManager.run());
   } catch (error) {
@@ -59,15 +88,17 @@ module.exports.run = function () {
     console.log(error.stack);
   }
 
-  // 4. Разведка
-  try {
-    cpuMonitor.trackRole("observerManager", () => observerManager.run());
-  } catch (error) {
-    console.log(`[observerManager] Ошибка: ${error.message}`);
-    console.log(error.stack);
+  // 5. Разведка (необязательная подсистема: пропуск при критичном bucket)
+  if (!bucketLow) {
+    try {
+      cpuMonitor.trackRole("observerManager", () => observerManager.run());
+    } catch (error) {
+      console.log(`[observerManager] Ошибка: ${error.message}`);
+      console.log(error.stack);
+    }
   }
 
-  // 4. Оборона — защита ремоут-комнат
+  // 6. Оборона — защита ремоут-комнат
   try {
     cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
   } catch (error) {
@@ -75,7 +106,7 @@ module.exports.run = function () {
     console.log(error.stack);
   }
 
-  // 5. Дальняя добыча — резервер / дальний майнер / дальний хайлер
+  // 7. Дальняя добыча — резервер / дальний майнер / дальний хайлер
   try {
     cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
   } catch (error) {
@@ -83,20 +114,26 @@ module.exports.run = function () {
     console.log(error.stack);
   }
 
-  // 6. TerminalNetwork — межкомнатная балансировка ресурсов
-  try {
-    cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
-  } catch (error) {
-    console.log(`[terminalNetwork] Ошибка: ${error.message}`);
-    console.log(error.stack);
+  // 8. TerminalNetwork — межкомнатная балансировка ресурсов
+  // (необязательная подсистема: пропуск при критичном bucket)
+  if (!bucketLow) {
+    try {
+      cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+    } catch (error) {
+      console.log(`[terminalNetwork] Ошибка: ${error.message}`);
+      console.log(error.stack);
+    }
   }
 
-  // 7. Рынок империального уровня
-  try {
-    cpuMonitor.trackRole("marketManager", () => marketManager.run());
-  } catch (error) {
-    console.log(`[marketManager] Ошибка: ${error.message}`);
-    console.log(error.stack);
+  // 9. Рынок империального уровня
+  // (необязательная подсистема: пропуск при критичном bucket)
+  if (!bucketLow) {
+    try {
+      cpuMonitor.trackRole("marketManager", () => marketManager.run());
+    } catch (error) {
+      console.log(`[marketManager] Ошибка: ${error.message}`);
+      console.log(error.stack);
+    }
   }
 
   try {

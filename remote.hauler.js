@@ -9,8 +9,8 @@
  *   Удалённая комната → контейнер → рюкзак полон
  *   → идём в HOME_ROOM → передаём в линк у границы → повтор
  *
- * Комнаты и привязка линков — в constants.REMOTE (ROOMS / HOME_ROOM /
- * ROOM_TO_LINK), чтобы не было второго списка комнат в коде.
+ * Комнаты и привязка линков — в Memory.empire (shard.state.js): remoteRooms /
+ * homeRoom / remoteLinks, с текущими значениями constants.REMOTE как defaults.
  *
  * Переход между комнатами (правка 18.09.2026, docs/REMOTE-BORDER-PING-PONG.md):
  *  - цель рейса (линк/storage при доставке, контейнер/источник при сборе)
@@ -32,6 +32,7 @@
  *    (структуры и дропнутые ресурсы) шли на каждом тике ожидания.
  */
 const { REMOTE } = require("./constants");
+const shardState = require("./shard.state");
 const { roomScopedTarget } = require("./remote.targets");
 
 // Room-зависимые цели хайлера: всё, что он помнит об удалённой комнате.
@@ -94,7 +95,34 @@ function knownHaulTarget(creep, targetRoom) {
 }
 
 /**
- * Цель доставки в HOME_ROOM: линк у границы (REMOTE.ROOM_TO_LINK), иначе
+ * Линк-приёмник удалённой комнаты из Memory.empire.remoteLinks.
+ *
+ * Невалидный ID (линк снесли/перестроили) — ОДИН явный лог вместо тихого
+ * фолбэка: раньше перестройка линка молча уводила хайлера на storage, и это
+ * выглядело как «хайлер почему-то не пользуется линком».
+ *
+ * @param {string} targetRoom
+ * @returns {any} линк или null
+ */
+function configuredLink(targetRoom) {
+  const linkId = shardState.remoteLink(targetRoom);
+  if (!linkId) return null;
+
+  const link = Game.getObjectById(linkId);
+  if (!link) {
+    shardState.warnOnce(
+      `remoteLink:${targetRoom}:${linkId}`,
+      `[remote.hauler] линк-приёмник ${linkId} комнаты ${targetRoom} не найден — ` +
+        "хайлер везёт в storage; поправьте Memory.empire.remoteLinks",
+    );
+    return null;
+  }
+
+  return link;
+}
+
+/**
+ * Цель доставки в HOME_ROOM: линк у границы (Memory.empire.remoteLinks), иначе
  * storage. Идём к ней напрямую с самого начала рейса — по той же причине,
  * что и в knownHaulTarget.
  *
@@ -102,18 +130,17 @@ function knownHaulTarget(creep, targetRoom) {
  * @returns {any} линк, storage или null
  */
 function knownDeliverTarget(targetRoom) {
-  const linkId = REMOTE.ROOM_TO_LINK[targetRoom];
-  const link = linkId ? Game.getObjectById(linkId) : null;
+  const link = configuredLink(targetRoom);
 
   if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) return link;
 
-  const home = Game.rooms[REMOTE.HOME_ROOM];
+  const home = Game.rooms[shardState.homeRoom()];
   return home ? home.storage : null;
 }
 
 module.exports = {
   run: function (creep) {
-    const HOME_ROOM = REMOTE.HOME_ROOM;
+    const HOME_ROOM = shardState.homeRoom();
 
     // Целевую комнату назначает ТОЛЬКО remote.manager (assignTargetRoom) —
     // единая точка назначения для всех дальних ролей. Пока свободной комнаты
@@ -167,8 +194,7 @@ module.exports = {
 
     if (creep.memory.working) {
       // === РЕЖИМ ДОСТАВКИ: несём в линк у границы ===
-      const linkId = REMOTE.ROOM_TO_LINK[targetRoom];
-      const link = linkId ? Game.getObjectById(linkId) : null;
+      const link = configuredLink(targetRoom);
 
       if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
         // Есть линк и в нём есть место — идём к нему. Действие вызываем

@@ -9,11 +9,7 @@
  */
 const attacker = require("defense.attacker");
 const { isCombatHostile, getHostiles } = require("threat");
-// Комнаты повышенного риска — проверяются первыми
-const HIGH_RISK_ROOMS = ["E36S37", "E35S38"];
-
-// Комнаты дальней добычи, которые нужно проверять на угрозы
-const REMOTE_SCAN_ROOMS = ["E36S37", "E35S38"];
+const shardState = require("./shard.state");
 
 // Как часто (тиков) обновлять в комнате список вражеских крипов и ядро.
 const DEFENSE_CACHE_TTL = 25;
@@ -24,13 +20,18 @@ const ATTACK_ALERT_TTL = 50;
 
 module.exports = {
   run: function () {
+    // Комнаты риска и список удалённых комнат — из состояния шарда
+    // (Memory.empire, defaults constants.EMPIRE).
+    const highRiskRooms = shardState.highRiskRooms();
+    const remoteScanRooms = shardState.remoteScanRooms();
+
     // Свои комнаты
     const ourRooms = Object.values(Game.rooms).filter(
       r => r.controller && r.controller.my,
     );
 
     // Видимые ремоут-комнаты (видимость есть, только если там наш крип)
-    const remoteRooms = REMOTE_SCAN_ROOMS.map(name => Game.rooms[name]).filter(
+    const remoteRooms = remoteScanRooms.map(name => Game.rooms[name]).filter(
       Boolean,
     );
 
@@ -42,8 +43,8 @@ module.exports = {
 
     // Комнаты повышенного риска проверяем первыми
     const sorted = allRooms.sort((a, b) => {
-      const aRisk = HIGH_RISK_ROOMS.includes(a.name) ? 0 : 1;
-      const bRisk = HIGH_RISK_ROOMS.includes(b.name) ? 0 : 1;
+      const aRisk = highRiskRooms.includes(a.name) ? 0 : 1;
+      const bRisk = highRiskRooms.includes(b.name) ? 0 : 1;
       return aRisk - bRisk;
     });
 

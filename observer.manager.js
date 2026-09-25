@@ -4,10 +4,10 @@
  * РАЗВЕДКА: обсервер по очереди смотрит удалённые комнаты.
  *
  * Зачем это нужно (не «слепое» использование): зрение удалённой комнаты живёт
- * один тик, а defense.manager проверяет угрозы в E36S37/E35S38 через
- * Game.rooms[name] (defense.manager.js: REMOTE_SCAN_ROOMS). Без observeRoom эти
+ * один тик, а defense.manager проверяет угрозы в комнатах
+ * Memory.empire.remoteScanRooms через Game.rooms[name]. Без observeRoom эти
  * комнаты видны только когда там стоит наш крип, поэтому обход по кругу
- * (ROOMS[Game.time % ROOMS.length]) оставлен как есть — менять его частоту
+ * (observerScanRooms[Game.time % length]) оставлен как есть — менять его частоту
  * значило бы резать покрытие обнаружения угроз.
  *
  * ЧТО ОПТИМИЗИРОВАНО (CPU). Прежняя реализация каждый тик строила
@@ -29,8 +29,7 @@
  */
 
 const scanner = require("./scanner");
-
-const ROOMS = ["E36S37", "E35S38"];
+const shardState = require("./shard.state");
 
 /**
  * Обсервер из кэша структур комнат (без обхода Game.structures).
@@ -67,7 +66,14 @@ module.exports = {
     const observer = findObserver();
     if (!observer) return;
 
-    const roomName = ROOMS[Game.time % ROOMS.length];
+    // Комнаты обхода — из состояния шарда (Memory.empire.observerScanRooms,
+    // default constants.EMPIRE.OBSERVER_SCAN_ROOMS). Пустой список = разведка
+    // выключена владельцем; деление по модулю на ноль недопустимо.
+    const rooms = shardState.observerScanRooms();
+    if (rooms.length === 0) return;
+
+    const roomName = rooms[Game.time % rooms.length];
+    if (!roomName) return;
 
     /** @type {any} */ (observer).observeRoom(roomName);
   },

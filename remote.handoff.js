@@ -44,7 +44,21 @@
  * ===================================
  */
 
-const { REMOTE, PRESPAWN_THRESHOLD } = require("./constants");
+const { REMOTE } = require("./constants");
+const shardState = require("./shard.state");
+
+/**
+ * Порог пре-спавна роли. Для дальних ролей он считается от НАСТРОЙКИ в Memory
+ * (shard.state.preSpawnThreshold: список комнат + маршруты + запас), для
+ * остальных — плоская константа PRESPAWN_THRESHOLD. Раньше здесь стоял
+ * constants.PRESPAWN_THRESHOLD[role], и правка списка комнат в Memory не
+ * меняла порог.
+ * @param {string} role
+ * @returns {number|undefined}
+ */
+function thresholdOf(role) {
+  return shardState.preSpawnThreshold(role);
+}
 
 /**
  * Сколько тиков запись handoffTo может указывать на крипа, которого ещё нет
@@ -54,7 +68,7 @@ const { REMOTE, PRESPAWN_THRESHOLD } = require("./constants");
  * @returns {number}
  */
 function pendingTtl(role) {
-  const threshold = PRESPAWN_THRESHOLD[role] || 0;
+  const threshold = thresholdOf(role) || 0;
   return threshold * 2;
 }
 
@@ -110,7 +124,7 @@ function hasPendingSuccessor(creep, maxPendingAge) {
  * @returns {Object[]}
  */
 function preSpawnCandidates(creeps, role) {
-  const threshold = PRESPAWN_THRESHOLD[role];
+  const threshold = thresholdOf(role);
   const maxPendingAge = pendingTtl(role);
   const candidates = [];
 
@@ -197,7 +211,7 @@ function bindHandoff(leaving, successorName) {
  * @returns {{pairs: {leaving: Object, successor: Object}[], unpaired: Object[]}}
  */
 function activePairs(role, creeps) {
-  const threshold = PRESPAWN_THRESHOLD[role];
+  const threshold = thresholdOf(role);
   const pairs = [];
   const unpaired = [];
 

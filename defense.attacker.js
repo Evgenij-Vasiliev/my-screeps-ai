@@ -11,17 +11,14 @@
  *    - Отправить в комнату: Memory.rallyOverride = "E36S37"
  *    - Сбросить (вернуть на базу): delete Memory.rallyOverride
  *
- * Точка сбора в мирное время: (39, 45) в E35S37
+ * Точка сбора в мирное время: Memory.empire.rally (default (39, 45) в E35S37)
  *
  * Автоматическая тревога через roomManager:
  *    Memory.attackAlert = { room: "E36S37", time: Game.time }
  * ===================================================
  */
 
-// Точка сбора в мирное время
-const RALLY_ROOM = "E35S37";
-const RALLY_X = 39;
-const RALLY_Y = 45;
+const shardState = require("./shard.state");
 
 module.exports = {
   run: function (creep) {
@@ -121,18 +118,20 @@ module.exports = {
   },
 
   /**
-   * Движение на точку сбора (39,45) в E35S37.
+   * Движение на точку сбора (Memory.empire.rally, default (39,45) в E35S37).
    */
   goToRally: function (creep) {
-    if (creep.room.name !== RALLY_ROOM) {
-      creep.travelTo(new RoomPosition(25, 25, RALLY_ROOM), {
+    const rally = shardState.rally();
+
+    if (creep.room.name !== rally.room) {
+      creep.travelTo(new RoomPosition(25, 25, rally.room), {
         reusePath: 20,
       });
       return;
     }
 
-    if (!creep.pos.inRangeTo(RALLY_X, RALLY_Y, 2)) {
-      creep.travelTo(new RoomPosition(RALLY_X, RALLY_Y, creep.room.name), {
+    if (!creep.pos.inRangeTo(rally.x, rally.y, 2)) {
+      creep.travelTo(new RoomPosition(rally.x, rally.y, creep.room.name), {
         reusePath: 20,
       });
     }

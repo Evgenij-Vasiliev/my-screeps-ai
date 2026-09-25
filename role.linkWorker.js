@@ -8,7 +8,9 @@
  * Тело роли — в конфиге: CREEP_BODIES.linkWorker = {carry:4, move:1} (250).
  *
  * ── V1.1 (CPU, накладные расходы) ────────────────────────────────────────
- * Замер Memory.cpuStats.profile (1503 сэмпла, tick ~83172186): блок linkWorker
+ * Замер Memory.cpuStats.profile (1503 сэмпла, tick ~83172186; сейчас ролевые
+ * замеры лежат в Memory.cpuStats.roles и включаются Memory.cpuMonitorRoles):
+ * блок linkWorker
  * = 0.367 мс/тик, при том что работы почти нет (в линках 0–150 энергии при
  * LINK_CAPACITY 800). Цепочка `Memory.rooms[name].links.storage` читалась НА
  * КАЖДОМ тике, хотя id линка неизменен всю жизнь крипа. Теперь id кэшируется в

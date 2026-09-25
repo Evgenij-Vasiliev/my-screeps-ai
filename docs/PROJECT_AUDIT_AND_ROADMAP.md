@@ -242,7 +242,7 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 7. **Полное разыменование структур комнаты каждый тик.** `room.manager.js:196-222`: `Game.getObjectById` для всех spawn/tower/link/lab/extension/**road/wall/rampart**/source/storage/terminal/factory/powerSpawn/observer/extractor/nuker, затем `concat` + `filter(s => s.hits < s.hitsMax)` (`249-251`). В развитой комнате это сотни объектов (дороги/стены/валы) и сотни `getObjectById` на комнату за тик. Это главный подозреваемый на CPU, причём большая часть данных нужна не каждый тик.
 8. **Скан стен/валов для detectAttack каждый тик.** `room.manager.js:65-86`: `reduce` по всем walls+ramparts + запись `Memory.rooms[roomName].lastWallHits` каждый тик. При этом `detectAttack` вызывается только если у комнаты есть башни (`88-90` ранний return) — значит `lastWallHits`/`underAttack` в комнатах без башен не обновляются вообще (мёртвый флаг, а после постройки башни первый тик даст ложную тревогу).
 9. **Роль-CPU мониторинг стоит 2 × `Game.cpu.getUsed()` на каждого крипа каждого тика.** `room.manager.js:53` + `cpuMonitor.js:32-41`, плюс запись `Memory.cpuStats` каждый тик (`cpuMonitor.js:47-56`) и `console.log` каждые 10 тиков (`57-79`) — в Screeps консольный вывод сам по себе стоит CPU, а выводится 7+ строк.
-10. **Нет реакции на bucket.** `Game.cpu.bucket` читается только для логирования (`cpuMonitor.js:45,61`); `CPU.BUCKET_CRITICAL` нигде не влияет на поведение. При истощении bucket ничего не отключается.
+10. ~~**Нет реакции на bucket.** `Game.cpu.bucket` читается только для логирования (`cpuMonitor.js:45,61`); `CPU.BUCKET_CRITICAL` нигде не влияет на поведение. При истощении bucket ничего не отключается.~~ **Исправлено 2026-09-24:** в `empire.js` при `Game.cpu.bucket < CPU.BUCKET_CRITICAL` пропускаются `observerManager`, `terminalNetwork` и `marketManager`; ядро (комнаты, оборона, ремоут) и очистка памяти работают всегда, пропуск объявляется одной строкой раз в `CPU.REPORT_INTERVAL` тиков. Регрессия — `tests/empire.bucket.gate.test.js`.
 11. **`observer.manager.js:7` — `Object.values(Game.structures)` каждый тик** по всем структурам всех видимых комнат ради одного observer’а. При этом наблюдение чередует две комнаты по `Game.time % 2` (`14`), а результаты нигде не сохраняются (косвенно помогают defense, давая видимость ремоут-комнат через тик).
 12. **Синхронизированные пики сканов.** `TOWER.REPAIR_INTERVAL` (`room.manager.js:107`), defense-кэш `Game.time % 25 === 0` (`defense.manager.js:52`) — все комнаты сканируют в один и тот же тик, вместо разнесения по тикам.
 13. **`role.builder.js:22` и `task.generators.js:490`** перебирают `Game.constructionSites` целиком (глобально) и фильтруют по комнате — по крипу и по комнате за тик соответственно.
@@ -298,8 +298,8 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 
 - **Ленивое/периодическое разыменование `roomState`** (дороги/стены/валы — только там и тогда, где они нужны: башни — раз в 15 тиков, repair-генератор — раз в N тиков). ~~Самый крупный ожидаемый выигрыш.~~ **Замерено 17.09.2026: 9.46 % `roomManager` (0.7391 мс/тик) — не главный выигрыш**; дороги/стены/валы уже убраны из `roomState` задачей по башням.
 - **Один `room.find(FIND_MY_STRUCTURES)`-подобный сбор вместо N × `getObjectById`** там, где нужны только характеристики (хиты для detectAttack), и переход `detectAttack` на периодический расчёт суммы хитов (или отказ от него в пользу `underAttack` + периодического скана врагов).
-- **Роль-мониторинг сделать opt-in** (`Memory.cpuMonitorRoles`), убрать 2 × `getUsed()` на крипа и вывод каждые 10 тиков (выводить раз в 50–100 тиков или по флагу).
-- **Гейт по bucket**: при `Game.cpu.bucket < CPU.BUCKET_CRITICAL` пропускать observer/market/terminalNetwork (существующая константа, ~3 строки в `empire.js`).
+- **Роль-мониторинг сделать opt-in** (`Memory.cpuMonitorRoles`), убрать 2 × `getUsed()` на крипа и вывод каждые 10 тиков (выводить раз в 50–100 тиков или по флагу). **✅ Выполнено 2026-09-24**: роли — opt-in (`Memory.cpuMonitorRoles`, по умолчанию выключено: ролевой бакет вообще не измеряется), сэмплирование — один тик из `CPU.SAMPLE_INTERVAL` (7), отдельное окно `Memory.cpuStats.roles` и одна строка `=== CPU ROLES` раз в `CPU.ROLE_REPORT_INTERVAL` (50) тиков; подсистемы по-прежнему раз в 100 тиков в `Memory.cpuStats.profile`. Тиковая строка `[CPU]` (total/BKT) осталась раз в 10 тиков. Тест `tests/cpuMonitor.sample.test.js`.
+- ~~**Гейт по bucket**: при `Game.cpu.bucket < CPU.BUCKET_CRITICAL` пропускать observer/market/terminalNetwork (существующая константа, ~3 строки в `empire.js`).~~ **Выполнено 2026-09-24** (`empire.js`, тест `tests/empire.bucket.gate.test.js`).
 - **`observer.manager`**: брать observer из уже собранного `roomState.observer` (или из structure-кэша), а не сканировать `Game.structures`.
 - **Разнести периодические сканы по тикам** (индекс комнаты как offset) — убрать синхронные спайки.
 - **Табличные сет-ы дедупликации задач** — один проход для построения `Set(ключ потребности)` вместо `some()` на каждую цель.
@@ -309,7 +309,7 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 ### Архитектура
 
 - Ничего перестраивать не нужно. Локально полезно: **изоляция по комнатам** в `runRoom` (try/catch вокруг подсистем + вокруг каждого генератора), **единая функция идентичности задачи** (`taskType+targetId+resourceType`) вместо 11 копий, **одна точка конфигурации ремоут-целей** вместо двух механизмов (`remote.manager` + `remote.hauler` hash).
-- Перенести игровое состояние (списки комнат, ID линков, точка сбора) из кода в `Memory` с текущими значениями как defaults — тогда перестройка структур не ломает поведение молча.
+- ✅ Перенести игровое состояние (списки комнат, ID линков, точка сбора) из кода в `Memory` с текущими значениями как defaults — тогда перестройка структур не ломает поведение молча. **Выполнено 2026-09-25** (`shard.state.js` / `Memory.empire`, задача 12).
 
 ### Надёжность
 
@@ -442,6 +442,7 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 - **Эффект:** −2 × N `getUsed()`/тик, меньше логов; предсказуемое поведение при нехватке CPU.
 - **Риск:** низкий.
 - **Приоритет:** высокий.
+- **Статус: ✅ ВЫПОЛНЕНО 2026-09-24.** Мониторинг: сэмплирование раз в `CPU.SAMPLE_INTERVAL` тиков, `Memory.cpuMonitorEnabled` как рубильник, одна строка отчёта раз в `CPU.REPORT_INTERVAL` (`cpuMonitor.js`, регрессия `tests/cpuMonitor.sample.test.js`). Гейт по bucket: `empire.js` пропускает `observerManager`/`terminalNetwork`/`marketManager` при `Game.cpu.bucket < CPU.BUCKET_CRITICAL` (условие строгое), регрессия `tests/empire.bucket.gate.test.js`.
 
 ### Задача 6. Дедуп задач одним проходом + единая функция идентичности
 
@@ -510,9 +511,24 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 
 ### Задача 12. Состояние игры — в Memory с безопасными defaults
 
+- **Статус: ✅ ВЫПОЛНЕНО 2026-09-25.** Списки комнат, ID линков, клетки контейнеров,
+  маршруты дальних ролей, обход обсервера, комнаты риска и точка сбора живут в
+  `Memory.empire` (`shard.state.js`); defaults — текущие значения `constants.REMOTE` и
+  нового `constants.EMPIRE`. `empire.js` каждый тик зовёт `shardState.ensure()`: он
+  дозаполняет только отсутствующие ключи и не перезаписывает правки владельца. Все
+  перечисленные файлы читают состояние через аксессоры `shard.state`; строки комнат в
+  продовом коде не осталось. Порог пре-спавна дальних ролей
+  (`shard.state.preSpawnThreshold`) считается от НАСТРОЕННЫХ комнат и маршрутов, поэтому
+  правка `Memory.empire.remoteRooms` не оставляет роль с заниженным порогом. Невалидный
+  ID линка-приёмника даёт один явный лог (`warnOnce`) вместо тихого фолбэка в storage.
+  Регрессия: `tests/shard.state.test.js` (39 проверок) + обновлённый контракт
+  `tests/module.barrel.test.js` (`EMPIRE`).
 - **Цель:** убрать молчаливые поломки при перестройке структур.
-- **Файлы:** `remote.hauler.js`, `remote.manager.js`, `defense.manager.js`, `defense.attacker.js`, `observer.manager.js`, `spawn.manager.js`.
-- **Что менять:** читать списки комнат/ID линков/точку сбора из `Memory` с текущими значениями как default; при невалидном ID — один явный лог вместо тихого фолбэка.
+- **Файлы (факт):** `shard.state.js` (новый), `constants/empire.js` (новый),
+  `constants.js`, `constants/creeps.js`, `empire.js`, `remote.manager.js`,
+  `remote.hauler.js`, `remote.miner.js`, `remote.handoff.js`, `spawn.manager.js`,
+  `observer.manager.js`, `defense.manager.js`, `defense.attacker.js`, `types.d.ts`.
+- **Что менять (исходно):** читать списки комнат/ID линков/точку сбора из `Memory` с текущими значениями как default; при невалидном ID — один явный лог вместо тихого фолбэка.
 - **Эффект:** управляемость без правки кода, диагностируемость.
 - **Риск:** средний (состояние игры, нужно аккуратно с дефолтами).
 - **Приоритет:** средний.
@@ -622,7 +638,7 @@ miner/remoteMiner/linkWorker) и без дешёвого аварийного т
 (`docs/CPU-PROFILE-ROOM-MANAGER.md`, раздел 2.5 и приложение 2).
 
 **Этап C (надёжность и предсказуемость):**
-Задача 11 (комната задачи), 10 (кэши ролей + один механизм назначения), 12 (состояние игры в Memory), 9 (Traveler `hostileRooms`/лог-спам), частично 14 (Memory hygiene).
+Задача 11 (комната задачи), 10 (кэши ролей + один механизм назначения), 12 (состояние игры в Memory — ✅ 2026-09-25), 9 (Traveler `hostileRooms`/лог-спам), частично 14 (Memory hygiene).
 
 **Этап D (экономика и масштабирование):**
 Задача 7 (квоты по возможностям комнаты), 8 (энергия без storage), 6 (дедуп и единая идентичность задач), затем 16 (рынок/структуры) — и только после этого рассматривать рост числа комнат и удержание RCL.

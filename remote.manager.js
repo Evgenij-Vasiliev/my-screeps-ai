@@ -5,7 +5,8 @@
  * Резервер, дальний майнер и дальний хайлер распределяются по комнатам и
  * запускают свою ролевую логику.
  *
- * Список удалённых комнат — constants.REMOTE.ROOMS (одна точка правды).
+ * Список удалённых комнат — Memory.empire.remoteRooms (shard.state.js), с
+ * текущим значением constants.REMOTE.ROOMS как default.
  *
  * ── ЕДИНСТВЕННАЯ ТОЧКА ПОЛИТИКИ ──────────────────────────────────────────
  * Ни одна дальняя роль не выбирает targetRoom сама (никакого хэша по имени,
@@ -44,13 +45,14 @@ const roleRemoteMiner = require("remote.miner");
 const roleRemoteHauler = require("remote.hauler");
 const { activePairs, cleanupStaleHandoff } = require("remote.handoff");
 const { REMOTE } = require("./constants");
+const shardState = require("./shard.state");
 
 /**
  * Раздаёт targetRoom всем крипам роли — единственное место, где эта память
  * пишется для дальних ролей.
  *
  * Правила (в этом порядке):
- *  1. Битая память (комната не из REMOTE.ROOMS) — снимается.
+ *  1. Битая память (комната не из Memory.empire.remoteRooms) — снимается.
  *  2. Валидная пара замены (уходящий + его замена) держит ОДНУ комнату на
  *     двоих: замена наследует targetRoom уходящего и идёт в путь, пока он ещё
  *     жив. Двое на комнате здесь — не дубль, а передача смены. Наследование
@@ -76,6 +78,9 @@ function assignTargetRoom(role, creeps) {
   // пар: иначе крип остался бы «связанным» навсегда и без замены.
   cleanupStaleHandoff(role, creeps);
 
+  // Настроенный список удалённых комнат — читаем один раз на роль.
+  const remoteRooms = shardState.remoteRooms();
+
   const { pairs } = activePairs(role, creeps);
 
   // Кто участвует в замене: пара держит ОДНУ комнату на двоих, и это не дубль.
@@ -95,10 +100,14 @@ function assignTargetRoom(role, creeps) {
   // комнату (пустая удалённая комната без вывоза — хуже, чем недобор второго
   // слота); вторые слоты включаются только когда крипов больше, чем комнат.
   // Иначе два хаулера садились бы в одну комнату, оставляя вторую без хаулера.
-  const perRoom = Math.min(
-    maxHolders,
-    Math.max(1, Math.ceil(creeps.length / REMOTE.ROOMS.length)),
-  );
+  // Пустой список комнат (владелец выключил дальний контур) — слотов нет,
+  // все крипы остаются с targetRoom = null и ждут. Без этой ветки деление на
+  // ноль дало бы Infinity.
+  const roomCount = remoteRooms.length;
+  const perRoom =
+    roomCount === 0
+      ? 0
+      : Math.min(maxHolders, Math.max(1, Math.ceil(creeps.length / roomCount)));
 
   // Слоты комнаты: обычный держатель — слот, пара «уходящий + замена» — один
   // слот на двоих (как и раньше в подсчёте хозяев).
@@ -112,10 +121,10 @@ function assignTargetRoom(role, creeps) {
     return count + (hasPair ? 1 : 0);
   };
 
-  // 1. Битая память (комната не из REMOTE.ROOMS) — снимаем.
+  // 1. Битая память (комната не из Memory.empire.remoteRooms) — снимаем.
   for (let i = 0; i < creeps.length; i++) {
     const room = creeps[i].memory.targetRoom;
-    if (room && REMOTE.ROOMS.indexOf(room) === -1) {
+    if (room && remoteRooms.indexOf(room) === -1) {
       creeps[i].memory.targetRoom = null;
     }
   }
@@ -169,8 +178,8 @@ function assignTargetRoom(role, creeps) {
   // каждую комнату, затем вторые. Иначе оба свободных места достались бы первой
   // комнате (у хаулера слотов HAULERS_PER_ROOM).
   for (let slot = 0; slot < perRoom; slot++) {
-    for (let i = 0; i < REMOTE.ROOMS.length; i++) {
-      const room = REMOTE.ROOMS[i];
+    for (let i = 0; i < roomCount; i++) {
+      const room = remoteRooms[i];
       if (slotsUsed(holders[room] || []) <= slot) freeRooms.push(room);
     }
   }
@@ -194,8 +203,8 @@ function assignTargetRoom(role, creeps) {
   // первыми по приоритету — уходящий (он передаёт комнату замене) либо тот,
   // кому раньше умирать; лишние освобождаются и ждут. Вытесненные сразу
   // убираются из holders, иначе шаг 6 не увидел бы освободившийся слот.
-  for (let i = 0; i < REMOTE.ROOMS.length; i++) {
-    const room = REMOTE.ROOMS[i];
+  for (let i = 0; i < roomCount; i++) {
+    const room = remoteRooms[i];
     const list = holders[room] || [];
     if (slotsUsed(list) <= perRoom) continue;
 

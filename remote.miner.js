@@ -38,6 +38,7 @@
  *    каждый раз разворачивался к её центру).
  */
 const { REMOTE } = require("./constants");
+const shardState = require("./shard.state");
 const { harvestPlan, harvestBoostedWork } = require("./role.miner");
 const { roomScopedTarget } = require("./remote.targets");
 
@@ -189,7 +190,7 @@ function findContainerTargets(creep, source, targetRoom) {
 
 /**
  * Рабочее место дальнего майнера в комнате — настроенная клетка контейнера у
- * источника (constants.REMOTE.ROOM_TO_CONTAINER_POS). Майнер стоит на ней,
+ * источника (Memory.empire.remoteContainerPos). Майнер стоит на ней,
  * добывает с источника и отдаёт энергию в контейнер.
  *
  * Зачем настраивать явно: пока контейнера нет, роль ставила площадку под
@@ -202,7 +203,7 @@ function findContainerTargets(creep, source, targetRoom) {
  * @returns {RoomPosition|null} клетка или null, если для комнаты не настроена
  */
 function configuredWorkCell(targetRoom) {
-  const cell = (REMOTE.ROOM_TO_CONTAINER_POS || {})[targetRoom];
+  const cell = shardState.remoteContainerPos(targetRoom);
   return cell ? new RoomPosition(cell.x, cell.y, targetRoom) : null;
 }
 

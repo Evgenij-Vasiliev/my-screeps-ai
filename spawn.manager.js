@@ -9,13 +9,14 @@ const {
   SPAWN_QUOTA,
   ROOM_SPAWN_QUOTA_OVERRIDES,
   MINERAL_MIN_AMOUNT_TO_SPAWN,
-  PRESPAWN_THRESHOLD,
   WORKER,
 } = require("./constants");
+const shardState = require("./shard.state");
 
 // Дальние роли (remote.reserver / remote.miner / remote.hauler): их крипы
 // работают в удалённой комнате, поэтому квота считается не по физическому
-// нахождению, а по «родной» комнате (REMOTE.HOME_ROOM = E35S37).
+// нахождению, а по «родной» комнате (Memory.empire.homeRoom, default
+// REMOTE.HOME_ROOM = E35S37).
 // Их пре-спавн — не просто «поставить замену заранее», а replacement handoff:
 // замену связывают с уходящим крипом (remote.handoff), чтобы она сразу
 // получила его удалённую комнату и пошла в неё, пока он ещё жив.
@@ -47,7 +48,7 @@ const REMOTE_ROLES = {
  * @returns {number}
  */
 function countRole(creeps, role, roomName) {
-  const threshold = PRESPAWN_THRESHOLD[role];
+  const threshold = shardState.preSpawnThreshold(role);
   const isRemote = REMOTE_ROLES[role] === true;
 
   return creeps.filter(c => {
@@ -110,6 +111,8 @@ function run(roomState) {
   const spawn = roomState.spawns.find(s => !s.spawning);
   if (!spawn) return;
   const creeps = roomState.creeps;
+  // «Родная» комната дальней добычи — из состояния шарда (default E35S37).
+  const homeRoom = shardState.homeRoom();
 
   // ── АВАРИЙНЫЙ ПОДЪЁМ КОМНАТЫ ───────────────────────────────────────────
   // Воркер — единственный, кто доливает спавны/расширения энергией из
@@ -132,7 +135,7 @@ function run(roomState) {
         spawn,
         "worker",
         roomState.roomName,
-        PRESPAWN_THRESHOLD.worker,
+        shardState.preSpawnThreshold("worker"),
         emergency,
       ) === OK
     ) {
@@ -145,10 +148,10 @@ function run(roomState) {
     // иначе уходящий остался бы «связанным» навсегда и без замены.
     if (REMOTE_ROLES[role] === true) cleanupStaleHandoff(role, creeps);
 
-    if (role === "reserver" && roomState.roomName !== "E35S37") continue;
-    if (role === "remoteMiner" && roomState.roomName !== "E35S37") continue;
-    if (role === "remoteHauler" && roomState.roomName !== "E35S37") continue;
-    if (role === "attacker" && roomState.roomName === "E35S37") continue;
+    if (role === "reserver" && roomState.roomName !== homeRoom) continue;
+    if (role === "remoteMiner" && roomState.roomName !== homeRoom) continue;
+    if (role === "remoteHauler" && roomState.roomName !== homeRoom) continue;
+    if (role === "attacker" && roomState.roomName === homeRoom) continue;
 
     if (role === "mineralMiner") {
       if (!roomState.mineral || !roomState.mineral.extractorId) continue;
@@ -201,12 +204,15 @@ function run(roomState) {
         // следующий тик дубля не поставит.
       }
 
+      // Порог роли: для дальних ролей — от настроенных комнат/маршрутов в
+      // Memory (shard.state.preSpawnThreshold), для остальных — константа.
+      const threshold = shardState.preSpawnThreshold(role);
       const name = creepFactory.creepName(role, roomState.roomName);
       const result = creepFactory.run(
         spawn,
         role,
         roomState.roomName,
-        PRESPAWN_THRESHOLD[role],
+        threshold,
         undefined,
         leaving ? leaving.name : null,
       );
@@ -221,7 +227,7 @@ function run(roomState) {
           bindHandoff(leaving, name);
           console.log(
             `PRE-SPAWN: ${name} — замена ${leaving.name} ` +
-              `(${role}, ttl ${leaving.ticksToLive}, порог ${PRESPAWN_THRESHOLD[role]})`,
+              `(${role}, ttl ${leaving.ticksToLive}, порог ${threshold})`,
           );
         }
         return;

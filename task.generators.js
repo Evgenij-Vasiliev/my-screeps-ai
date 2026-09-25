@@ -239,19 +239,24 @@ function generateCollectFactoryBattery(roomState) {
 
   if (!factory) return;
 
-  if (factory.store[RESOURCE_BATTERY] === 0) return;
-
-  addIfNew(
-    roomName,
-    "collectFactoryBattery",
-    {
-      type: "transfer",
-      sourceId: factory.id,
-      targetId: storage.id,
-      resourceType: RESOURCE_BATTERY,
-    },
-    existingKeys(roomName, "collectFactoryBattery"),
-  );
+  // Вывозим и продукт (battery), и «чужой» ресурс (не компонент рецепта и не
+  // продукт) — см. factoryManager.collectableResources. Иначе посторонний
+  // ресурс копится в фабрике и занимает место (живой случай: 8850 H в E35S39).
+  const keys = existingKeys(roomName, "collectFactoryBattery");
+  const resourceTypes = factoryManager.collectableResources(factory);
+  for (let i = 0; i < resourceTypes.length; i++) {
+    addIfNew(
+      roomName,
+      "collectFactoryBattery",
+      {
+        type: "transfer",
+        sourceId: factory.id,
+        targetId: storage.id,
+        resourceType: resourceTypes[i],
+      },
+      keys,
+    );
+  }
 }
 
 function generateFillTerminalEnergy(roomState) {

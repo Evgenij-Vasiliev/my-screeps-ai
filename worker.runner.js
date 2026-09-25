@@ -126,6 +126,20 @@ function shouldPreempt(creep, roomName) {
   const heldIndex = TASK_CHAIN.indexOf(creep.memory.taskType);
   if (heldIndex <= 0) return false; // категории приоритетнее нет
 
+  // Доставку не прерываем: груз уже в рюкзаке и едет к цели. Прерывание в этой
+  // фазе — выброшенный рейс и полный перепчёт (Traveler), при том что энергия
+  // всё равно ушла бы другому потребителю. Воркер довозит груз и берёт
+  // приоритетную задачу следующим шагом.
+  //
+  // Только для transfer-задач: у ремонта/стройки/апгрейда `working === true`
+  // означает «работаю», и их прерывать ПО-ПРЕЖНЕМУ нужно — иначе долгая задача
+  // займёт всех воркеров (см. комментарий выше). У fillSpawnsExtensions фазы
+  // `working` нет вовсе, поэтому она как преемптор не затрагивается.
+  const held = creep.memory.task;
+  if (held && held.type === "transfer" && creep.memory.working === true) {
+    return false;
+  }
+
   for (let index = 0; index < heldIndex; index++) {
     const task = taskManager.getNextTask(roomName, TASK_CHAIN[index]);
     if (!task) continue;
