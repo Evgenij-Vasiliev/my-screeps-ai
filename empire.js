@@ -11,6 +11,7 @@ const terminalNetwork = require("terminalNetwork");
 const defenseManager = require("defense.manager");
 const remoteManager = require("remote.manager");
 const shardState = require("./shard.state");
+const log = require("./log");
 const { CPU } = require("./constants");
 
 // ── ИНИЦИАЛИЗАЦИЯ ГЛОБАЛЬНЫХ КЭШЕВ (heap) ─────────────────────────────────
@@ -37,12 +38,26 @@ function initGlobalCaches() {
   if (typeof global._taskIdSeq !== "number") global._taskIdSeq = 0;
 }
 
+/**
+ * Ошибка подсистемы уровня империи. Печатается не чаще раза в
+ * log.THROTTLE_INTERVAL тиков на подсистему: сломанный модуль бросает
+ * исключение КАЖДЫЙ тик, а каждый console.log в Screeps стоит CPU. Раньше
+ * здесь печатались две строки на тик, то есть ошибка сама себя усиливала.
+ * @param {string} label
+ * @param {Error} error
+ */
+function reportCatch(label, error) {
+  log.warnThrottled(
+    "empire:" + label,
+    () => `[${label}] Ошибка: ${error.message}\n${error.stack}`,
+  );
+}
+
 module.exports.run = function () {
   try {
     cpuMonitor.startTick();
   } catch (error) {
-    console.log(`[cpuMonitor.startTick] Ошибка: ${error.message}`);
-    console.log(error.stack);
+    reportCatch("cpuMonitor.startTick", error);
   }
 
   // 1. Очистка памяти умерших крипов
@@ -61,8 +76,7 @@ module.exports.run = function () {
   try {
     shardState.ensure();
   } catch (error) {
-    console.log(`[shardState.ensure] Ошибка: ${error.message}`);
-    console.log(error.stack);
+    reportCatch("shardState.ensure", error);
   }
 
   // 3. Гейт по bucket: при критически низком запасе CPU необязательные
@@ -84,8 +98,7 @@ module.exports.run = function () {
   try {
     cpuMonitor.trackRole("roomManager", () => roomManager.run());
   } catch (error) {
-    console.log(`[roomManager] Ошибка: ${error.message}`);
-    console.log(error.stack);
+    reportCatch("roomManager", error);
   }
 
   // 5. Разведка (необязательная подсистема: пропуск при критичном bucket)
@@ -93,8 +106,7 @@ module.exports.run = function () {
     try {
       cpuMonitor.trackRole("observerManager", () => observerManager.run());
     } catch (error) {
-      console.log(`[observerManager] Ошибка: ${error.message}`);
-      console.log(error.stack);
+      reportCatch("observerManager", error);
     }
   }
 
@@ -102,16 +114,14 @@ module.exports.run = function () {
   try {
     cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
   } catch (error) {
-    console.log(`[defenseManager] Ошибка: ${error.message}`);
-    console.log(error.stack);
+    reportCatch("defenseManager", error);
   }
 
   // 7. Дальняя добыча — резервер / дальний майнер / дальний хайлер
   try {
     cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
   } catch (error) {
-    console.log(`[remoteManager] Ошибка: ${error.message}`);
-    console.log(error.stack);
+    reportCatch("remoteManager", error);
   }
 
   // 8. TerminalNetwork — межкомнатная балансировка ресурсов
@@ -120,8 +130,7 @@ module.exports.run = function () {
     try {
       cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
     } catch (error) {
-      console.log(`[terminalNetwork] Ошибка: ${error.message}`);
-      console.log(error.stack);
+      reportCatch("terminalNetwork", error);
     }
   }
 
@@ -131,15 +140,13 @@ module.exports.run = function () {
     try {
       cpuMonitor.trackRole("marketManager", () => marketManager.run());
     } catch (error) {
-      console.log(`[marketManager] Ошибка: ${error.message}`);
-      console.log(error.stack);
+      reportCatch("marketManager", error);
     }
   }
 
   try {
     cpuMonitor.endTick();
   } catch (error) {
-    console.log(`[cpuMonitor.endTick] Ошибка: ${error.message}`);
-    console.log(error.stack);
+    reportCatch("cpuMonitor.endTick", error);
   }
 };

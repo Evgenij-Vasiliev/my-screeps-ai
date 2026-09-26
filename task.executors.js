@@ -169,6 +169,16 @@ function executeFillFactoryEnergy(creep, task) {
       return "DONE";
     }
 
+    // ЭНЕРГОБЮДЖЕТ КОМНАТЫ. Тот же гейт, что у генератора, но проверенный В
+    // МОМЕНТ забора: склад выше резерва И терминал не ниже своей цели. Нужен
+    // для уже стоящих в очереди задач — очередь чистится лишь по DONE/SKIP,
+    // поэтому без этой проверки задача, созданная при набранном терминале,
+    // продолжала бы выедать склад после просадки терминала.
+    if (!factoryManager.canTakeStorageEnergy(source, creep.room.terminal)) {
+      delete creep.memory.working;
+      return "SKIP";
+    }
+
     const withdrawn = energySource.withdrawFromStorage(creep);
     if (!withdrawn) {
       delete creep.memory.working;
@@ -419,14 +429,11 @@ function executeFillTerminalEnergy(creep, task) {
 
   // ЦЕЛЬ, А НЕ ЁМКОСТЬ (правка по разбору приоритетов).
   // Раньше здесь была только проверка полноты (isTargetFull): задача,
-  // сгенерированная генератором ради разницы до TERMINAL_SUPPLY.ENERGY_TARGET
-  // (task.generators.js: если энергия терминала < ENERGY_TARGET и storage выше
-  // 195000), уходила «в работу» и лила терминал ДО ПОЛНОЙ ЁМКОСТИ 300k.
-  // Пока storage держится выше 195000 — а он держится ровно настолько, насколько
-  // его отпускает резерв, — воркеры вычерпывали из storage сотни тысяч энергии
-  // в терминал, вытесняя снабжение фабрики (600 энергии → 50 battery по 650).
-  // Теперь обе стороны согласованы: генератор считает дефицит до ENERGY_TARGET,
-  // исполнитель останавливается ровно на нём.
+  // сгенерированная генератором ради разницы до TERMINAL_SUPPLY.ENERGY_TARGET,
+  // уходила «в работу» и лила терминал ДО ПОЛНОЙ ЁМКОСТИ 300k, вычерпывая
+  // storage сотни тысяч энергии и вытесняя снабжение фабрики. Теперь обе стороны
+  // согласованы: генератор считает дефицит до ENERGY_TARGET, исполнитель
+  // останавливается ровно на нём.
   if (isTargetFull(target)) {
     return "DONE";
   }
@@ -437,9 +444,11 @@ function executeFillTerminalEnergy(creep, task) {
 
   if (creep.store[RESOURCE_ENERGY] === 0) {
     // Тот же порог, что в генераторе: склад отдаёт энергию терминалу только из
-    // излишка выше 195000 (STORAGE.ENERGY_MIN × STORAGE_RESERVE_MULTIPLIER).
+    // излишка выше резерва (STORAGE.ENERGY_MIN × FILL_STORAGE_MULTIPLIER =
+    // 150000). Прежний 195000 делал цель 100000 недостижимой. Ниже 150000 склад
+    // не опускается — energySource.withdrawFromStorage обрезает amount.
     const reserveThreshold =
-      STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
+      STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER;
     if (source.store[RESOURCE_ENERGY] <= reserveThreshold) {
       return "SKIP";
     }

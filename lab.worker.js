@@ -7,6 +7,26 @@
  * ОПТИМИЗАЦИЯ v4 (ТЗ №5): Round-Robin Scheduling — указатель старта обхода
  * троек, чтобы ни одна тройка не голодала.
  *
+ * ОПТИМИЗАЦИЯ v6 (CPU, живой замер shard3 2026-09-25, tests/_lwprobe.js):
+ * бакет роли — 3.19 мс/тик (31 % roomManager), 10 крипов = 0.32 мс/тик на крипа.
+ * Адресный замер (82 тика, 820 вызовов run) разложил это так: travelTo 167 мс
+ * (60 %), withdraw 25 мс, transfer 26 мс, перебор конфигов 3 мс, остальное —
+ * логика. Причина — безусловный сброс задачи на пустом рюкзаке (был ниже):
+ * пустой рюкзак — НОРМАЛЬНОЕ состояние фазы забора, поэтому задача сбрасывалась
+ * и планировалась заново КАЖДЫЙ тик. Зонд (71 тик, 420 вызовов): пустых 276,
+ * из них с задачей 228, цель сменилась прямо в вызове 196 раз (2.8 смены/тик),
+ * getRotatedConfigs — 276 вызовов (ровно на каждый пустой). Смена цели — это
+ * новый PathFinder.search в Traveler. Что изменено:
+ *   1. Задача НЕ сбрасывается на пустом рюкзаке. Невыполнимая задача сбрасывается
+ *      адресно: источник исчерпан, цель пуста, цель полна (ERR_FULL) — см. ветки.
+ *   2. `transfer` с ERR_FULL завершает задачу: раньше крип с остатком груза
+ *      «залипал» у полной лаборатории и слал transfer каждый тик вечно.
+ *   3. Движок НЕ обрезает amount у `withdraw`: пока крип ехал, реакция выедала
+ *      реагент у лабы-источника, устаревший memory.amount давал
+ *      ERR_NOT_ENOUGH_RESOURCES каждый тик — задача висла навсегда (живой замер:
+ *      153 withdraw, 67 ошибок). Теперь amount = min(memory.amount, остаток
+ *      источника), а любой иной не-OK сбрасывает задачу (ERR_NOT_IN_RANGE — нет).
+ *
  * ОПТИМИЗАЦИЯ v5 (CPU, отчёт docs/LAB-WORKER-CPU-OPTIMIZATION.md):
  * замеры на живом шарде (0.94 мс/тик, 13.8 % roomManager) показали, что ~85 %
  * бакета — это рейсы «хранилище → лаба»: крип возил по 5 единиц реагента
@@ -133,10 +153,12 @@ module.exports = {
     // для всех крипов — storage). Раньше энергия бралась из терминала ПЕРВЫМ
     // (строка стояла выше склада), и заправка буст-лабораторий вычерпывала
     // терминал: в живом замере терминал E35S39 потерял 4495 энергии за 43 тика.
-    // Подвоза у терминала нет, пока склад ниже 195000 (гейт
-    // TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER), поэтому энергия, ушедшая в
-    // лабы, не возвращалась — и её не оставалось на комиссии отправок и сделок.
-    // Резерв склада неприкосновенен: ниже STORAGE.ENERGY_MIN энергия не берётся.
+    // Энергия терминала предназначена комиссиям отправок и сделок. Резерв склада
+    // неприкосновенен: ниже STORAGE.ENERGY_MIN энергия не берётся (забор ещё и
+    // обрезается по остатку сверх резерва — см. energySource.withdrawFromStorage).
+    // Важно: и лаборатории, и PowerSpawn, и ремонт живут из остатка склада ВЫШЕ
+    // резерва, поэтому снабжение фабрики гейтится отдельно и с рабочим буфером
+    // (FACTORY.ENERGY_RESERVE_MULTIPLIER).
     if (resource === RESOURCE_ENERGY) {
       if (storage && (storage.store[RESOURCE_ENERGY] || 0) > STORAGE.ENERGY_MIN) {
         return storage;
@@ -233,14 +255,15 @@ module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
 
-    // Сбрасываем задачу когда крип пустой
-    if (creep.store.getUsedCapacity() === 0) {
-      creep.memory.task = null;
-      delete creep.memory.resource;
-      delete creep.memory.targetId;
-      delete creep.memory.sourceId;
-      delete creep.memory.labKey;
-    }
+    // ── ЗАДАЧА НЕ СБРАСЫВАЕТСЯ НА ПУСТОМ РЮКЗАКЕ (v6) ────────────────────
+    // Здесь раньше стоял безусловный сброс задачи при getUsedCapacity() === 0.
+    // Для фазы ЗАБОРА пустой рюкзак — норма (крип едет к источнику), поэтому
+    // сброс срабатывал на каждом тике рейса и запускал перепланирование:
+    // getRotatedConfigs двигал round-robin, цель менялась, Traveler удалял путь
+    // к прежней цели и считал новый (живой замер — в шапке файла).
+    // Завершение задачи делает исполнитель (transfer → OK → task = null), а
+    // невыполнимая задача сбрасывается адресно в ветках выполнения ниже:
+    // источник исчерпан, цель пуста (забрать нечего), цель полна (ERR_FULL).
 
     // Ищем задачу если нет текущей
     if (!creep.memory.task) {
@@ -546,14 +569,28 @@ module.exports = {
       }
 
       if (creep.store[creep.memory.resource] === 0) {
-        actIfNear(creep, target, () =>
+        // Цель уже пуста (ресурс забрал другой крип) — задача невыполнима,
+        // планируем заново. Без этой проверки задача висела бы на крипе вечно
+        // (withdraw возвращает ERR_NOT_ENOUGH_RESOURCES каждый тик).
+        if ((target.store[creep.memory.resource] || 0) === 0) {
+          creep.memory.task = null;
+          return;
+        }
+        const r = actIfNear(creep, target, () =>
           creep.withdraw(target, creep.memory.resource),
         );
+        // Не-OK кроме «ещё не дошёл» (например, рюкзак забит другим ресурсом —
+        // withdraw вернёт ERR_FULL): задача невыполнима, сбрасываем.
+        if (r !== OK && r !== ERR_NOT_IN_RANGE) creep.memory.task = null;
       } else {
         const r = actIfNear(creep, dest, () =>
           creep.transfer(dest, creep.memory.resource),
         );
-        if (r === OK) creep.memory.task = null;
+        // ERR_FULL: приёмник заполнен (в т.ч. другим крипом) — задача
+        // выполнена настолько, насколько возможно. Сбрасываем её: остаток
+        // груза крип перевезёт следующей задачей (ветка «уже везёт»), иначе он
+        // слал бы transfer в полный приёмник каждый тик вечно.
+        if (r === OK || r === ERR_FULL) creep.memory.task = null;
       }
       return;
     }
@@ -573,14 +610,15 @@ module.exports = {
           creep.memory.task = null;
           return;
         }
-        actIfNear(creep, reactor, () =>
+        const r = actIfNear(creep, reactor, () =>
           creep.withdraw(reactor, creep.memory.resource),
         );
+        if (r !== OK && r !== ERR_NOT_IN_RANGE) creep.memory.task = null;
       } else {
         const r = actIfNear(creep, dest, () =>
           creep.transfer(dest, creep.memory.resource),
         );
-        if (r === OK) creep.memory.task = null;
+        if (r === OK || r === ERR_FULL) creep.memory.task = null;
       }
       return;
     }
@@ -600,15 +638,34 @@ module.exports = {
       }
 
       if (creep.store[creep.memory.resource] === 0) {
+        const have = src.store[creep.memory.resource] || 0;
+        // Источник исчерпан (реагент забрал другой крип или его израсходовала
+        // реакция) — задача невыполнима, планируем заново. Раньше это скрывал
+        // сброс задачи на пустом рюкзаке.
+        if (have === 0) {
+          creep.memory.task = null;
+          return;
+        }
+        // ДВИЖОК НЕ ОБРЕЗАЕТ amount. memory.amount мог устареть, пока крип ехал:
+        // 5 единиц/тик выедает реакция у лабы-источника, а живой замер (153
+        // withdraw, 67 ошибок) показал, что withdraw с завышенным amount
+        // возвращает ERR_NOT_ENOUGH_RESOURCES и задача виснет навсегда. Берём
+        // минимум с ТЕКУЩИМ остатком источника; 0/мусор в памяти = «сколько есть».
+        const want = creep.memory.amount;
+        const amount =
+          typeof want === "number" && want > 0 ? Math.min(want, have) : have;
         const r = actIfNear(creep, src, () =>
-          creep.withdraw(src, creep.memory.resource, creep.memory.amount),
+          creep.withdraw(src, creep.memory.resource, amount),
         );
         if (r === OK) delete creep.memory.amount;
+        // Любой другой не-OK, кроме «ещё не дошёл», означает невыполнимую
+        // задачу — сбрасываем, иначе крип повторял бы проваленный withdraw вечно.
+        else if (r !== ERR_NOT_IN_RANGE) creep.memory.task = null;
       } else {
         const r = actIfNear(creep, dest, () =>
           creep.transfer(dest, creep.memory.resource),
         );
-        if (r === OK) creep.memory.task = null;
+        if (r === OK || r === ERR_FULL) creep.memory.task = null;
       }
       return;
     }

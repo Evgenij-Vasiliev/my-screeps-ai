@@ -4,7 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/run-all.js"
+    "test": "node tests/run-all.js",
+    "test:counts": "node scripts/sync-test-counts.js",
+    "test:counts:check": "node scripts/sync-test-counts.js --check",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p jsconfig.json && tsc --noEmit -p tsconfig.tools.json",
+    "check": "npm run lint && npm run typecheck",
+    "ci": "npm run check && npm test && npm run test:counts:check",
+    "hooks:install": "node scripts/install-hooks.js --strict",
+    "prepare": "node scripts/install-hooks.js"
   },
   "keywords": [],
   "author": "",
@@ -12,12 +20,13 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/lodash": "^4.17.24",
+    "@types/node": "^24.13.6",
     "@types/screeps": "^3.3.8",
     "eslint": "^10.10.0",
     "eslint-config-screeps": "^1.1.1",
     "globals": "^17.12.0",
-    "typescript": "5.7",
-    "grunt": "^1.6.1"
+    "grunt": "^1.6.1",
+    "typescript": "5.7"
   },
   "dependencies": {
     "screeps-api": "^1.16.1"

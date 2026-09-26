@@ -100,12 +100,10 @@ function run(roomState) {
 
   if (!hasResources(powerSpawn)) return;
 
-  const result = powerSpawn.processPower();
-  if (result !== OK) {
-    console.log(
-      `[PowerSpawn] ${roomState.roomName} : processPower() вернул ошибку ${result}`,
-    );
-  }
+  // Сырьё и cooldown проверены выше, поэтому ненулевой код возврата здесь —
+  // редкая гонка состояния. Раньше он печатался каждый тик: строка в консоли
+  // в горячем пути стоит CPU, а действия всё равно нет.
+  powerSpawn.processPower();
 }
 
 module.exports = { run, isProductionComplete, hasResources, hasEnergySupply };

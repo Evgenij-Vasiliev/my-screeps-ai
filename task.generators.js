@@ -4,7 +4,6 @@ const powerSpawnManager = require("powerSpawn.manager");
 const {
   POWER_SPAWN,
   STORAGE,
-  FACTORY,
   TERMINAL_SUPPLY,
   TOWER,
   TASK_CONFIG,
@@ -199,7 +198,7 @@ function generateFillPowerSpawnEnergy(roomState) {
 
 function generateFillFactoryEnergy(roomState) {
   if (!TASK_CONFIG.fillFactoryEnergy) return;
-  const { factory, storage, roomName } = roomState;
+  const { factory, storage, terminal, roomName } = roomState;
 
   if (!storage) return;
 
@@ -214,9 +213,14 @@ function generateFillFactoryEnergy(roomState) {
   // было некуда лечь.
   if (factoryManager.isEnergySupplyComplete(factory)) return;
 
-  const reserveThreshold =
-    STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
-  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) return;
+  // ФАБРИКА — ПОСЛЕДНЯЯ В ОЧЕРЕДИ ЭНЕРГИИ. Одного порога склада мало: фабрика,
+  // забирающая весь излишек, запирает и терминал (нужен для комиссий рынка и
+  // сети), и критические системы (лаборатории/PowerSpawn берут из склада выше
+  // STORAGE.ENERGY_MIN). canTakeStorageEnergy требует целыми ОБА резерва —
+  // склад выше 150 000 × 1.1 и терминал не ниже 100 000; пока терминал не
+  // набран, задача не создаётся вовсе, и весь излишек склада достаётся
+  // fillTerminalEnergy. См. factory.manager.
+  if (!factoryManager.canTakeStorageEnergy(storage, terminal)) return;
 
   addIfNew(
     roomName,
@@ -267,13 +271,14 @@ function generateFillTerminalEnergy(roomState) {
 
   if (terminal.store[RESOURCE_ENERGY] >= TERMINAL_SUPPLY.ENERGY_TARGET) return;
 
-  // ПРАВИЛО ВЛАДЕЛЬЦА: склад отдаёт энергию терминалу ТОЛЬКО из излишка выше
-  // STORAGE.ENERGY_MIN × 1.3 (195000), то есть после резерва комнаты (150000) и
-  // 45k буфера фабрики. Тот же порог проверяет исполнитель (task.executors.js),
-  // поэтому склад ниже ~195k не опускается. Понижать этот гейт нельзя: он и есть
-  // защита склада, а не «недостижимый порог».
+  // ГЕЙТ ПОДВОЗА — РЕЗЕРВ СКЛАДА (150000). Терминал обязан дойти до
+  // ENERGY_TARGET (100000), а единственный источник — излишек склада. Прежний
+  // множитель 1.3 (195000) делал цель недостижимой: живой склад держится
+  // 191–195k, гейт его не пускал, терминалы стояли на 39–71k. Ниже 150000 склад
+  // не опускается: energySource.withdrawFromStorage обрезает amount по остатку
+  // сверх резерва. Тот же порог проверяет исполнитель (task.executors.js).
   const reserveThreshold =
-    STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
+    STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER;
   if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) return;
 
   addIfNew(

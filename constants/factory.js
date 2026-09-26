@@ -17,7 +17,16 @@ const FACTORY_RECIPES = {
 
 // Порог, ниже которого фабрика не имеет права забирать энергию из Storage.
 const FACTORY = {
-  ENERGY_RESERVE_MULTIPLIER: 1.0, // множитель к STORAGE.ENERGY_MIN
+  // Множитель к STORAGE.ENERGY_MIN: нижняя граница склада для снабжения
+  // фабрики (150 000 × 1.1 = 165 000). Это не «жадность», а рабочий буфер:
+  // лаборатории, PowerSpawn и ремонт берут энергию ТОЛЬКО из остатка склада
+  // выше STORAGE.ENERGY_MIN (lab.worker.js), поэтому фабрика, выедающая всё
+  // выше 150 000, останавливает буст-конвейер — ровно то, что означает «империя
+  // с включёнными фабриками не функционирует». 165k = резерв 150k + буфер 15k.
+  // Второй, не менее важный резерв — терминал (TERMINAL_SUPPLY.ENERGY_TARGET,
+  // 100 000): фабрика обязана видеть целыми ОБА. Единое условие —
+  // factory.manager.canTakeStorageEnergy. Почему так — docs/FACTORY-ENERGY-CONTRACT.md.
+  ENERGY_RESERVE_MULTIPLIER: 1.0, // множитель к STORAGE.ENERGY_MIN (150000 → 165000)
 
   // Стоимость рецепта battery (COMMODITIES.RESOURCE_BATTERY в движке:
   // 600 энергии → 50 battery, cooldown 10). Меньше сырья — produce() вернёт

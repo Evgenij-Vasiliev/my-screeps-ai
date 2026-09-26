@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "moduleResolution": "node",
+    "checkJs": true,
+    "allowJs": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "Gruntfile.js",
+    "screeps.token.js",
+    "eslint.config.js",
+    "scripts/**/*.js"
+  ]
+}

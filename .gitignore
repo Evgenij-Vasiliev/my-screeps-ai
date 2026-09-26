@@ -1,3 +1,6 @@
 node_modules/
 .screeps.json
 test.js
+# Машиночитаемая сводка полного прогона тестов (пишет tests/run-all.js).
+# Числа из неё подставляет в README/SESSION_HANDOFF scripts/sync-test-counts.js.
+tests/.last-run.json

@@ -258,6 +258,64 @@ function check(label, cond, extra) {
   delete Memory.rooms.R2;
 }
 
+// ── Гейт подвоза терминала: порог = резерв склада, а не 195000 ───────────
+// Смысл правки 25.09.2026: терминал обязан доходить до ENERGY_TARGET (100000),
+// а единственный источник — излишек склада. Прежний порог 195000 был выше
+// живого склада (191–195k), поэтому цель была недостижима.
+{
+  console.log("\nГейт fillTerminalEnergy: порог 150000, а не 195000");
+  const { STORAGE, TERMINAL_SUPPLY } = require("../constants");
+
+  function terminalState(storageEnergy, terminalEnergy) {
+    return {
+      roomName: "R",
+      storage: { id: "ST", store: { energy: storageEnergy } },
+      terminal: { id: "TE", store: { energy: terminalEnergy } },
+    };
+  }
+  const queued = () => Memory.rooms.R.tasks.fillTerminalEnergy || [];
+
+  newMemory();
+  resetHeap();
+  tg.generateFillTerminalEnergy(terminalState(STORAGE.ENERGY_MIN + 1, 1000));
+  check(
+    "склад 150001 — задача создаётся (гейт больше не 195000)",
+    queued().length === 1,
+    JSON.stringify(queued()),
+  );
+
+  newMemory();
+  resetHeap();
+  tg.generateFillTerminalEnergy(terminalState(STORAGE.ENERGY_MIN, 1000));
+  check(
+    "склад на резерве 150000 — задача не создаётся",
+    queued().length === 0,
+    JSON.stringify(queued()),
+  );
+
+  newMemory();
+  resetHeap();
+  tg.generateFillTerminalEnergy(
+    terminalState(200000, TERMINAL_SUPPLY.ENERGY_TARGET),
+  );
+  check(
+    "терминал на цели 100000 — задача не создаётся",
+    queued().length === 0,
+    JSON.stringify(queued()),
+  );
+
+  check(
+    "FILL_STORAGE_MULTIPLIER = 1.0 (порог подвоза = резерв склада)",
+    TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER === 1.0,
+    String(TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER),
+  );
+  check(
+    "донорский STORAGE_RESERVE_MULTIPLIER не тронут (1.3)",
+    TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER === 1.3,
+    String(TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER),
+  );
+}
+
 // ── Итог ─────────────────────────────────────────────────────────────────
 console.log(`\nПРОЙДЕНО: ${passed}, ПРОВАЛЕНО: ${failed}`);
 if (failed > 0) {

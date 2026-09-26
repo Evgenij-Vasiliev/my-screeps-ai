@@ -1,11 +1,14 @@
 "use strict";
 /**
  * ПРОВЕРКА НА ЖИВОМ ШАРДЕ — ТОЛЬКО ЧТЕНИЕ.
- * Что показывает: выключены ли фабричные флаги, остались ли в очередях Memory
- * задачи fillFactoryEnergy/collectFactoryBattery, и текущие энергии
- * storage/terminal/фабрики по комнатам.
+ * Что показывает: состояние фабричного контура и ЭНЕРГОБЮДЖЕТ по комнатам —
+ * флаги, очереди fillFactoryEnergy/collectFactoryBattery, энергии
+ * storage/terminal/фабрики и ВЕРДИКТ ГЕЙТА (может ли снабжение брать энергию
+ * прямо сейчас: склад выше резерва И терминал не ниже цели), плюс сколько
+ * терминалу не хватает до цели. Это ровно «условия запуска» фабрики —
+ * docs/FACTORY-ENERGY-CONTRACT.md.
  *
- * Запуск: node tests/live.factory.off.check.js
+ * Запуск: node tests/live.factory.budget.check.js
  */
 const { ScreepsAPI } = require("screeps-api");
 const { resolveToken } = require("../screeps.token");
@@ -20,6 +23,8 @@ const CMDS = [
   `(function(){var K=require('constants');var c=K.TASK_CONFIG;
 var o={factory:c.factory,fillFactoryEnergy:c.fillFactoryEnergy,collectFactoryBattery:c.collectFactoryBattery,
 fillTerminalEnergy:c.fillTerminalEnergy,fillTerminalResources:c.fillTerminalResources,powerSpawn:c.powerSpawn,
+stFloor:K.STORAGE.ENERGY_MIN*K.FACTORY.ENERGY_RESERVE_MULTIPLIER,
+teTarget:K.TERMINAL_SUPPLY.ENERGY_TARGET,
 workerBody:K.CREEP_BODIES.worker,normalBody:K.WORKER.NORMAL_BODY_ENERGY,
 minerBody:K.CREEP_BODIES.miner,minerPrespawn:K.PRESPAWN_THRESHOLD.miner};
 var q={};${MYROOMS}
@@ -46,6 +51,38 @@ console.log('MB'+JSON.stringify(o));})();`,
 ];
 
 const TAGS = ["CHK", "NRG", "MB"];
+
+/**
+ * Считает вердикт энергоконтракта НА СТОРОНЕ NODE: консольный API режет
+ * выражение примерно на 1020 символах («expression size is too large»), а
+ * вычисления на комнатах раздувают команду. Здесь уже есть сырые st/te и
+ * пороги из CHK, поэтому арифметика бесплатна.
+ */
+function printBudget(chk, nrg) {
+  const stFloor = chk.stFloor;
+  const teTarget = chk.teTarget;
+  if (!nrg) return;
+  console.log("\n── Энергоконтракт фабрики ──");
+  console.log(
+    `порог склада ${stFloor}, цель терминала ${teTarget} ` +
+      `(сумма для обоих резервов ${stFloor + teTarget})`,
+  );
+  for (const name of Object.keys(nrg)) {
+    if (name === "t") continue;
+    const r = nrg[name];
+    if (!r || typeof r.st !== "number") continue;
+    const gate = r.st > stFloor && r.te >= teTarget;
+    const need = Math.max(0, teTarget - r.te);
+    const canRise = Math.max(0, r.st + r.te - stFloor - teTarget);
+    console.log(
+      `  ${name}: склад ${r.st}, терминал ${r.te}` +
+        (r.fe === null ? "" : `, фабрика ${r.fe}`) +
+        ` | гейт ${gate ? "ОТКРЫТ" : "закрыт"}` +
+        ` | терминалу до цели ${need}` +
+        ` | запас сверх резервов ${canRise}`,
+    );
+  }
+}
 
 (async () => {
   const lines = {};
@@ -85,13 +122,16 @@ const TAGS = ["CHK", "NRG", "MB"];
   } catch (err) {
     void err;
   }
+  const parsed = {};
   for (const tag of TAGS) {
     if (!(tag in lines)) {
       console.error("нет секции " + tag);
       process.exit(2);
     }
-    console.log(tag + " = " + JSON.stringify(JSON.parse(lines[tag]), null, 1));
+    parsed[tag] = JSON.parse(lines[tag]);
+    console.log(tag + " = " + JSON.stringify(parsed[tag], null, 1));
   }
+  printBudget(parsed.CHK, parsed.NRG);
 })().catch((e) => {
   console.error("ОШИБКА:", (e && e.message) || e);
   process.exit(1);

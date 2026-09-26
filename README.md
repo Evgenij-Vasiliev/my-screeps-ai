@@ -7,6 +7,25 @@
 вызывает `empire.run()` из `empire.js` (ядро империи). Вся остальная логика —
 модули рядом, в корне и в `constants/`.
 
+## Ветки: trunk — `Новая-Империя`
+
+**Trunk (основная линия) — `Новая-Империя`.** В ней вся разработка, из неё идёт
+деплой, и она же — ветка по умолчанию (`origin/HEAD`). Коммиты идут прямо в неё.
+
+| Ветка | Роль |
+| --- | --- |
+| `Новая-Империя` | **trunk**: единственная живая линия, источник деплоя. |
+| `main` | Архив: заморожена на 2026-07-08 (`8c99cad`), не сливается и не пушится. |
+| `empire-candidate-1`, `empire-candidate-2` | Эксперименты 2026-07-09, не развиваются. |
+
+Если ветка по умолчанию на GitHub сбилась на `main`, вернуть её:
+`gh repo edit --default-branch 'Новая-Империя'` или Settings → General →
+Default branch.
+
+Ветка **`test`** в деплое (`npx grunt screeps`, `.screeps.json`) — это ветка кода
+внутри аккаунта Screeps, **не** git-ветка: в неё выгружаются те же `*.js` из
+рабочего дерева (см. «Деплой»). Не путать её с trunk.
+
 ## Быстрый старт
 
 ```sh
@@ -78,9 +97,21 @@ node tests/run-all.js --timeout=60000
 
 Новый тест — просто файл `tests/<имя>.test.js`; правки в раннере не нужны.
 
-Актуальный статус: **31 PASS / 1 FAIL** (32 файла). Красный —
-`factory.manager.test.js` (контракт «все три флага фабричного контура
-включены»); состояние и решение по нему — в `docs/SESSION_HANDOFF.md`, §0.000.
+Числа тестов в этом файле и в `docs/SESSION_HANDOFF.md` не набираются руками:
+они сгенерированы из вывода раннера и живут между маркерами `tests:auto`
+(HTML-комментарии вокруг числа, в отрендеренном markdown невидимы). Обновить —
+`npm run test:counts`; проверить, что доки не разошлись с прогоном, —
+`npm run test:counts:check` (эту же сверку делает `npm run ci` в pre-push и в CI).
+
+Актуальный статус: <!-- tests:auto -->**36 PASS / 0 FAIL** (36 файлов)<!-- /tests:auto -->.
+Фабричный контур **включён под гейтом**: три флага (`factory`, `fillFactoryEnergy`,
+`collectFactoryBattery`) стоят `true` и обязаны совпадать — инвариант держит
+`tests/factory.manager.test.js`. Энергию фабрика получает только когда в комнате
+целы оба резерва: терминал 100 000–150 000 и склад ≥150 000
+(`factory.manager.canTakeStorageEnergy`), поэтому до готовности резервов она не
+объедает терминал, лаборатории и PowerSpawn. Порог подвоза терминала понижен до
+резерва склада (150 000), пол склада жёсткий. План и живые числа —
+`docs/FACTORY-ENERGY-CONTRACT.md`; история — `docs/SESSION_HANDOFF.md`, §0.0000.
 
 ### Live-скрипты (`tests/live.*.js`, `tests/_*.js`)
 
@@ -231,18 +262,61 @@ scripts/run-history-scrub.sh '<секрет>' '[REDACTED]'
 ## Проверки качества
 
 ```sh
-npx eslint .                        # 0 ошибок (27 warnings — в одноразовых _*.js)
-npx tsc --noEmit -p jsconfig.json   # типизация для редактора
+npm run check             # = lint + typecheck, обе части должны завершиться с кодом 0
+npm run lint              # eslint .                       — 0 ошибок (27 warnings — в одноразовых _*.js)
+npm run typecheck         # tsc по jsconfig.json + tsconfig.tools.json
+npm run test:counts       # переписать числа тестов в README/HANDOFF из вывода раннера
+npm run test:counts:check # сверить числа в доках с прогоном (код 1 при дрейфе)
+npm run ci                # = check + test + test:counts:check — все гейты одной командой
+```
+
+Эквивалент вызовов вручную:
+
+```sh
+npx eslint .                              # 0 ошибок (27 warnings — в одноразовых _*.js)
+npx tsc --noEmit -p jsconfig.json         # код бота: типы @types/screeps
+npx tsc --noEmit -p tsconfig.tools.json   # Node-инструменты: типы @types/node
 ```
 
 `eslint.config.js` подключает `eslint-config-screeps` и добавляет глобалы
 движка, которых нет в конфиге (`RESOURCE_BATTERY`, `RESOURCE_H`,
 `STRUCTURE_FACTORY`, `STRUCTURE_INVADER_CORE`).
 
-`jsconfig.json` проверяет JS с типами `@types/screeps` (`moduleResolution:
-classic`). `tsc` ругается только на Node-файлы вне кода бота
-(`screeps.token.js`, `scripts/*` — `TS2792`/`TS2591`, нет `@types/node`);
-ошибок в модулях бота нет.
+`jsconfig.json` проверяет JS бота с типами `@types/screeps`
+(`moduleResolution: classic`). Node-файлы (`Gruntfile.js`, `screeps.token.js`,
+`scripts/*`, `eslint.config.js`) в него не входят: у них другая среда и другие
+типы. Их отдельно проверяет `tsconfig.tools.json` с `@types/node`
+(`moduleResolution: node`). Оба вызова `tsc` должны завершаться с кодом 0;
+каталог `tests/` типами не покрыт ни одним из конфигов.
+
+### Хуки git (локальный CI)
+
+`npm install` сам подключает версионируемые хуки из `.githooks/` через
+`core.hooksPath` (`scripts/install-hooks.js`, он же `npm run hooks:install`;
+повторный вызов идемпотентен).
+
+| Хук | Что запускает | Когда |
+| --- | --- | --- |
+| `.githooks/pre-commit` | `npm run check` — eslint + оба `tsc` (~6 с) | перед каждым коммитом |
+| `.githooks/pre-push` | `npm run ci` = `npm run check` + `npm test` + `npm run test:counts:check` (~10 с) | перед push |
+
+Все проверки локальные: сеть, токен и живой шард не нужны. Хук упал —
+коммит (push) отменён, код возврата 1. Осознанный обход для WIP:
+
+```sh
+git commit --no-verify           # или: SKIP_CHECK=1 git commit -m "..."
+git push --no-verify             # или: SKIP_TESTS=1 git push
+```
+
+Проверить, что хуки подключены: `git config --get core.hooksPath` → `.githooks`.
+
+### CI на GitHub
+
+`.github/workflows/ci.yml` гоняет те же гейты на каждый push и pull request:
+job `check` — `npm run check`, job `test` — `npm test` + `npm run test:counts:check`
+(Node 24, `npm ci`). Секреты не нужны: раннер `tests/run-all.js` не обращается к
+шарду. Локальные хуки и GitHub CI используют одни и те же npm-скрипты, поэтому
+«зелено локально» и «зелено в CI» означают одно и то же.
 
 ## Документация
 
@@ -268,7 +342,8 @@ remote.*.js          дальняя добыча
 constants.js         barrel конфига
 constants/*.js       конфиг по доменам
 types.d.ts           типы для редактора
+.githooks/           pre-commit (npm run check) и pre-push (npm run ci)
 tests/               офлайн-тесты (*.test.js) и live-скрипты (live.*, _*)
-scripts/             служебные скрипты (очистка истории git)
+scripts/             служебные скрипты (хуки, деплой, sync-test-counts, очистка истории git)
 docs/                аудиты, планы, отчёты
 ```

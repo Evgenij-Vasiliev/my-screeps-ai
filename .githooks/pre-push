@@ -1,0 +1,43 @@
+#!/bin/sh
+# ===================================================
+# PRE-PUSH — все гейты перед отправкой ветки
+# ===================================================
+# Запускает `npm run ci` = `npm run check` (eslint + tsc) + `npm test`
+# (офлайн-раннер tests/run-all.js) + `npm run test:counts:check` (числа
+# тестов в README/HANDOFF совпадают с выводом раннера). Тесты локальные,
+# без сети и без обращения к живому шарду, поэтому хук безопасен для
+# любого пуша.
+#
+# Подключается тем же `core.hooksPath`, что и pre-commit:
+# `npm install` или `npm run hooks:install`.
+#
+# Осознанный обход:
+#
+#   git push --no-verify
+#   SKIP_TESTS=1 git push        # пропустить только этот хук
+set -u
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+if [ "${SKIP_TESTS:-0}" = "1" ]; then
+  echo "pre-push: SKIP_TESTS=1 — проверки пропущены" >&2
+  exit 0
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-push: npm не найден в PATH — npm run ci пропущен" >&2
+  echo "pre-push: поставьте Node.js или пушьте с --no-verify" >&2
+  exit 0
+fi
+
+echo "pre-push: npm run ci (eslint + tsc + офлайн-тесты)…"
+if ! npm run --silent ci; then
+  echo "" >&2
+  echo "pre-push: npm run ci упал — push отменён." >&2
+  echo "pre-push: почините ошибки выше либо используйте 'git push --no-verify'." >&2
+  exit 1
+fi
+
+echo "pre-push: все гейты пройдены"
+exit 0

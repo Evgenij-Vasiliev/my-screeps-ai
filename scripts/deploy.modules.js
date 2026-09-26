@@ -234,6 +234,7 @@ function listSourceFiles(root) {
  * @returns {Record<string, string>} имя модуля (путь без .js) → исходник
  */
 function collectModules(root) {
+  /** @type {Record<string, string>} */
   const modules = {};
   for (const rel of listSourceFiles(root)) {
     modules[rel.replace(/\.js$/, "")] = fs.readFileSync(
@@ -251,6 +252,7 @@ function collectModules(root) {
  * @returns {Record<string, string>}
  */
 function buildModules(fileMap) {
+  /** @type {Record<string, string>} */
   const modules = {};
   for (const [name, source] of Object.entries(fileMap)) {
     modules[name] = translateModuleSource(source, name);

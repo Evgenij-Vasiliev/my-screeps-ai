@@ -1,7 +1,7 @@
 "use strict";
 /**
  * ===================================================
- * LAB.WORKER.TEST.JS — офлайн-проверка роли lab.worker (v5, CPU)
+ * LAB.WORKER.TEST.JS — офлайн-проверка роли lab.worker (v6, CPU)
  * ===================================================
  * Проверяет то, что даёт выигрыш по CPU (docs/LAB-WORKER-CPU-OPTIMIZATION.md):
  *   1) гистерезис дозаправки: рейс начинается только при дефиците >= рюкзака;
@@ -10,7 +10,10 @@
  *   4) действие не вызывается «в молоко»: пока крип далеко, только travelTo;
  *   5) перебор конфигов без задачи — не чаще IDLE_SCAN_INTERVAL тиков;
  *   6) порог выгрузки продукта PRODUCT_UNLOAD_AT;
- *   7) round-robin порядок троек сохранён, room.memory.labWorkerIndex не пишется.
+ *   7) round-robin порядок троек сохранён, room.memory.labWorkerIndex не пишется;
+ *   8) v6: задача НЕ перепланируется, пока крип пуст (фаза забора), а
+ *      невыполнимая задача (источник исчерпан / приёмник полон / устаревший
+ *      amount / проваленный withdraw) сбрасывается.
  *
  * Запуск: node tests/lab.worker.test.js
  */
@@ -18,6 +21,7 @@
 global.OK = 0;
 global.ERR_NOT_IN_RANGE = -9;
 global.ERR_FULL = -8;
+global.ERR_NOT_ENOUGH_RESOURCES = -6;
 // Константа движка: нужна findSource — энергия теперь берётся только из склада
 // (единый источник энергии для всех крипов), и ветка сравнивает ресурс с ней.
 global.RESOURCE_ENERGY = "energy";
@@ -151,8 +155,15 @@ class Creep {
     const near = this.pos.isNearTo(target);
     this.withdrawCalls.push({ id: target.id, resource, amount, near });
     if (!near) return ERR_NOT_IN_RANGE;
+    const have = target.store[resource] || 0;
+    // Движок НЕ обрезает amount: если запрошено больше, чем лежит в цели, — это
+    // ERR_NOT_ENOUGH_RESOURCES (именно на это опирается проверка устаревшего
+    // memory.amount в lab.worker v6).
+    if (have <= 0) return ERR_NOT_ENOUGH_RESOURCES;
+    if (amount !== undefined && amount > have) return ERR_NOT_ENOUGH_RESOURCES;
+    if (this.store.getFreeCapacity() <= 0) return ERR_FULL;
     const room = Math.min(
-      target.store[resource] || 0,
+      have,
       amount === undefined ? Infinity : amount,
       this.store.getFreeCapacity(),
     );
@@ -348,6 +359,121 @@ function newCreep(roomName, capacity, contents) {
   mod.run(creep);
   check("задача clear_lab", creep.memory.task === "clear_lab", String(creep.memory.task));
   check("ресурс X", creep.memory.resource === "X", String(creep.memory.resource));
+}
+
+// ── 9. v6: пустой крип НЕ перепланирует рейс каждый тик ─────────────────
+{
+  console.log("\n9. v6: пустой крип в фазе забора не перепланирует задачу");
+  resetHeap();
+  makeRoom("T9", { rc1: "O", rc2: "H", product: "OH", l1: 2400, l2: 3000, prod: 0 });
+  const creep = newCreep("T9", 500, {});
+  let scans = 0;
+  const orig = mod.getRotatedConfigs;
+  mod.getRotatedConfigs = function (room) {
+    scans++;
+    return orig.call(mod, room);
+  };
+
+  Game.time += 1;
+  mod.run(creep);
+  const target1 = creep.memory.targetId;
+  check("тик 1: задача load_lab1", creep.memory.task === "load_lab1", String(creep.memory.task));
+  check("тик 1: перебор конфигов 1 раз", scans === 1, String(scans));
+
+  // Крип остаётся пустым и в пути: мок больше не «телепортирует» к цели.
+  creep.pos = new RoomPosition(1, 1, "T9");
+  creep.travelTo = function (target) {
+    this.travelToCalls.push(target.id);
+    return OK;
+  };
+  Game.time += 1;
+  mod.run(creep);
+
+  check("тик 2: задача сохранена", creep.memory.task === "load_lab1", String(creep.memory.task));
+  check("тик 2: цель не сменилась", creep.memory.targetId === target1, String(creep.memory.targetId));
+  check("тик 2: перебора НЕ было (всего 1, было бы 2)", scans === 1, String(scans));
+  check("тик 2: withdraw «в молоко» не вызван", creep.withdrawCalls.length === 0, String(creep.withdrawCalls.length));
+  mod.getRotatedConfigs = orig;
+}
+
+// ── 10. v6: исчерпанный источник сбрасывает задачу, а не вешает её ──────
+{
+  console.log("\n10. v6: источник исчерпан -> задача сброшена (раньше её скрывал сброс)");
+  resetHeap();
+  makeRoom("T10", { rc1: "O", rc2: "H", product: "OH", l1: 2400, l2: 3000, prod: 0 });
+  const creep = newCreep("T10", 500, {});
+  Game.time += 1;
+  mod.run(creep);
+  check("тик 1: задача load_lab1", creep.memory.task === "load_lab1", String(creep.memory.task));
+
+  // Источник опустел (реагент забрал другой крип), крип всё ещё пуст.
+  WORLD.objects.ST.store.O = 0;
+  creep.travelTo = function (target) {
+    this.travelToCalls.push(target.id);
+    return OK;
+  };
+  Game.time += 1;
+  mod.run(creep);
+  check("тик 2: задача сброшена", !creep.memory.task, String(creep.memory.task));
+}
+
+// ── 11. v6: полный приёмник завершает задачу (ERR_FULL) ─────────────────
+{
+  console.log("\n11. v6: ERR_FULL при сдаче не оставляет задачу висеть");
+  resetHeap();
+  makeRoom("T11", { rc1: "O", rc2: "H", product: "OH", l1: 2400, l2: 3000, prod: 0 });
+  const creep = newCreep("T11", 500, { O: 500 });
+  mod.run(creep);
+  check("тик 1: задача load_lab1 (везём)", creep.memory.task === "load_lab1", String(creep.memory.task));
+
+  // Лабу заполнил другой крип: крип уже рядом, transfer вернёт ERR_FULL.
+  WORLD.objects.L1.store.O = 3000;
+  creep.pos = new RoomPosition(10, 11, "T11");
+  Game.time += 1;
+  mod.run(creep);
+  check("тик 2: ERR_FULL снял задачу", !creep.memory.task, String(creep.memory.task));
+  check("тик 2: груз сохранён для следующей задачи", creep.store.O === 500, String(creep.store.O));
+}
+
+// ── 12. v6: устаревший amount не вешает задачу ───────────────────────────
+{
+  console.log("\n12. v6: устаревший amount обрезается по остатку источника");
+  resetHeap();
+  makeRoom("T12", { rc1: "O", rc2: "H", product: "OH", l1: 2400, l2: 3000, prod: 0 });
+  const creep = newCreep("T12", 500, {});
+  Game.time += 1;
+  mod.run(creep);
+  check("тик 1: задача load_lab1, amount 500", creep.memory.amount === 500, String(creep.memory.amount));
+
+  // Пока крип ехал, источник частично разобрали: осталось 100 при amount 500.
+  // Движок вернул бы ERR_NOT_ENOUGH_RESOURCES — роль обязана взять 100.
+  WORLD.objects.ST.store.O = 100;
+  creep.pos = new RoomPosition(10, 19, "T12");
+  Game.time += 1;
+  mod.run(creep);
+  const w = creep.withdrawCalls[creep.withdrawCalls.length - 1];
+  check("withdraw обрезан по остатку (100, а не 500)", w && w.amount === 100, JSON.stringify(w));
+  check("груз принят (100)", creep.store.O === 100, String(creep.store.O));
+  check("задача сохранена под сдачу", creep.memory.task === "load_lab1", String(creep.memory.task));
+  check("amount из памяти снят после OK", creep.memory.amount === undefined, String(creep.memory.amount));
+}
+
+// ── 13. v6: не-OK кроме «не дошёл» сбрасывает задачу ────────────────────
+{
+  console.log("\n13. v6: проваленный withdraw не повторяется вечно");
+  resetHeap();
+  makeRoom("T13", { rc1: "O", rc2: "H", product: "OH", l1: 2400, l2: 3000, prod: 0 });
+  const creep = newCreep("T13", 500, {});
+  Game.time += 1;
+  mod.run(creep);
+  check("тик 1: задача load_lab1", creep.memory.task === "load_lab1", String(creep.memory.task));
+
+  // Рюкзак забит другим ресурсом: движок вернёт ERR_FULL на withdraw.
+  creep.store = new Store(500, { energy: 500 });
+  creep.pos = new RoomPosition(10, 19, "T13");
+  Game.time += 1;
+  mod.run(creep);
+  check("задача сброшена (не зависла на проваленном withdraw)", !creep.memory.task, String(creep.memory.task));
 }
 
 // ── Итог ────────────────────────────────────────────────────────────────

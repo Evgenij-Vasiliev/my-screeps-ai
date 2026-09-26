@@ -27,20 +27,31 @@ const TASK_CONFIG = {
   fillPowerSpawnEnergy: true, // подвоз энергии в PowerSpawn
   fillTerminalEnergy: true, // подвоз энергии в терминал
   fillTerminalResources: true, // подвоз прочих ресурсов в терминал
-  // Фабричный контур включён (решение владельца): энергия едет в фабрику,
-  // battery вывозится, менеджер производства работает. Все три флага
-  // (fillFactoryEnergy + collectFactoryBattery + factory) включаются и
-  // выключаются только вместе — иначе фабрика либо голодает, либо копит
-  // продукт без вывоза. Контракт «все три включены» закреплён тестом
-  // tests/factory.manager.test.js (раздел 1).
-  fillFactoryEnergy: false, // подвоз энергии в фабрику
-  collectFactoryBattery: false, // забор battery из фабрики
+  // ФАБРИЧНЫЙ КОНТУР ВКЛЮЧЁН, НО ГЕЙТИТСЯ РЕЗЕРВАМИ (25.09.2026). Три флага
+  // подняты (true), потому что энергоприток фабрики всё равно закрыт, пока в
+  // комнате целы ОБА резерва: терминал 100 000–150 000 И склад ≥ 150 000.
+  // Решает не флаг, а гейт factory.manager.canTakeStorageEnergy: склад выше
+  // 150 000 × 1.1 = 165 000 И терминал ≥ 100 000. Пока гейт закрыт, задача
+  // fillFactoryEnergy не создаётся вовсе и фабрика энергии не получает — так
+  // она не выедает излишек склада, из которого живут терминал (комиссии рынка
+  // и терминал-сети), лаборатории и PowerSpawn. Резервы целы — излишек может
+  // забрать фабрика.
+  // Все три флага (fillFactoryEnergy + collectFactoryBattery + factory) обязаны
+  // совпадать: иначе фабрика либо голодает, либо копит продукт без вывоза.
+  // Инвариант «три флага согласованы» закреплён тестом
+  // tests/factory.manager.test.js (раздел 1) и не спорит с решением владельца
+  // о значении флагов; фактический расход ограничивает гейт.
+  // Условие достижимо: терминал пополняется из излишка склада выше 150 000
+  // (TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER), а не 195 000; подробности и
+  // таблица по комнатам — docs/FACTORY-ENERGY-CONTRACT.md.
+  fillFactoryEnergy: true, // подвоз энергии в фабрику (гейт canTakeStorageEnergy)
+  collectFactoryBattery: true, // забор battery из фабрики
   repairStructures: true, // ремонт повреждённых структур (дороги — только башни)
   buildStructures: true, // стройка по construction site
   fillTowers: true, // подвоз энергии в башни
   upgradeController: true, // прокачка контроллера
 
-  factory: false, // factory.manager.run() — 600 энергии → 50 battery
+  factory: true, // factory.manager.run() — 600 энергии → 50 battery
   powerSpawn: true, // powerSpawn.manager.run() — processPower() (GPL)
 };
 

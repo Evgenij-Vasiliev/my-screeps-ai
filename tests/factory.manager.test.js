@@ -16,8 +16,9 @@
  *      варить МОЖЕТ.
  *
  * Проверяем:
- *   1) конфиг: флаг включён, рецепт/резерв/пороги на месте, обе категории задач
- *      (fillFactoryEnergy, collectFactoryBattery) по-прежнему в TASK_CHAIN;
+ *   1) конфиг: три фабричных флага СОВПАДАЮТ (инвариант, а не «все true»),
+ *      рецепт/резерв/пороги на месте, обе категории задач (fillFactoryEnergy,
+ *      collectFactoryBattery) по-прежнему в TASK_CHAIN;
  *   2) manager реально доходит до produce() — в том числе на ПОЛНОЙ фабрике;
  *   3) manager не вызывает produce() без сырья и в cooldown; порог склада на
  *      produce() НЕ влияет — produce() не трогает storage, а запирает только
@@ -62,7 +63,7 @@ Module._resolveFilename = function (request, ...rest) {
 const factoryManager = require("../factory.manager");
 const taskGenerators = require("../task.generators");
 const taskExecutors = require("../task.executors");
-const { FACTORY, STORAGE, TASK_CONFIG, TASK_GEN_INTERVAL } = require("../constants");
+const { FACTORY, STORAGE, TERMINAL_SUPPLY, TASK_CONFIG, TASK_GEN_INTERVAL } = require("../constants");
 const { TASK_CHAIN } = require("../task.manager");
 
 let passed = 0;
@@ -117,13 +118,23 @@ function makeStorage(energy) {
   return { id: "ST", store: makeStore(1000000, { energy }) };
 }
 
-const STORAGE_PLENTY = STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER + 1;
+function makeTerminal(energy) {
+  return { id: "TE", store: makeStore(300000, { energy }) };
+}
 
-function roomState(factory, energy) {
+const STORAGE_PLENTY = STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER + 1;
+// Терминал по умолчанию «здоров» — на цели ENERGY_TARGET. Тесты энергобюджета
+// (раздел 4b) опускают его ниже цели явно.
+const TERMINAL_HEALTHY = TERMINAL_SUPPLY.ENERGY_TARGET;
+
+function roomState(factory, energy, terminalEnergy) {
   return {
     roomName: "R",
     factory,
     storage: makeStorage(energy),
+    terminal: makeTerminal(
+      terminalEnergy === undefined ? TERMINAL_HEALTHY : terminalEnergy,
+    ),
   };
 }
 
@@ -143,17 +154,30 @@ function collectTasks() {
 
 // ── 1. Конфиг ────────────────────────────────────────────────────────────
 {
-  console.log("\n1. Конфиг: флаг включён, рецепт и резерв заданы");
-  // Фабричный контур включён решением владельца: энергия снова едет в фабрику,
-  // продукт вывозится, менеджер производства работает. Контракт «все три флага
-  // включены» держим здесь явно, чтобы случайное выключение ловилось тестом,
-  // а не молчанием фабрики на живом шарде.
+  console.log("\n1. Контракт конфига: три флага, рецепт и резерв");
+  // Здесь держим ИНВАРИАНТ «три фабричных флага совпадают» (все вкл ИЛИ все
+  // выкл), а не конкретное состояние «все true»: вкл/выкл контура — решение
+  // владельца, и тест не должен с ним спорить. Инвариант ловит опасную
+  // половинчатость: снабжение без производства (голодание) или производство
+  // без вывоза (затор продукта). Каждый флаг обязан быть булевым: сравнение
+  // трёх `undefined` тоже «совпало» бы, пропустив опечатку в имени ключа.
+  // За фактический расход энергии отвечает гейт canTakeStorageEnergy
+  // (раздел 4b), а не значение флага, поэтому он проверяется независимо.
+  const factoryFlags = [
+    ["factory", TASK_CONFIG.factory],
+    ["fillFactoryEnergy", TASK_CONFIG.fillFactoryEnergy],
+    ["collectFactoryBattery", TASK_CONFIG.collectFactoryBattery],
+  ];
+  const factoryFlagsAreBooleans = factoryFlags.every(
+    ([, value]) => typeof value === "boolean",
+  );
+  const factoryFlagsAgree = factoryFlags.every(
+    ([, value]) => value === factoryFlags[0][1],
+  );
   check(
-    "фабричный контур включён всеми тремя флагами",
-    TASK_CONFIG.factory === true &&
-      TASK_CONFIG.fillFactoryEnergy === true &&
-      TASK_CONFIG.collectFactoryBattery === true,
-    `factory=${TASK_CONFIG.factory} fill=${TASK_CONFIG.fillFactoryEnergy} collect=${TASK_CONFIG.collectFactoryBattery}`,
+    "три фабричных флага совпадают (все вкл или все выкл)",
+    factoryFlagsAreBooleans && factoryFlagsAgree,
+    factoryFlags.map(([name, value]) => `${name}=${value}`).join(" "),
   );
   check(
     "активный рецепт описан в RECIPES",
@@ -346,6 +370,69 @@ TASK_CONFIG.collectFactoryBattery = true;
   resetTasks();
   taskGenerators.generateFillFactoryEnergy({ roomName: "R", factory: hungry, storage: null });
   check("без storage задача не создаётся", fillTasks().length === 0);
+}
+
+// ── 4b. Энергобюджет: фабрика не трогает склад, пока терминал ниже цели ──
+{
+  console.log("\n4b. Фабрика — последняя в очереди: резерв терминала обязателен");
+  const hungry = makeFactory({});
+
+  // Склад с излишком, но терминал ниже ENERGY_TARGET — задача НЕ создаётся.
+  resetTasks();
+  taskGenerators.generateFillFactoryEnergy(
+    roomState(hungry, STORAGE_PLENTY, TERMINAL_SUPPLY.ENERGY_TARGET - 1),
+  );
+  check(
+    "терминал ниже цели: задача снабжения не создаётся",
+    fillTasks().length === 0,
+    JSON.stringify(fillTasks()),
+  );
+
+  // Терминал ровно на цели — задача создаётся (гейт строгий только к складу).
+  resetTasks();
+  taskGenerators.generateFillFactoryEnergy(
+    roomState(hungry, STORAGE_PLENTY, TERMINAL_SUPPLY.ENERGY_TARGET),
+  );
+  check(
+    "терминал на цели: задача снабжения создаётся",
+    fillTasks().length === 1,
+    JSON.stringify(fillTasks()),
+  );
+
+  // Пустой терминал (сток обнулён) — фабрика тоже не берёт энергию.
+  resetTasks();
+  taskGenerators.generateFillFactoryEnergy(roomState(hungry, STORAGE_PLENTY, 0));
+  check(
+    "пустой терминал: задача снабжения не создаётся",
+    fillTasks().length === 0,
+    JSON.stringify(fillTasks()),
+  );
+
+  // Нет терминала (разрушенная комната) — энергию из склада не берём.
+  resetTasks();
+  taskGenerators.generateFillFactoryEnergy({
+    roomName: "R",
+    factory: hungry,
+    storage: makeStorage(STORAGE_PLENTY),
+    terminal: null,
+  });
+  check("нет терминала: задача снабжения не создаётся", fillTasks().length === 0);
+
+  // Единое условие для генератора и исполнителя — сама функция контракта.
+  check(
+    "canTakeStorageEnergy: склад выше резерва + терминал на цели",
+    factoryManager.canTakeStorageEnergy(
+      makeStorage(STORAGE_PLENTY),
+      makeTerminal(TERMINAL_SUPPLY.ENERGY_TARGET),
+    ) === true,
+  );
+  check(
+    "canTakeStorageEnergy: терминал ниже цели — отказ",
+    factoryManager.canTakeStorageEnergy(
+      makeStorage(STORAGE_PLENTY),
+      makeTerminal(TERMINAL_SUPPLY.ENERGY_TARGET - 1),
+    ) === false,
+  );
 }
 
 // ── 5. collectFactoryBattery не сломан ───────────────────────────────────
@@ -555,6 +642,7 @@ TASK_CONFIG.collectFactoryBattery = true;
   // Фаза сбора: снабжение уже закончено → не идём за энергией.
   const collector = makeCreep(0);
   collector.room.storage = storage;
+  collector.room.terminal = makeTerminal(TERMINAL_HEALTHY);
   Game.getObjectById = id => (id === "F1" ? satisfied : storage);
   const res4 = execute(collector, task);
   check("сбор при готовом снабжении: DONE", res4 === "DONE", res4);
@@ -563,6 +651,7 @@ TASK_CONFIG.collectFactoryBattery = true;
   // Фаза сбора при нужде в сырье → идём в storage.
   const collector2 = makeCreep(0);
   collector2.room.storage = storage;
+  collector2.room.terminal = makeTerminal(TERMINAL_HEALTHY);
   Game.getObjectById = id => (id === "F1" ? hungryFactory : storage);
   const res5 = execute(collector2, task);
   check("сбор при нужде: CONTINUE", res5 === "CONTINUE", res5);
@@ -570,6 +659,21 @@ TASK_CONFIG.collectFactoryBattery = true;
     "сбор при нужде: withdraw из storage",
     collector2.calls.withdraw.join(",") === RESOURCE_ENERGY,
     JSON.stringify(collector2.calls.withdraw),
+  );
+
+  // Энергобюджет в исполнителе: терминал ниже цели — задачу снимаем и НЕ
+  // забираем энергию со склада (иначе уже стоящая в очереди задача продолжала
+  // бы выедать склад после просадки терминала).
+  const collector3 = makeCreep(0);
+  collector3.room.storage = storage;
+  collector3.room.terminal = makeTerminal(TERMINAL_SUPPLY.ENERGY_TARGET - 1);
+  Game.getObjectById = id => (id === "F1" ? hungryFactory : storage);
+  const res6 = execute(collector3, task);
+  check("терминал ниже цели: исполнитель снимает задачу (SKIP)", res6 === "SKIP", res6);
+  check(
+    "терминал ниже цели: withdraw не вызывался",
+    collector3.calls.withdraw.length === 0,
+    JSON.stringify(collector3.calls.withdraw),
   );
 }
 

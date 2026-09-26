@@ -34,6 +34,7 @@
  * ===================================================
  */
 const recipes = require("./lab.recipes");
+const log = require("./log");
 
 const labManager = {
   /**
@@ -170,8 +171,11 @@ const labManager = {
     try {
       recipes.ensureTriples(room);
     } catch (e) {
-      console.log(
-        `[LabManager] binding ${room.name}: ${e && e.stack ? e.stack : e}`,
+      // Троттлинг: подсистема бросает исключение каждый тик, пока причина
+      // жива; без гейта лог в горячем пути забивает консоль и ест CPU.
+      log.warnThrottled(
+        "labManager:binding:" + room.name,
+        () => `[LabManager] binding ${room.name}: ${e && e.stack ? e.stack : e}`,
       );
     }
 
@@ -185,8 +189,9 @@ const labManager = {
     try {
       bootstrapBoostLab = recipes.ensureBoostLab(room);
     } catch (e) {
-      console.log(
-        `[LabManager] boostLab ${room.name}: ${e && e.stack ? e.stack : e}`,
+      log.warnThrottled(
+        "labManager:boostLab:" + room.name,
+        () => `[LabManager] boostLab ${room.name}: ${e && e.stack ? e.stack : e}`,
       );
     }
 
@@ -201,8 +206,9 @@ const labManager = {
       recipes.sync(room);
       configs = this.getConfigs(room.memory);
     } catch (e) {
-      console.log(
-        `[LabManager] plan ${room.name}: ${e && e.stack ? e.stack : e}`,
+      log.warnThrottled(
+        "labManager:plan:" + room.name,
+        () => `[LabManager] plan ${room.name}: ${e && e.stack ? e.stack : e}`,
       );
       configs = this.getConfigs(room.memory);
     }

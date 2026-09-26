@@ -778,6 +778,10 @@ class TerminalNetwork {
    *   считается и проверяется, обычные отправки (энергия, балансировка
    *   ресурсов) используют прежний порог, а энергия как ресурс всегда
    *   отправляется с прежним полом.
+   *   ОБНОВЛЕНО 25.09.2026: гейт подвоза понижен до 150k
+   *   (TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER), поэтому терминал доходит до
+   *   ENERGY_TARGET (100k) и упомянутая недостижимость снята. Пол донора
+   *   ENERGY_MIN = 10000 при этом не менялся.
    * @returns {number}
    */
   fitSendAmount(terminal, destRoomName, resourceType, desired, priority) {

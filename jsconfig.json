@@ -6,5 +6,12 @@
     "checkJs": true,
     "types": ["screeps"]
   },
-  "exclude": ["node_modules", "eslint.config.js", "tests"]
+  "exclude": [
+    "node_modules",
+    "eslint.config.js",
+    "tests",
+    "scripts",
+    "Gruntfile.js",
+    "screeps.token.js"
+  ]
 }

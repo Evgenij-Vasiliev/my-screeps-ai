@@ -1,10 +1,5 @@
 const roleMineralMiner = {
   run: function (creep, roomState) {
-    if (!creep.memory._started) {
-      console.log(`[Mineral] ${creep.memory.homeRoom} : mineralMiner started`);
-      creep.memory._started = true;
-    }
-
     if (creep.memory.working === undefined) {
       creep.memory.working = false;
     }
@@ -23,13 +18,10 @@ const roleMineralMiner = {
       const resourceType = Object.keys(creep.store)[0];
       if (!resourceType) return;
 
-      const transferResult = creep.transfer(storage, resourceType);
-      if (transferResult === ERR_NOT_IN_RANGE) {
+      // Ошибка transfer (склад полон, чужой ресурс) — штатное состояние:
+      // роль просто подождёт следующего тика. Лог в горячем пути не нужен.
+      if (creep.transfer(storage, resourceType) === ERR_NOT_IN_RANGE) {
         creep.travelTo(storage);
-      } else if (transferResult !== OK) {
-        console.log(
-          `[Mineral] ${creep.name} : transfer() вернул ошибку ${transferResult}`,
-        );
       }
       return;
     }
@@ -43,11 +35,10 @@ const roleMineralMiner = {
       roomState.mineral.mineral || Game.getObjectById(roomState.mineral.id);
     if (!mineral || !roomState.mineral.extractorId) return;
 
-    const harvestResult = creep.harvest(mineral);
-    if (harvestResult === ERR_NOT_IN_RANGE) {
+    // Ошибки harvest (нет экстрактора, минерал пуст) — штатные состояния:
+    // роль ждёт следующего тика, лог в горячем пути не нужен.
+    if (creep.harvest(mineral) === ERR_NOT_IN_RANGE) {
       creep.travelTo(mineral);
-    } else if (harvestResult !== OK) {
-      // console.log(...)
     }
   },
 };

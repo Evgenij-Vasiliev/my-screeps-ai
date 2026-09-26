@@ -469,6 +469,26 @@ function fixtures() {
     result === "SKIP",
     `${result} storage=${room.storage.store.energy}`,
   );
+
+  // ГЕЙТ ПОДВОЗА (правка 25.09.2026): порог — резерв склада 150000, а не
+  // 195000. Прежние 195000 были выше живого склада (191–195k), и цель терминала
+  // 100000 оставалась недостижимой.
+  const { STORAGE } = require("../constants");
+  room.storage.store.energy = STORAGE.ENERGY_MIN;
+  result = executors.fillTerminalEnergy(emptyCreep, task);
+  check(
+    "склад ровно на резерве 150000 — энергия не берётся (SKIP)",
+    result === "SKIP",
+    `${result} storage=${room.storage.store.energy}`,
+  );
+
+  room.storage.store.energy = STORAGE.ENERGY_MIN + 1;
+  result = executors.fillTerminalEnergy(emptyCreep, task);
+  check(
+    "склад 150001 — энергия берётся (CONTINUE), порог больше не 195000",
+    result === "CONTINUE",
+    `${result} storage=${room.storage.store.energy}`,
+  );
 }
 
 // ── Итог ─────────────────────────────────────────────────────────────────

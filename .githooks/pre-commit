@@ -1,0 +1,46 @@
+#!/bin/sh
+# ===================================================
+# PRE-COMMIT — локальный гейт качества перед коммитом
+# ===================================================
+# Запускает `npm run check` (eslint . + tsc по jsconfig.json и
+# tsconfig.tools.json). Полный набор гейтов, включая офлайн-тесты,
+# живёт в pre-push (`npm run ci`).
+#
+# Хук лежит в репозитории (`.githooks/`), а не в `.git/hooks/`, и
+# подключается через `core.hooksPath`:
+#
+#   npm install          # prepare -> scripts/install-hooks.js (автоматически)
+#   npm run hooks:install # то же самое вручную
+#
+# Осознанный обход для WIP-коммитов:
+#
+#   git commit --no-verify
+#   SKIP_CHECK=1 git commit -m "..."
+set -u
+
+# Корень репозитория, а не текущий каталог: GUI-клиенты git и
+# `git commit -C <path>` запускают хук из произвольного места.
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+if [ "${SKIP_CHECK:-0}" = "1" ]; then
+  echo "pre-commit: SKIP_CHECK=1 — проверки пропущены" >&2
+  exit 0
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-commit: npm не найден в PATH — npm run check пропущен" >&2
+  echo "pre-commit: поставьте Node.js или коммитьте с --no-verify" >&2
+  exit 0
+fi
+
+echo "pre-commit: npm run check (eslint + tsc)…"
+if ! npm run --silent check; then
+  echo "" >&2
+  echo "pre-commit: npm run check упал — коммит отменён." >&2
+  echo "pre-commit: почините ошибки выше либо используйте 'git commit --no-verify'." >&2
+  exit 1
+fi
+
+echo "pre-commit: проверки пройдены"
+exit 0

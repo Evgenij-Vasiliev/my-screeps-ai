@@ -26,6 +26,7 @@ const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
 const roleLabWorker = require("lab.worker");
 const cpuMonitor = require("cpuMonitor");
+const log = require("./log");
 const { TOWER, TASK_CONFIG } = require("./constants");
 
 // Специализации, которые действительно спавнятся (см. SPAWN_QUOTA).
@@ -54,7 +55,13 @@ function safe(label, fn) {
   try {
     fn();
   } catch (e) {
-    console.log(`[RoomManager] ${label}: ${e && e.stack ? e.stack : e}`);
+    // Лог троттлится: сломанная подсистема бросает исключение КАЖДЫЙ тик, и
+    // без гейта одна ошибка забивает консоль (а каждый console.log в Screeps
+    // стоит CPU). Ключ ограничен именем подсистемы, а не крипом.
+    log.warnThrottled(
+      "roomManager:" + label,
+      () => `[RoomManager] ${label}: ${e && e.stack ? e.stack : e}`,
+    );
   }
 }
 
@@ -97,8 +104,10 @@ function runCreepLogic(roomState) {
       try {
         boosting = boostManager.run(roomState, creep) === true;
       } catch (e) {
-        console.log(
-          `[RoomManager] Ошибка буста у крипа ${creep.name}: ${e.stack || e}`,
+        log.warnThrottled(
+          "roomManager:boost:" + roomState.roomName,
+          () =>
+            `[RoomManager] Ошибка буста у крипа ${creep.name}: ${e.stack || e}`,
         );
       }
     });
@@ -110,8 +119,15 @@ function runCreepLogic(roomState) {
         try {
           roleModule.run(creep, roomState);
         } catch (e) {
-          console.log(
-            `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
+          // Ключ — комната+роль, а не имя крипа: имя уникально и превратило
+          // бы защиту от спама в утечку heap (имена живут до global reset).
+          log.warnThrottled(
+            "roomManager:creep:" +
+              roomState.roomName +
+              ":" +
+              creep.memory.role,
+            () =>
+              `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
           );
         }
       },
@@ -486,10 +502,12 @@ function runLinkLogic(roomState) {
     try {
       linkManager.run(roomState);
     } catch (e) {
-      console.log(
-        `[RoomManager] Ошибка linkManager в комнате ${roomState.roomName}: ${
-          e.stack || e
-        }`,
+      log.warnThrottled(
+        "roomManager:links:" + roomState.roomName,
+        () =>
+          `[RoomManager] Ошибка linkManager в комнате ${roomState.roomName}: ${
+            e.stack || e
+          }`,
       );
     }
   });
@@ -730,8 +748,12 @@ module.exports = {
           this.runRoom(roomState),
         );
       } catch (e) {
-        console.log(
-          `[RoomManager] room:${roomState.roomName}: ${e && e.stack ? e.stack : e}`,
+        log.warnThrottled(
+          "roomManager:room:" + roomState.roomName,
+          () =>
+            `[RoomManager] room:${roomState.roomName}: ${
+              e && e.stack ? e.stack : e
+            }`,
         );
       }
     }

@@ -30,10 +30,16 @@ if (!SEARCH || SEARCH.length < 8) {
   process.exit(2);
 }
 
+/**
+ * @param {string[]} args
+ * @param {Buffer | string} [input]
+ * @returns {Buffer}
+ */
 const git = (args, input) => {
+  /** @type {{ maxBuffer: number, input?: Buffer | string }} */
   const opts = { maxBuffer: 1 << 30 };
   if (input !== undefined) opts.input = input;
-  return execFileSync("git", args, opts);
+  return /** @type {Buffer} */ (execFileSync("git", args, opts));
 };
 const gitText = (args, input) => git(args, input).toString("utf8").trim();
 const realOid = (oid) => (oid.length === 40 ? oid : gitText(["rev-parse", oid]));
@@ -64,7 +70,7 @@ const serializeTree = (entries) => {
     parts.push(
       Buffer.from(e.mode + " ", "utf8"),
       e.name,
-      Buffer.from([0], "utf8"),
+      Buffer.from([0]),
       Buffer.from(e.oid, "hex")
     );
   }
@@ -137,6 +143,7 @@ while (tstack.length) {
 function batchRead(oids) {
   if (oids.length === 0) return [];
   const out = git(["cat-file", "--batch"], Buffer.from(oids.join("\n") + "\n", "utf8"));
+  /** @type {[string, Buffer][]} */
   const result = [];
   let pos = 0;
   while (pos < out.length) {

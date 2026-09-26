@@ -3,10 +3,38 @@
  * Варит активный рецепт фабрики (FACTORY.ACTIVE_RECIPE): сейчас это
  * 600 энергии → 50 battery (COMMODITIES.RESOURCE_BATTERY в движке, cooldown 10).
  *
- * Подсистема включена флагом TASK_CONFIG.factory. Снабжение включено
- * (TASK_CONFIG.fillFactoryEnergy) и обязано оставлять в store резерв под
- * результат производства — FACTORY.PRODUCT_RESERVE, см. isEnergySupplyComplete();
- * вывоз продукта делает collectFactoryBattery.
+ * Подсистема включается флагом TASK_CONFIG.factory. ФЛАГИ ВКЛЮЧЕНЫ (true), но
+ * расход энергии закрыт гейтом резервов: пока империя не держит требуемые
+ * резервы (терминал 100000–150000, склад ≥150000), фабрика энергии не получает
+ * — иначе она выедает излишек, которым живут терминал, лаборатории и
+ * PowerSpawn. Гейт — canTakeStorageEnergy (см. ниже). Снабжение
+ * (TASK_CONFIG.fillFactoryEnergy) обязано оставлять в store резерв под
+ * результат производства — FACTORY.PRODUCT_RESERVE, см.
+ * isEnergySupplyComplete(); вывоз продукта делает collectFactoryBattery.
+ * Условия, живые числа и порядок — docs/FACTORY-ENERGY-CONTRACT.md.
+ *
+ * ЭНЕРГЕТИЧЕСКИЙ КОНТРАКТ КОМНАТЫ (почему фабрика не «ложит» склад и терминал).
+ * Фабрика — ПОСЛЕДНИЙ потребитель энергии в комнате, а не первый. Снабжение
+ * имеет право брать энергию из Storage, только когда целы ОБА резерва
+ * (canTakeStorageEnergy):
+ *   1) Storage > STORAGE.ENERGY_MIN × FACTORY.ENERGY_RESERVE_MULTIPLIER
+ *      (150 000 × 1.1 = 165 000) — резерв комнаты + рабочий буфер, из которого
+ *      берут лаборатории/PowerSpawn/ремонт (они ходят в склад только выше
+ *      STORAGE.ENERGY_MIN, см. lab.worker.js);
+ *   2) Terminal >= TERMINAL_SUPPLY.ENERGY_TARGET (100 000) — оплата рынка и
+ *      терминал-сети (лимит владельца: в терминале всегда 100 000–150 000).
+ *
+ * Прежний гейт был только по складу (150 000) — и этого мало: терминал
+ * пополнялся ИЗ ИЗЛИШКА СКЛАДА ВЫШЕ 195 000 (прежний гейт подвоза), поэтому
+ * фабрика, выедающая всё выше 150 000, НАВСЕГДА запирала терминал ниже его цели.
+ * Живой замер 25.09.2026 (тик 83221605): склад 191–195k, терминал 39–71k.
+ * Прямого withdraw из терминала у фабрики нет и не было
+ * (energySource.withdrawFromStorage берёт только Storage) — «фабрика ложит
+ * терминал» означало именно это голодание, а не отдельный сток.
+ *
+ * Гейт подвоза терминала теперь 150 000 (TERMINAL_SUPPLY.FILL_STORAGE_MULTIPLIER),
+ * то есть терминал может дойти до 100 000 из излишка склада над резервом; а
+ * фабрика включается только после этого и берёт лишь то, что выше 165 000.
  *
  * Пороги проверяются ДО produce(): без сырья движок возвращает
  * ERR_NOT_ENOUGH_RESOURCES, и это чистый расход CPU без результата.
@@ -25,7 +53,7 @@
  * продаж решает market.manager (battery входит в MARKET.SELL_RESOURCES), а не
  * эта подсистема.
  */
-const { FACTORY } = require("./constants");
+const { FACTORY, STORAGE, TERMINAL_SUPPLY } = require("./constants");
 
 /**
  * Рецепт, который фабрика варит сейчас.
@@ -46,6 +74,41 @@ function componentsVolume(recipe) {
     total += recipe.components[resourceType];
   }
   return total;
+}
+
+/**
+ * Имеет ли снабжение фабрики право брать энергию из Storage ПРЯМО СЕЙЧАС.
+ *
+ * Единое условие для генератора задач (task.generators.generateFillFactoryEnergy)
+ * и исполнителя (task.executors.executeFillFactoryEnergy). Оба резерва комнаты
+ * обязаны быть целы:
+ *   - Storage выше STORAGE.ENERGY_MIN × FACTORY.ENERGY_RESERVE_MULTIPLIER
+ *     (150 000 × 1.1 = 165 000) — резерв комнаты и рабочий буфер критических
+ *     систем (лаборатории/PowerSpawn/ремонт берут из склада только выше
+ *     STORAGE.ENERGY_MIN);
+ *   - Terminal держит не меньше TERMINAL_SUPPLY.ENERGY_TARGET (100 000) —
+ *     иначе фабрика выедает излишек, из которого терминал пополняется, и он
+ *     остаётся ниже цели (см. заголовок файла).
+ *
+ * Терминал обязателен: фабрика есть только на RCL8, а терминал — с RCL6,
+ * поэтому «фабрика без терминала» — это разрушенная комната, и брать из неё
+ * энергию нельзя. Само производство (run) этим условием не гейтится: produce()
+ * расходует энергию, УЖЕ лежащую в фабрике, а не со склада.
+ *
+ * @param {Object|null} storage
+ * @param {Object|null} terminal
+ * @returns {boolean}
+ */
+function canTakeStorageEnergy(storage, terminal) {
+  if (!storage) return false;
+
+  const storageFloor = STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
+  if ((storage.store[RESOURCE_ENERGY] || 0) <= storageFloor) return false;
+
+  if (!terminal) return false;
+  return (
+    (terminal.store[RESOURCE_ENERGY] || 0) >= TERMINAL_SUPPLY.ENERGY_TARGET
+  );
 }
 
 /**
@@ -75,7 +138,7 @@ function isEnergySupplyComplete(factory) {
  * @param {Object} roomState
  */
 function run(roomState) {
-  const { factory, roomName } = roomState;
+  const { factory } = roomState;
 
   if (!factory) return;
 
@@ -104,16 +167,15 @@ function run(roomState) {
   // не защищала: она лишь запирала доставленную энергию, пока склад не поднимется
   // выше порога. Живой случай (24.09.2026, docs/INCOME-AND-PREEMPTION-CHECK.md):
   // E37S38 держала 40 731 энергии и не варила 956 тиков, потому что склад стоял
-  // на 164 361–164 898 ≤ 165 000. Резерв склада защищают ДРУГИЕ места: генератор
-  // generateFillFactoryEnergy не создаёт задачу выше порога, а
-  // energySource.withdrawFromStorage не даёт опустить склад ниже
-  // STORAGE.ENERGY_MIN.
-  const result = factory.produce(FACTORY.ACTIVE_RECIPE);
-  if (result !== OK) {
-    console.log(
-      `[Factory] ${roomName} : produce(${FACTORY.ACTIVE_RECIPE}) вернул ошибку ${result}`,
-    );
-  }
+  // на 164 361–164 898 ≤ 165 000. Резервы склада и терминала защищают ДРУГИЕ
+  // места: генератор generateFillFactoryEnergy не создаёт задачу без
+  // canTakeStorageEnergy, исполнитель повторяет то же условие перед withdraw, а
+  // energySource.withdrawFromStorage физически не даёт опустить склад ниже
+  // STORAGE.ENERGY_MIN (обрезает amount по остатку сверх резерва).
+  // Сырьё, cooldown и место проверены выше, поэтому ненулевой код возврата —
+  // редкая гонка состояния. Раньше он печатался каждый тик: строка в консоли в
+  // горячем пути стоит CPU, а действия всё равно нет.
+  factory.produce(FACTORY.ACTIVE_RECIPE);
 }
 
 /**
@@ -145,4 +207,9 @@ function collectableResources(factory) {
   return out;
 }
 
-module.exports = { run, isEnergySupplyComplete, collectableResources };
+module.exports = {
+  run,
+  isEnergySupplyComplete,
+  canTakeStorageEnergy,
+  collectableResources,
+};

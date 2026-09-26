@@ -12,8 +12,16 @@ const { STORAGE } = require("./constants");
 module.exports = {
   /**
    * Берёт энергию из storage, не опуская его ниже STORAGE.ENERGY_MIN
-   * (если не ignoreReserve). Когда storage на резерве — забирает
-   * из терминала (туда приходит балансировка TerminalNetwork).
+   * (если не ignoreReserve). Терминал источником не является — см. ниже.
+   *
+   * ЖЁСТКИЙ ПОЛ (правка под лимит владельца «в хранилище не меньше 150 000»).
+   * Раньше проверялся только ФАКТ «резерв ещё цел» (`storageEnergy >
+   * STORAGE.ENERGY_MIN`), а забор шёл полным `withdraw()` — до всего рюкзака
+   * крипа. Один воркер при складе 150 001 и свободных 300 забирал 300 и оставлял
+   * 149 701, то есть склад уходил НИЖЕ резерва. Теперь amount считается как
+   * остаток СВЕРХ резерва (`storageEnergy − STORAGE.ENERGY_MIN`), поэтому склад
+   * не опускается ниже пола ни на единицу — сколько бы воркеров ни забирало в
+   * одном тике (каждый читает живой store).
    *
    * @param {Creep} creep
    * @param {boolean} [ignoreReserve=false] - true для аварийного режима
@@ -31,12 +39,17 @@ module.exports = {
     const storageEnergy = storage ? storage.store[RESOURCE_ENERGY] || 0 : 0;
     const moveFn = move || function (c, target) { return c.travelTo(target); };
 
-    if (
-      storage &&
-      storageEnergy > 0 &&
-      (ignoreReserve || storageEnergy > STORAGE.ENERGY_MIN)
-    ) {
-      if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+    // Разрешённый к забору объём: при обычном режиме — только излишек над
+    // резервом; в аварийном — весь остаток склада.
+    const allowance = ignoreReserve
+      ? storageEnergy
+      : storageEnergy - STORAGE.ENERGY_MIN;
+
+    if (storage && allowance > 0) {
+      const free = creep.store.getFreeCapacity();
+      const amount = Math.min(free, allowance);
+      if (amount <= 0) return false; // рюкзак полон — взять нечего
+      if (creep.withdraw(storage, RESOURCE_ENERGY, amount) === ERR_NOT_IN_RANGE) {
         moveFn(creep, storage);
       }
       return true;
@@ -45,13 +58,11 @@ module.exports = {
     // ТЕРМИНАЛ КАК ИСТОЧНИК ЭНЕРГИИ НЕ ИСПОЛЬЗУЕТСЯ.
     // Правило владельца: единый источник энергии для всех крипов — ХРАНИЛИЩЕ.
     // Здесь стояла ветка `withdraw(terminal, ENERGY)` «когда storage на резерве»,
-    // и она была единственным стоком, который опустошал терминал в ноль: подвоза
-    // у терминала нет, пока склад ниже 195000 (гейт TERMINAL_SUPPLY.
-    // STORAGE_RESERVE_MULTIPLIER в task.generators.js), а брали из него все —
-    // спавны, расширения, башни, ремонт, стройка, апгрейд. Энергия терминала
-    // предназначена комиссиям отправок (terminalNetwork) и сделок (market).
-    // Аварийные потребители берут из склада с ignoreReserve=true (вызов
-    // fillSpawnsExtensions при room.energyAvailable < 400, constants.js BOOTSTRAP).
+    // и она была единственным стоком, который опустошал терминал в ноль: брали из
+    // него все — спавны, расширения, башни, ремонт, стройка, апгрейд, — а
+    // энергия терминала предназначена комиссиям отправок (terminalNetwork) и
+    // сделок (market). Аварийные потребители берут из склада с ignoreReserve=true
+    // (вызов fillSpawnsExtensions при room.energyAvailable < 400, BOOTSTRAP).
     return false;
   },
 };

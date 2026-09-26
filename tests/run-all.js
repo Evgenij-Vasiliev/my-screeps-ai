@@ -22,6 +22,13 @@
  *   node tests/run-all.js -v              # печатать вывод и успешных тестов
  *   node tests/run-all.js --timeout=60000 # таймаут на тест, мс (по умолч. 120000)
  *   node tests/run-all.js --list          # только показать, что будет запущено
+ *   node tests/run-all.js --json          # в stdout только JSON-сводка (для скриптов)
+ *   node tests/run-all.js --summary-file=/tmp/summary.json
+ *
+ * Полный прогон без фильтров дополнительно пишет JSON-сводку в
+ * tests/.last-run.json — из неё scripts/sync-test-counts.js берёт числа для
+ * README/SESSION_HANDOFF. Отфильтрованный прогон сводку НЕ трогает: иначе
+ * числа в доках сузились бы до подмножества тестов.
  */
 
 const fs = require("fs");
@@ -34,17 +41,27 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const TEST_SUFFIX = ".test.js";
 /** Хвост вывода упавшего теста, который печатается в отчёте. */
 const FAILURE_TAIL_LINES = 40;
+/**
+ * Куда полный прогон пишет машиночитаемую сводку. Путь знает и
+ * scripts/sync-test-counts.js — держать эти две строки согласованными.
+ */
+const DEFAULT_SUMMARY_FILE = path.join(TESTS_DIR, ".last-run.json");
 
 // ── Разбор аргументов ────────────────────────────────────────────────────
 const filters = [];
 let verbose = false;
 let listOnly = false;
+let jsonOnly = false;
+let summaryFile = DEFAULT_SUMMARY_FILE;
 let timeoutMs = DEFAULT_TIMEOUT_MS;
 
 for (const arg of process.argv.slice(2)) {
   if (arg === "-v" || arg === "--verbose") verbose = true;
   else if (arg === "--list") listOnly = true;
-  else if (arg === "-h" || arg === "--help") {
+  else if (arg === "--json") jsonOnly = true;
+  else if (arg.startsWith("--summary-file=")) {
+    summaryFile = path.resolve(ROOT, arg.slice("--summary-file=".length));
+  } else if (arg === "-h" || arg === "--help") {
     console.log(fs.readFileSync(__filename, "utf8").split("*/")[0] + "*/");
     process.exit(0);
   } else if (arg.startsWith("--timeout=")) {
@@ -100,6 +117,12 @@ const red = paint(31);
 const yellow = paint(33);
 const dim = paint(2);
 const bold = paint(1);
+
+/**
+ * В `--json` stdout принадлежит машине: человекочитаемый прогресс молчит,
+ * остаётся ровно один JSON-объект. Ошибки по-прежнему идут в stderr.
+ */
+const log = jsonOnly ? () => {} : (...args) => console.log(...args);
 
 // ── Запуск одного теста ──────────────────────────────────────────────────
 /**
@@ -166,15 +189,32 @@ function printFailureOutput(output) {
   const lines = output.replace(/\s+$/, "").split("\n");
   const tail = lines.slice(-FAILURE_TAIL_LINES);
   if (lines.length > tail.length) {
-    console.log(dim(`      … пропущено строк: ${lines.length - tail.length}`));
+    log(dim(`      … пропущено строк: ${lines.length - tail.length}`));
   }
-  for (const line of tail) console.log(dim(`      │ ${line}`));
+  for (const line of tail) log(dim(`      │ ${line}`));
+}
+
+// ── Машиночитаемая сводка ────────────────────────────────────────────────
+/**
+ * Полный прогон (без фильтров) оставляет сводку в tests/.last-run.json —
+ * единственный источник чисел для README/SESSION_HANDOFF. Отфильтрованный
+ * прогон сводку не пишет: он описывает подмножество, а не состояние проекта.
+ * @param {object} summary
+ */
+function writeSummary(summary) {
+  try {
+    fs.writeFileSync(summaryFile, `${JSON.stringify(summary, null, 2)}\n`);
+  } catch (err) {
+    console.error(
+      `[раннер] не удалось записать сводку ${summaryFile}: ${err.message}`,
+    );
+  }
 }
 
 // ── Основной прогон ──────────────────────────────────────────────────────
 (async () => {
   const total = selected.length;
-  console.log(
+  log(
     bold(`\nЗапуск ${total} тест(ов) из tests/`) +
       dim(`  (таймаут на тест: ${timeoutMs} мс, node ${process.version})\n`),
   );
@@ -182,21 +222,22 @@ function printFailureOutput(output) {
   const failures = [];
   let passedCount = 0;
   const startedAt = Date.now();
+  const startedHr = process.hrtime.bigint();
 
   for (let i = 0; i < total; i++) {
     const file = selected[i];
     const label = `[${String(i + 1).padStart(String(total).length)}/${total}]`;
-    process.stdout.write(`${dim(label)} ${file} … `);
+    if (!jsonOnly) process.stdout.write(`${dim(label)} ${file} … `);
 
     const result = await runTest(file);
     const secs = (result.durationMs / 1000).toFixed(2);
 
     if (result.ok) {
       passedCount++;
-      console.log(green("PASS") + dim(` (${secs}s)`));
+      log(green("PASS") + dim(` (${secs}s)`));
       if (verbose && result.output.trim()) {
         for (const line of result.output.replace(/\s+$/, "").split("\n")) {
-          console.log(dim(`      │ ${line}`));
+          log(dim(`      │ ${line}`));
         }
       }
       continue;
@@ -205,33 +246,54 @@ function printFailureOutput(output) {
     const reason = result.timedOut
       ? `TIMEOUT (>${timeoutMs} мс)`
       : `FAIL (код ${result.code}${result.signal ? `, сигнал ${result.signal}` : ""})`;
-    console.log(yellow(reason) + dim(` (${secs}s)`));
-    failures.push({ file, reason, output: result.output });
+    log(yellow(reason) + dim(` (${secs}s)`));
+    failures.push({
+      file,
+      reason,
+      timedOut: result.timedOut,
+      output: result.output,
+    });
   }
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(2);
+  const durationMs = Math.round(Number(process.hrtime.bigint() - startedHr) / 1e6);
 
   if (failures.length > 0) {
-    console.log(red(bold(`\n─── Вывод упавших тестов ───`)));
+    log(red(bold(`\n─── Вывод упавших тестов ───`)));
     for (const failure of failures) {
-      console.log(red(`\n${failure.file} — ${failure.reason}`));
+      log(red(`\n${failure.file} — ${failure.reason}`));
       printFailureOutput(failure.output);
     }
   }
 
   // ── Итог ───────────────────────────────────────────────────────────────
-  console.log("");
-  console.log(
+  log("");
+  log(
     `${bold("Итого:")} ${green(`${passedCount} PASS`)}, ` +
       `${failures.length ? red(`${failures.length} FAIL`) : "0 FAIL"}, ` +
       `${total} всего ${dim(`(${elapsed}s)`)}`,
   );
 
   if (failures.length > 0) {
-    console.log(
-      red("Провалились: ") + failures.map((f) => f.file).join(", "),
-    );
+    log(red("Провалились: ") + failures.map((f) => f.file).join(", "));
   }
+
+  const summary = {
+    files: total,
+    passed: passedCount,
+    failed: failures.length,
+    failures: failures.map((f) => ({ file: f.file, reason: f.reason })),
+    timeoutMs,
+    durationMs,
+    node: process.version,
+    filters,
+    generatedAt: new Date().toISOString(),
+  };
+
+  // Фильтрованный прогон — не состояние проекта, а срез: сводку не трогаем.
+  if (filters.length === 0) writeSummary(summary);
+
+  if (jsonOnly) process.stdout.write(`${JSON.stringify(summary)}\n`);
 
   process.exitCode = failures.length === 0 ? 0 : 1;
 })();

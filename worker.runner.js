@@ -1,5 +1,6 @@
 const taskManager = require("task.manager");
 const taskExecutors = require("task.executors");
+const log = require("./log");
 
 const TASK_CHAIN = taskManager.TASK_CHAIN;
 
@@ -236,19 +237,18 @@ function run(creep) {
 
     if (!removed) {
       // Task не найдена в FIFO по taskId (аномалия — например, уже была
-      // удалена откуда-то ещё). Не считаем это молча успехом: явно
-      // логируем, но всё равно освобождаем Worker от "фантомной" Task,
-      // иначе он будет пытаться завершить несуществующую запись вечно.
-      console.log(
-        "[worker.runner] " +
-          creep.name +
-          ": не удалось " +
+      // удалена откуда-то ещё). Не считаем это молча успехом: сообщаем один
+      // раз за сессию на роль+комнату, чтобы аномалия была видна, но не
+      // печаталась на каждом крипе каждый тик. Worker всё равно освобождается
+      // от "фантомной" Task, иначе он пытался бы завершить несуществующую
+      // запись вечно.
+      log.warnOnce(
+        "worker.runner:phantom:" + roomName + ":" + currentTaskType,
+        () =>
+          `[worker.runner] ${creep.name}: не удалось ` +
           (result === "DONE" ? "completeTask" : "removeTask") +
-          " для taskId=" +
-          (creep.memory.task && creep.memory.task.taskId) +
-          " (" +
-          currentTaskType +
-          ") — Task не найдена в FIFO.",
+          ` для taskId=${creep.memory.task && creep.memory.task.taskId} ` +
+          `(${currentTaskType}) — Task не найдена в FIFO.`,
       );
     }
   }

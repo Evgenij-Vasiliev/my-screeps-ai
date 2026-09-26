@@ -1,0 +1,46 @@
+name: CI
+
+# Три гейта проекта: eslint без ошибок, tsc чист по обоим tsconfig,
+# офлайн-тесты зелёные — плюс сверка чисел тестов в README/HANDOFF с
+# выводом раннера. Локально те же команды запускают хуки
+# .githooks/pre-commit (npm run check) и .githooks/pre-push (npm run ci).
+on:
+  push:
+  pull_request:
+
+# Серия пушей в одну ветку не должна держать очередь прогонов.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint + typecheck (npm run check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  test:
+    name: offline tests (npm test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # tests/ сетап не требует: секретов и сети нет, шард не трогается.
+      - run: npm test
+      # Числа в README/HANDOFF сверяются со сводкой только что прошедшего
+      # прогона (tests/.last-run.json): доки с устаревшим числом краснеют.
+      - run: npm run test:counts:check

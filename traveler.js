@@ -24,6 +24,7 @@
  * require('util.traveler')({exportTraveler: false, installTraveler: false, installPrototype: true, defaultStuckValue: 2});
  */
 "use strict";
+const log = require("./log");
 module.exports = function (globalOpts = {}) {
   const gOpts = _.defaults(globalOpts, {
     exportTraveler: true,
@@ -95,7 +96,12 @@ module.exports = function (globalOpts = {}) {
         },
       });
       if (!_.isArray(ret)) {
-        console.log(`couldn't findRoute to ${destination}`);
+        // Не нашли маршрут — это горячий путь: попытка повторяется каждый тик
+        // крипа, поэтому строка троттлится, а не печатается каждый раз.
+        log.warnThrottled(
+          "traveler:noRoute:" + destination,
+          () => `couldn't findRoute to ${destination}`,
+        );
         return;
       }
       for (let value of /** @type {any[]} */ (ret)) {

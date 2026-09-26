@@ -34,12 +34,11 @@ module.exports = {
       if (sender.store[RESOURCE_ENERGY] === 0) continue; // пустой
       if (sender.cooldown > 0) continue; // кулдаун
 
-      const result = sender.transferEnergy(storageLink);
-      if (result !== OK) {
-        console.log(
-          `[LinkManager] ${roomState.roomName} : transferEnergy(${senderId}) вернул ошибку ${result}`,
-        );
-      }
+      // Нештатный код возврата (полный приёмник, чужой ресурс, снесённый
+      // линк) — штатное состояние тика: следующий тик либо условия изменятся,
+      // либо линк исчезнет из конфига. Раньше здесь печаталась строка на
+      // каждый такой линк КАЖДЫЙ тик — прямой расход CPU в горячем пути.
+      sender.transferEnergy(storageLink);
     }
   },
 };

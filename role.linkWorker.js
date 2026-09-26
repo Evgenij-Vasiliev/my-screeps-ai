@@ -139,12 +139,9 @@ module.exports = {
       : creep.transfer(storage, RESOURCE_ENERGY);
 
     if (acted === OK) return;
-    if (acted !== ERR_NOT_IN_RANGE) {
-      console.log(
-        `[LinkWorker] ${room.name} : ${empty ? "withdraw" : "transfer"}() вернул ошибку ${acted}`,
-      );
-      return;
-    }
+    // Не OK и не «далеко» (чужой ресурс в линке, полный storage) — штатное
+    // состояние: роль просто ждёт следующего тика. Лог в горячем пути не нужен.
+    if (acted !== ERR_NOT_IN_RANGE) return;
 
     // 2) Не достаём — становимся на рабочую клетку, откуда достают обе операции.
     let post = creep.memory.post;
