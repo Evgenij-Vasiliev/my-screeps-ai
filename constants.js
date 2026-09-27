@@ -90,6 +90,16 @@ const CACHE = {
   REFRESH_INTERVAL: 20,
 };
 
+const MARKET = {
+  // Тиков между проходами рынка. Один проход стоит 0.16-0.89 CPU на каждый
+  // РАЗЛИЧНЫЙ запрос getAllOrders (замерено на живом шарде, см.
+  // docs/CPU-BASELINE.md), поэтому рынок не может работать каждый тик.
+  // Откат к прежнему поведению — INTERVAL: 1.
+  INTERVAL: 10,
+  // Сколько тиков держится кэш списка комнат с терминалами.
+  TERMINALS_CACHE_TTL: 100,
+};
+
 const CPU = {
   REPORT_INTERVAL: 10,
   AVERAGE_WINDOW: 100,
@@ -98,6 +108,7 @@ const CPU = {
 
 module.exports = {
   STORAGE,
+  MARKET,
   TASK_TYPES,
   TERMINAL_SUPPLY,
   FACTORY,

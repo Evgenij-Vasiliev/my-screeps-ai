@@ -10,32 +10,12 @@ function run(creep) {
 
   const roomName = creep.room.name;
 
-  if (!creep.memory.task) {
-    const taskType = TASK_CHAIN[creep.memory.taskIndex];
-    const task = taskManager.getNextTask(roomName, taskType);
-
-    if (!task) {
-      // Очередь текущего taskType пуста (или все Task зарезервированы) —
-      // переходим ровно на следующий тип.
-      creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
-      return;
-    }
-
-    const reserved = taskManager.reserveTask(
-      roomName,
-      taskType,
-      task,
-      creep.name,
-    );
-
-    if (!reserved) {
-      // Защитный случай: не удалось зарезервировать (например, Task уже
-      // не в очереди). В этом тике ничего не берём.
-      return;
-    }
-
-    // Task остаётся в FIFO — только ссылка сохраняется в памяти Worker.
-    creep.memory.task = task;
+  // Миграция со старого формата: раньше в памяти крипа лежала КОПИЯ задачи
+  // целиком. Переносим её в taskId, иначе воркер бросил бы свою задачу
+  // (она осталась бы навсегда зарезервированной за ним в очереди).
+  if (creep.memory.task) {
+    creep.memory.taskId = creep.memory.task.taskId;
+    delete creep.memory.task;
   }
 
   // Категория определяется через taskIndex (позицию в TASK_CHAIN),
@@ -49,7 +29,36 @@ function run(creep) {
     return;
   }
 
-  const result = executor(creep, creep.memory.task);
+  // В памяти крипа — только идентификатор. Сама задача резолвится из
+  // очереди через heap-индекс (Memory больше не хранит её копию).
+  let task = creep.memory.taskId
+    ? taskManager.getTaskById(roomName, currentTaskType, creep.memory.taskId)
+    : null;
+
+  if (!task) {
+    // Задачи нет или она исчезла из очереди — берём следующую.
+    creep.memory.taskId = null;
+
+    const candidate = taskManager.getNextTask(roomName, currentTaskType);
+
+    if (!candidate) {
+      // Очередь текущего taskType пуста (или все Task зарезервированы) —
+      // переходим ровно на следующий тип.
+      creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
+      return;
+    }
+
+    if (!taskManager.reserveTask(roomName, currentTaskType, candidate, creep.name)) {
+      // Защитный случай: не удалось зарезервировать (например, Task уже
+      // не в очереди). В этом тике ничего не берём.
+      return;
+    }
+
+    creep.memory.taskId = candidate.taskId;
+    task = candidate;
+  }
+
+  const result = executor(creep, task);
 
   if (result === "CONTINUE") {
     return;
@@ -58,8 +67,8 @@ function run(creep) {
   if (result === "DONE" || result === "SKIP") {
     const removed =
       result === "DONE"
-        ? taskManager.completeTask(roomName, currentTaskType, creep.memory.task)
-        : taskManager.removeTask(roomName, currentTaskType, creep.memory.task);
+        ? taskManager.completeTask(roomName, currentTaskType, task)
+        : taskManager.removeTask(roomName, currentTaskType, task);
 
     if (!removed) {
       // Task не найдена в FIFO по taskId (аномалия — например, уже была
@@ -72,7 +81,7 @@ function run(creep) {
           ": не удалось " +
           (result === "DONE" ? "completeTask" : "removeTask") +
           " для taskId=" +
-          (creep.memory.task && creep.memory.task.taskId) +
+          task.taskId +
           " (" +
           currentTaskType +
           ") — Task не найдена в FIFO.",
@@ -80,7 +89,7 @@ function run(creep) {
     }
   }
 
-  creep.memory.task = null;
+  creep.memory.taskId = null;
   creep.memory.taskIndex = (creep.memory.taskIndex + 1) % TASK_CHAIN.length;
 }
 

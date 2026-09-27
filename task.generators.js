@@ -11,23 +11,11 @@ const {
 
 const TASK_TYPE = "fillSpawnsExtensions";
 
-function isDuplicateTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks[TASK_TYPE]) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_FILLSPAWNS = ["type", "targetId", "sourceId", "resourceType"];
 
-  // Резервация (reservedBy) намеренно не участвует в сравнении —
-  // зарезервированная Task тоже считается существующей.
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.targetId === candidate.targetId &&
-      task.sourceId === candidate.sourceId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicateTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillSpawnsExtensions", candidate, FIELDS_FILLSPAWNS);
 }
 
 function needsEnergy(target) {
@@ -72,37 +60,18 @@ function generateFillSpawnsExtensions(roomState) {
   }
 }
 
-function isDuplicatePowerSpawnPowerTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.fillPowerSpawnPower) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_POWERSPAWNPOWER = ["type", "targetId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.targetId === candidate.targetId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicatePowerSpawnPowerTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillPowerSpawnPower", candidate, FIELDS_POWERSPAWNPOWER);
 }
 
-function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.fillPowerSpawnEnergy) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_POWERSPAWNENERGY = ["type", "sourceId", "targetId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.sourceId === candidate.sourceId &&
-      task.targetId === candidate.targetId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillPowerSpawnEnergy", candidate, FIELDS_POWERSPAWNENERGY);
 }
 
 function generateFillPowerSpawnPower(roomState) {
@@ -181,21 +150,11 @@ function generateFillPowerSpawnEnergy(roomState) {
   taskManager.addTask(roomName, "fillPowerSpawnEnergy", candidate);
 }
 
-function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.fillFactoryEnergy) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_FILLFACTORYENERGY = ["type", "sourceId", "targetId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.sourceId === candidate.sourceId &&
-      task.targetId === candidate.targetId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillFactoryEnergy", candidate, FIELDS_FILLFACTORYENERGY);
 }
 
 function generateFillFactoryEnergy(roomState) {
@@ -234,21 +193,11 @@ function generateFillFactoryEnergy(roomState) {
   taskManager.addTask(roomName, "fillFactoryEnergy", candidate);
 }
 
-function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.collectFactoryBattery) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_COLLECTFACTORYBATTERY = ["type", "sourceId", "targetId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.sourceId === candidate.sourceId &&
-      task.targetId === candidate.targetId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "collectFactoryBattery", candidate, FIELDS_COLLECTFACTORYBATTERY);
 }
 
 function generateCollectFactoryBattery(roomState) {
@@ -281,21 +230,11 @@ function generateCollectFactoryBattery(roomState) {
   taskManager.addTask(roomName, "collectFactoryBattery", candidate);
 }
 
-function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.fillTerminalEnergy) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_FILLTERMINALENERGY = ["type", "sourceId", "targetId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.sourceId === candidate.sourceId &&
-      task.targetId === candidate.targetId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillTerminalEnergy", candidate, FIELDS_FILLTERMINALENERGY);
 }
 
 function generateFillTerminalEnergy(roomState) {
@@ -330,21 +269,11 @@ function generateFillTerminalEnergy(roomState) {
   taskManager.addTask(roomName, "fillTerminalEnergy", candidate);
 }
 
-function isDuplicateFillTerminalResourceTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.fillTerminalResources) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_FILLTERMINALRESOURCE = ["type", "sourceId", "targetId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.sourceId === candidate.sourceId &&
-      task.targetId === candidate.targetId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicateFillTerminalResourceTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillTerminalResources", candidate, FIELDS_FILLTERMINALRESOURCE);
 }
 
 function generateFillTerminalResources(roomState) {
@@ -386,21 +315,11 @@ function generateFillTerminalResources(roomState) {
   }
 }
 
-function isDuplicateFillTowersTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.fillTowers) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_FILLTOWERS = ["type", "targetId", "sourceId", "resourceType"];
 
-  return tasks.some(
-    task =>
-      task.type === candidate.type &&
-      task.targetId === candidate.targetId &&
-      task.sourceId === candidate.sourceId &&
-      task.resourceType === candidate.resourceType,
-  );
+function isDuplicateFillTowersTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "fillTowers", candidate, FIELDS_FILLTOWERS);
 }
 
 function generateFillTowers(roomState) {
@@ -433,15 +352,11 @@ function generateFillTowers(roomState) {
 
 const REPAIR_THRESHOLD_RATIO = 0.5;
 
-function isDuplicateRepairTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.repairStructures) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_REPAIR = ["targetId"];
 
-  return tasks.some(task => task.targetId === candidate.targetId);
+function isDuplicateRepairTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "repairStructures", candidate, FIELDS_REPAIR);
 }
 
 function generateRepairStructures(roomState) {
@@ -466,15 +381,28 @@ function generateRepairStructures(roomState) {
     taskManager.addTask(roomName, "repairStructures", candidate);
   }
 }
-function isDuplicateBuildTask(roomName, candidate) {
+/**
+ * Множество targetId, уже стоящих в очереди задач указанного типа.
+ * Собирается один раз, чтобы проверка дублей не была O(кандидаты x очередь).
+ * @param {string} roomName
+ * @param {string} taskType
+ * @returns {Set<string>}
+ */
+function collectTargetIds(roomName, taskType) {
+  const ids = new Set();
   const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.buildStructures) ||
-    [];
+    Memory.rooms &&
+    Memory.rooms[roomName] &&
+    Memory.rooms[roomName].tasks &&
+    Memory.rooms[roomName].tasks[taskType];
 
-  return tasks.some(task => task.targetId === candidate.targetId);
+  if (tasks) {
+    for (let i = 0; i < tasks.length; i++) {
+      ids.add(tasks[i].targetId);
+    }
+  }
+
+  return ids;
 }
 
 function generateBuildStructures(roomState) {
@@ -482,33 +410,30 @@ function generateBuildStructures(roomState) {
 
   const { roomName } = roomState;
 
-  const sites = Object.values(Game.constructionSites).filter(
-    site => site.pos.roomName === roomName,
-  );
+  // Стройплощадки комнаты из общего индекса — без перебора всей Империи
+  // на каждую комнату за тик.
+  const sites = roomState.constructionSites;
+  if (!sites || sites.length === 0) return;
 
-  for (const site of sites) {
-    const candidate = {
+  const existing = collectTargetIds(roomName, "buildStructures");
+
+  for (let i = 0; i < sites.length; i++) {
+    const siteId = sites[i].id;
+    if (existing.has(siteId)) continue;
+
+    taskManager.addTask(roomName, "buildStructures", {
       type: "build",
-      targetId: site.id,
-    };
-
-    if (isDuplicateBuildTask(roomName, candidate)) {
-      continue;
-    }
-
-    taskManager.addTask(roomName, "buildStructures", candidate);
+      targetId: siteId,
+    });
+    existing.add(siteId);
   }
 }
 
-function isDuplicateUpgradeTask(roomName, candidate) {
-  const tasks =
-    (Memory.rooms &&
-      Memory.rooms[roomName] &&
-      Memory.rooms[roomName].tasks &&
-      Memory.rooms[roomName].tasks.upgradeController) ||
-    [];
+// Поля, по которым задача считается дублем (задание 9 плана).
+const FIELDS_UPGRADE = ["targetId"];
 
-  return tasks.some(task => task.targetId === candidate.targetId);
+function isDuplicateUpgradeTask(roomName, candidate) {
+  return taskManager.hasDuplicate(roomName, "upgradeController", candidate, FIELDS_UPGRADE);
 }
 
 function generateUpgradeController(roomState) {

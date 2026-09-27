@@ -42,20 +42,84 @@ const ROLES = {
   worker: workerRunner,
 };
 
+function runCreep(creep, roomState) {
+  const roleModule = ROLES[creep.memory.role];
+  if (!roleModule) return;
+
+  try {
+    roleModule.run(creep, roomState);
+  } catch (e) {
+    console.log(`[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`);
+  }
+}
+
 function runCreepLogic(roomState) {
+  // Обычный режим: без замеров на каждом крипе. Два Game.cpu.getUsed() и
+  // замыкание на крипа стоили больше, чем весь остальной оверхед логики
+  // (замерено: getUsed() = 0.000244 CPU), а разбивка по ролям нужна редко.
+  if (!cpuMonitor.verboseEnabled()) {
+    for (const creep of roomState.creeps) {
+      if (creep) runCreep(creep, roomState);
+    }
+    return;
+  }
+
+  // Подробный режим (Memory.cpuMonitorVerbose = true) — замер по каждому крипу.
   for (const creep of roomState.creeps) {
     if (!creep) continue;
-    const roleModule = ROLES[creep.memory.role];
-    if (!roleModule) continue;
-    cpuMonitor.trackRole(creep.memory.role, () => {
-      try {
-        roleModule.run(creep, roomState);
-      } catch (e) {
-        console.log(
-          `[RoomManager] Ошибка у крипа ${creep.name}: ${e.stack || e}`,
-        );
-      }
-    });
+    cpuMonitor.trackRole(creep.memory.role, () => runCreep(creep, roomState));
+  }
+}
+
+/** Резолвит массив id в объекты, пропуская исчезнувшие. */
+function resolveByIds(ids) {
+  const out = [];
+  if (!ids) return out;
+  for (let i = 0; i < ids.length; i++) {
+    const obj = Game.getObjectById(ids[i]);
+    if (obj) out.push(obj);
+  }
+  return out;
+}
+
+/**
+ * Стены и валы комнаты — ЛЕНИВО (задание 7 плана).
+ *
+ * Раньше buildRoomState резолвил их каждый тик на каждую комнату: это
+ * сотни Game.getObjectById (замерено 0.000152 CPU каждый) на комнату за
+ * тик, тогда как нужны они раз в TOWER.REPAIR_INTERVAL тиков (ремонт) и
+ * раз в TOWER.HOSTILE_CHECK_INTERVAL тиков (резервный детектор атаки).
+ *
+ * Результат мемоизируется на объекте roomState, а тот живёт один тик —
+ * поэтому отдельной инвалидации не требуется.
+ */
+function getWallsAndRamparts(roomState) {
+  if (!roomState._wallsAndRamparts) {
+    roomState._wallsAndRamparts = resolveByIds(roomState.wallIds).concat(
+      resolveByIds(roomState.rampartIds),
+    );
+  }
+  return roomState._wallsAndRamparts;
+}
+
+/** Состояние комнаты, которому не обязательно переживать рестарт. */
+function roomHeap(roomName) {
+  if (!global.__roomHeap) global.__roomHeap = {};
+  if (!global.__roomHeap[roomName]) global.__roomHeap[roomName] = {};
+  return global.__roomHeap[roomName];
+}
+
+/**
+ * Записывает флаг атаки в Memory ТОЛЬКО при смене значения.
+ * Раньше underAttack переписывался каждый тик на каждую комнату, хотя
+ * меняется раз в сотни тиков.
+ */
+function setUnderAttack(roomName, underAttack) {
+  if (!Memory.rooms) Memory.rooms = {};
+  if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
+
+  if (Memory.rooms[roomName].underAttack !== underAttack) {
+    Memory.rooms[roomName].underAttack = underAttack;
   }
 }
 
@@ -63,17 +127,18 @@ function detectAttack(roomState) {
   const roomName = roomState.roomName;
   const ATTACK_DROP_THRESHOLD = 1500;
 
-  if (!Memory.rooms) Memory.rooms = {};
-  if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
+  const wallsAndRamparts = getWallsAndRamparts(roomState);
 
-  const wallsAndRamparts = []
-    .concat(roomState.walls)
-    .concat(roomState.ramparts);
+  let currentTotalHits = 0;
+  for (let i = 0; i < wallsAndRamparts.length; i++) {
+    currentTotalHits += wallsAndRamparts[i].hits;
+  }
 
-  const currentTotalHits = wallsAndRamparts.reduce((sum, s) => sum + s.hits, 0);
-  const previousTotalHits = Memory.rooms[roomName].lastWallHits;
-
-  Memory.rooms[roomName].lastWallHits = currentTotalHits;
+  // lastWallHits — в heap: это детектор, а не состояние Империи. После
+  // рестарта он просто начнёт отсчёт заново (как при первом запуске).
+  const heap = roomHeap(roomName);
+  const previousTotalHits = heap.lastWallHits;
+  heap.lastWallHits = currentTotalHits;
 
   if (previousTotalHits === undefined) {
     return false;
@@ -87,22 +152,44 @@ function runTowerLogic(roomState) {
     if (!roomState.towers || roomState.towers.length === 0) return;
 
     const roomName = roomState.roomName;
-    const wasUnderAttack =
-      Memory.rooms[roomName] && Memory.rooms[roomName].underAttack;
-    const hitsDropped = detectAttack(roomState);
-
-    const roomData = {};
-
-    if (wasUnderAttack || hitsDropped) {
-      roomData.hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
-    } else {
-      roomData.hostiles = [];
+    const heap = roomHeap(roomName);
+    // После рестарта heap пуст — подхватываем последнее известное значение
+    // из Memory, чтобы не потерять тик на повторное обнаружение атаки.
+    if (heap.underAttack === undefined) {
+      heap.underAttack = !!(
+        Memory.rooms &&
+        Memory.rooms[roomName] &&
+        Memory.rooms[roomName].underAttack
+      );
     }
 
-    Memory.rooms[roomName].underAttack = roomData.hostiles.length > 0;
+    // Основной сигнал — присутствие враждебных крипов. room.find движок
+    // кэширует в пределах тика, и это дешевле JS-обхода списка id стен.
+    const hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
+    let underAttack = hostiles.length > 0;
+
+    // Резервный сигнал — падение hits стен и валов: стены могут бить и без
+    // враждебных крипов в поле зрения. Обход дорогой, поэтому раз в
+    // TOWER.HOSTILE_CHECK_INTERVAL тиков, а не каждый тик.
+    if (
+      !underAttack &&
+      Game.time % TOWER.HOSTILE_CHECK_INTERVAL === 0 &&
+      detectAttack(roomState)
+    ) {
+      underAttack = true;
+    }
+
+    const roomData = { hostiles: underAttack ? hostiles : [] };
+
+    heap.underAttack = underAttack;
+    setUnderAttack(roomName, underAttack);
 
     if (Game.time % TOWER.REPAIR_INTERVAL === 0) {
-      roomData.woundedCreep = roomState.creeps.find(c => c.hits < c.hitsMax);
+      // Только крипы, физически находящиеся в комнате: heal() по крипу
+      // из другой комнаты — бесполезный интент.
+      roomData.woundedCreep = roomState.creepsInRoom.find(
+        c => c.hits < c.hitsMax,
+      );
 
       const wallThreshold =
         roomState.room.memory.wallThreshold || TOWER.WALL_THRESHOLD_DEFAULT;
@@ -110,9 +197,7 @@ function runTowerLogic(roomState) {
       // Поиск самой повреждённой стены/рампарта одним проходом, без filter+sort
       let weakestWallOrRampart = null;
       let foundBelowThreshold = false;
-      const wallsAndRamparts = []
-        .concat(roomState.walls)
-        .concat(roomState.ramparts);
+      const wallsAndRamparts = getWallsAndRamparts(roomState);
 
       for (let i = 0; i < wallsAndRamparts.length; i++) {
         const s = wallsAndRamparts[i];
@@ -171,6 +256,11 @@ function runLinkLogic(roomState) {
 }
 
 module.exports = {
+  // Экспортируется для офлайн-тестов (tests/tower.attack.test.js):
+  // логика башен и детектор атаки проверяются без запуска всего цикла.
+  runTowerLogic,
+  detectAttack,
+
   /**
    * Возвращает массив всех комнат, принадлежащих игроку.
    * @returns {Room[]}
@@ -186,7 +276,7 @@ module.exports = {
    * @param {Room} room
    * @returns {Object} roomState
    */
-  buildRoomState: function (room, precomputedCreeps) {
+  buildRoomState: function (room, precomputedCreeps, precomputedCreepsInRoom) {
     const cache = scanner.getStructureCache(room);
 
     const grouped = {
@@ -198,10 +288,6 @@ module.exports = {
         .map(id => Game.getObjectById(id))
         .filter(Boolean),
       roads: cache.roadIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      walls: cache.wallIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      ramparts: cache.rampartIds
-        .map(id => Game.getObjectById(id))
-        .filter(Boolean),
       factories: cache.factoryId
         ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
         : [],
@@ -261,6 +347,14 @@ module.exports = {
         c => c.memory.homeRoom === room.name || c.room.name === room.name,
       );
 
+    // Физически находящиеся в комнате — для задач, привязанных к месту
+    // (лечение башней), а не к принадлежности крипа комнате.
+    const creepsInRoom =
+      precomputedCreepsInRoom ||
+      Object.values(Game.creeps).filter(
+        c => c.room && c.room.name === room.name,
+      );
+
     return {
       room,
       roomName: room.name,
@@ -273,10 +367,14 @@ module.exports = {
       towers: grouped.towers,
       extensions: grouped.extensions,
       roads: grouped.roads,
-      walls: grouped.walls,
-      ramparts: grouped.ramparts,
+      // Только id: объекты резолвятся лениво, см. getWallsAndRamparts.
+      wallIds: cache.wallIds,
+      rampartIds: cache.rampartIds,
       damagedStructures,
       creeps,
+      creepsInRoom,
+      // Стройплощадки комнаты из общего индекса (один проход за тик).
+      constructionSites: scanner.getSitesByRoom()[room.name] || [],
       sources,
       links: grouped.links,
       labs: grouped.labs,
@@ -299,23 +397,41 @@ module.exports = {
 
     // Один проход по всем крипам империи вместо повторного
     // Object.values(Game.creeps).filter() внутри buildRoomState на каждую комнату.
-    // Сохраняем оригинальное поведение: крип может попасть в список и своей
-    // homeRoom, и текущей физической комнаты, если они различаются.
+    //
+    // ОДИН КРИП — РОВНО ОДИН roomState. Приоритет у homeRoom: именно он
+    // «владеет» крипом (квоты ролей, спавн). Раньше крип попадал и в свою
+    // homeRoom, и в текущую физическую комнату, если они различались, —
+    // и исполнял логику дважды за тик, а countRole считал его дважды.
+    //
+    // Кто физически находится в комнате — отдельный список creepsInRoom
+    // (нужен башням для лечения: лечить крипа из другой комнаты бессмысленно).
     const creepsByRoom = {};
-    for (const c of Object.values(Game.creeps)) {
+    const creepsInRoom = {};
+
+    for (const name in Game.creeps) {
+      const c = Game.creeps[name];
+      if (!c) continue;
+
       const homeRoom = c.memory.homeRoom;
-      const currentRoom = c.room.name;
+      const currentRoom = c.room && c.room.name;
+
+      if (currentRoom && roomNames.has(currentRoom)) {
+        (creepsInRoom[currentRoom] = creepsInRoom[currentRoom] || []).push(c);
+      }
 
       if (homeRoom && roomNames.has(homeRoom)) {
         (creepsByRoom[homeRoom] = creepsByRoom[homeRoom] || []).push(c);
-      }
-      if (currentRoom !== homeRoom && roomNames.has(currentRoom)) {
+      } else if (currentRoom && roomNames.has(currentRoom)) {
         (creepsByRoom[currentRoom] = creepsByRoom[currentRoom] || []).push(c);
       }
     }
 
     return rooms.map(room =>
-      this.buildRoomState(room, creepsByRoom[room.name] || []),
+      this.buildRoomState(
+        room,
+        creepsByRoom[room.name] || [],
+        creepsInRoom[room.name] || [],
+      ),
     );
   },
 

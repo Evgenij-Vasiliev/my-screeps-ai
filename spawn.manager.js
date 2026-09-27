@@ -11,19 +11,47 @@ const {
   PRESPAWN_THRESHOLD,
 } = require("./constants");
 
-function countRole(creeps, role) {
-  return creeps.filter(c => {
-    if (c.memory.role !== role) return false;
+/**
+ * Счётчики крипов по ролям — ОДИН проход по списку (задание 8 плана).
+ *
+ * Раньше countRole(creeps, role) вызывался на каждую роль из SPAWN_QUOTA,
+ * то есть список крипов проходился девять раз с созданием массива и
+ * замыкания на каждый проход. При этом у пяти ролей квота равна нулю —
+ * их счёт не нужен вовсе.
+ *
+ * Правила счёта сохранены прежние:
+ * - роль не из SPAWN_QUOTA или с нулевой квотой не считается;
+ * - крип, чей ticksToLive ниже PRESPAWN_THRESHOLD[role], не считается:
+ *   он «уже уходящий», вместо него нужен новый (иначе спавн опоздает).
+ *
+ * @param {Array} creeps
+ * @returns {Object} role -> количество
+ */
+function countRoles(creeps) {
+  const counts = {};
+
+  for (let i = 0; i < creeps.length; i++) {
+    const creep = creeps[i];
+    if (!creep) continue;
+
+    const role = creep.memory.role;
+
+    // !quota отсекает и 0, и роли вне таблицы квот.
+    if (!SPAWN_QUOTA[role]) continue;
+
     const threshold = PRESPAWN_THRESHOLD[role];
     if (
       threshold !== undefined &&
-      c.ticksToLive !== undefined &&
-      c.ticksToLive < threshold
+      creep.ticksToLive !== undefined &&
+      creep.ticksToLive < threshold
     ) {
-      return false;
+      continue;
     }
-    return true;
-  }).length;
+
+    counts[role] = (counts[role] || 0) + 1;
+  }
+
+  return counts;
 }
 
 /**
@@ -32,14 +60,20 @@ function countRole(creeps, role) {
 function run(roomState) {
   const spawn = roomState.spawns.find(s => !s.spawning);
   if (!spawn) return;
-  const creeps = roomState.creeps;
 
-  // if (countRole(creeps, "harvester") === 0) {
-  //   creepFactory.run(spawn, "harvester", roomState.roomName);
-  //   return;
-  // }
+  // Один проход вместо девяти.
+  const counts = countRoles(roomState.creeps);
 
   for (const role in SPAWN_QUOTA) {
+    const quota = SPAWN_QUOTA[role];
+
+    // Роль с нулевой квотой не спавнится — незачем её считать и проверять.
+    if (!quota) continue;
+
+    // Квота уже набрана. Проверка идёт ДО дорогих условий ниже: например,
+    // для mineralMiner это экономит Game.getObjectById на каждом тике.
+    if ((counts[role] || 0) >= quota) continue;
+
     if (
       role === "upgrader" &&
       roomState.room.controller.ticksToDowngrade > 100000
@@ -53,16 +87,16 @@ function run(roomState) {
         continue;
     }
 
-    if (countRole(creeps, role) < SPAWN_QUOTA[role]) {
-      const result = creepFactory.run(
-        spawn,
-        role,
-        roomState.roomName,
-        PRESPAWN_THRESHOLD[role],
-      );
-      if (result === OK) return;
-    }
+    const result = creepFactory.run(
+      spawn,
+      role,
+      roomState.roomName,
+      PRESPAWN_THRESHOLD[role],
+    );
+    if (result === OK) return;
   }
 }
 
 module.exports.run = run;
+// Экспортируется для офлайн-тестов (tests/spawn.count.test.js).
+module.exports.countRoles = countRoles;

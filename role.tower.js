@@ -9,19 +9,15 @@ module.exports = {
   run: function (tower, roomData) {
     if (!tower) return;
 
-    if (!Memory.towerState) Memory.towerState = {};
-    if (!Memory.towerState[tower.id]) Memory.towerState[tower.id] = {};
-    const state = Memory.towerState[tower.id];
-
+    // Memory.towerState убран (задание 5 плана): он дублировал флаг
+    // Memory.rooms[room].underAttack и переписывался на каждую башню
+    // каждый тик. Заодно ушла задержка реакции: прежнее условие
+    // shouldCheckAttack пропускало атаку до TOWER.HOSTILE_CHECK_INTERVAL
+    // тиков, пока флаг не проставится в предыдущем тике.
     const hostiles = roomData.hostiles;
     const hasHostiles = hostiles && hostiles.length > 0;
 
-    state.underAttack = hasHostiles;
-
-    const shouldCheckAttack =
-      state.underAttack || Game.time % TOWER.HOSTILE_CHECK_INTERVAL === 0;
-
-    if (hasHostiles && shouldCheckAttack) {
+    if (hasHostiles) {
       const closestHostile = tower.pos.findClosestByRange(hostiles);
       if (closestHostile) {
         tower.attack(closestHostile);

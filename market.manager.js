@@ -3,7 +3,7 @@
  * Автоматическая продажа избыточных ресурсов через Market.
  */
 
-const { TERMINAL_SUPPLY } = require("./constants");
+const { TERMINAL_SUPPLY, MARKET } = require("./constants");
 
 // Единый источник порогов терминала — TERMINAL_SUPPLY из constants.js.
 // Продаём всё, что превышает эти же значения, которые Task System
@@ -39,15 +39,48 @@ const COMPOUNDS = RESOURCES_ALL.filter(
     !BASE_MINERALS.includes(r),
 );
 
+/**
+ * Ордера по паре (тип, ресурс) с кэшем на текущий тик.
+ *
+ * Замерено на живом шарде: первый getAllOrders стоит 0.16-0.89 CPU, а
+ * повторный запрос с теми же аргументами — 0.09 CPU (кэш движка). Кэш
+ * ниже убирает и эти 0.09: за проход рынок обходит все терминалы, и без
+ * кэша один и тот же ресурс запрашивался бы по разу на терминал.
+ *
+ * Кэш живёт ровно один тик (ключ — Game.time), поэтому устаревшие ордера
+ * вернуть не может.
+ *
+ * @param {string} type ORDER_BUY | ORDER_SELL
+ * @param {string} resourceType
+ * @returns {Array} массив ордеров
+ */
+function getOrders(type, resourceType) {
+  const tick = Game.time;
+
+  if (!global.__marketOrders || global.__marketOrders.tick !== tick) {
+    global.__marketOrders = { tick, byKey: {} };
+  }
+
+  const key = type + "|" + resourceType;
+  const cached = global.__marketOrders.byKey[key];
+  if (cached !== undefined) return cached;
+
+  const orders = Game.market.getAllOrders({ type, resourceType });
+  global.__marketOrders.byKey[key] = orders;
+  return orders;
+}
+
 function findAffordableBuyOrders(resourceType, maxPriceRatio = 1.2) {
-  const orders = Game.market.getAllOrders({
-    type: ORDER_SELL,
-    resourceType,
-  });
+  const orders = getOrders(ORDER_SELL, resourceType);
 
   if (orders.length === 0) return [];
 
-  const minPrice = Math.min(...orders.map(o => o.price));
+  // Цикл вместо Math.min(...orders.map(...)): spread массива в аргументы
+  // не масштабируется и лишний раз аллоцирует.
+  let minPrice = Infinity;
+  for (let i = 0; i < orders.length; i++) {
+    if (orders[i].price < minPrice) minPrice = orders[i].price;
+  }
   const maxAcceptable = minPrice * maxPriceRatio;
 
   return orders
@@ -85,9 +118,29 @@ function getReserve(group) {
  * Собирает все терминалы Империи (раздел 10 ТЗ №6).
  */
 function getEmpireTerminals() {
-  return Object.values(Game.rooms)
-    .filter(room => room.terminal && room.terminal.my)
-    .map(room => room.terminal);
+  // Кэшируются ИМЕНА комнат, а не объекты терминалов: игровые объекты
+  // живут только в пределах тика, и ссылка, сохранённая в global, на
+  // следующем тике уже невалидна.
+  const cached = global.__marketTerminalRooms;
+  let names;
+
+  if (cached && Game.time - cached.tick < MARKET.TERMINALS_CACHE_TTL) {
+    names = cached.names;
+  } else {
+    names = [];
+    for (const name in Game.rooms) {
+      const room = Game.rooms[name];
+      if (room.terminal && room.terminal.my) names.push(name);
+    }
+    global.__marketTerminalRooms = { tick: Game.time, names };
+  }
+
+  const terminals = [];
+  for (let i = 0; i < names.length; i++) {
+    const room = Game.rooms[names[i]];
+    if (room && room.terminal && room.terminal.my) terminals.push(room.terminal);
+  }
+  return terminals;
 }
 
 /**
@@ -97,14 +150,14 @@ function getEmpireTerminals() {
  * @param {string} resourceType
  */
 function findBestOrder(resourceType) {
-  const orders = Game.market.getAllOrders({
-    type: ORDER_BUY,
-    resourceType,
-  });
+  const orders = getOrders(ORDER_BUY, resourceType);
 
   if (orders.length === 0) return null;
 
-  const maxPrice = Math.max(...orders.map(o => o.price));
+  let maxPrice = -Infinity;
+  for (let i = 0; i < orders.length; i++) {
+    if (orders[i].price > maxPrice) maxPrice = orders[i].price;
+  }
   const minAcceptable = maxPrice * CONFIG.MIN_PRICE_RATIO;
 
   const goodOrders = orders.filter(o => o.price >= minAcceptable);
@@ -183,12 +236,21 @@ function tryBuyPower(terminal) {
 function run() {
   if (!Game.market) return;
 
+  // Throttle: проход рынка стоит 1-4 CPU, работать каждый тик он не может.
+  // Откат к прежнему поведению — MARKET.INTERVAL = 1 в constants.js.
+  if (Game.time % MARKET.INTERVAL !== 0) return;
+
   const terminals = getEmpireTerminals();
+  if (terminals.length === 0) return;
+
   let dealsCount = 0;
 
   for (const group of GROUP_ORDER) {
     if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
     if (!isGroupEnabled(group)) continue;
+
+    // Порог группы одинаков для всех ресурсов и терминалов — считаем один раз.
+    const reserve = getReserve(group);
 
     for (const terminal of terminals) {
       if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
@@ -197,7 +259,6 @@ function run() {
         if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
         if (getResourceGroup(resourceType) !== group) continue;
 
-        const reserve = getReserve(group);
         const surplus = terminal.store[resourceType] - reserve;
         if (surplus <= 0) continue;
 

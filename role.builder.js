@@ -2,7 +2,7 @@ const roleUpgrader = require("./role.upgrader");
 const energySource = require("energySource");
 
 module.exports = {
-  run: function (creep) {
+  run: function (creep, roomState) {
     if (creep.memory.working === undefined) {
       creep.memory.working = false;
     }
@@ -19,19 +19,14 @@ module.exports = {
     if (!creep.memory.working) {
       energySource.withdrawFromStorage(creep);
     } else {
-      const sitesInRoom = Object.values(Game.constructionSites).filter(
-        s => s.pos.roomName === creep.room.name,
-      );
-
-      let target = null;
-      let minRange = Infinity;
-      for (let i = 0; i < sitesInRoom.length; i++) {
-        const range = creep.pos.getRangeTo(sitesInRoom[i]);
-        if (range < minRange) {
-          minRange = range;
-          target = sitesInRoom[i];
-        }
-      }
+      // Стройплощадки комнаты берутся из общего индекса (один проход по
+      // Game.constructionSites за тик), а не перебором всей Империи на
+      // каждого строителя. Ближайшую площадку ищет движок.
+      const sitesInRoom = roomState.constructionSites;
+      const target =
+        sitesInRoom && sitesInRoom.length > 0
+          ? creep.pos.findClosestByRange(sitesInRoom)
+          : null;
 
       if (target) {
         if (creep.build(target) === ERR_NOT_IN_RANGE) {
