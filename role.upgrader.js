@@ -10,12 +10,13 @@ module.exports = {
   run: function (creep) {
     if (!creep || !creep.room) return;
 
-    // Переключение режимов
+    // Переключение режимов. Запись в Memory — только при смене режима:
+    // значение живёт в памяти крипа тиками и меняется редко.
     if (creep.store[RESOURCE_ENERGY] === 0) {
-      creep.memory.working = false;
+      if (creep.memory.working !== false) creep.memory.working = false;
     }
     if (creep.store.getFreeCapacity() === 0) {
-      creep.memory.working = true;
+      if (creep.memory.working !== true) creep.memory.working = true;
     }
 
     // Режим сбора энергии

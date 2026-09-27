@@ -7,6 +7,7 @@ module.exports = {
       creep.memory.working = false;
     }
 
+    // Значения уже сверяются с текущим режимом — лишних записей в Memory нет.
     if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
       creep.memory.working = true;
     } else if (
@@ -30,9 +31,10 @@ module.exports = {
 
       if (target) {
         if (creep.build(target) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(target, {
-            visualizePathStyle: { stroke: "#ffff00" },
-          });
+          // Визуализация пути убрана: она дороже обычного moveTo, а нужна
+          // только при отладке. reusePath добавлен — без него путь
+          // пересчитывался каждый тик.
+          creep.moveTo(target, { reusePath: 20 });
         }
       } else {
         roleUpgrader.run(creep);

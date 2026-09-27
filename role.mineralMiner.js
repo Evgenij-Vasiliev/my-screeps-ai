@@ -9,7 +9,9 @@ const roleMineralMiner = {
       creep.memory.working = false;
     }
 
-    if (creep.memory.working && _.sum(creep.store) === 0) {
+    // getUsedCapacity() вместо _.sum(creep.store): без обхода склада
+    // и без вызова lodash на каждом тике.
+    if (creep.memory.working && creep.store.getUsedCapacity() === 0) {
       creep.memory.working = false;
     }
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
@@ -20,7 +22,11 @@ const roleMineralMiner = {
       const storage = creep.room.storage;
       if (!storage) return;
 
-      const resourceType = Object.keys(creep.store)[0];
+      // Тип ресурса берётся из состояния комнаты: крип возит только
+      // минерал своей комнаты, а Object.keys(creep.store) аллоцировал
+      // массив на каждом тике.
+      const resourceType =
+        roomState.mineral && roomState.mineral.mineralType;
       if (!resourceType) return;
 
       const transferResult = creep.transfer(storage, resourceType);
