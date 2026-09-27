@@ -398,7 +398,8 @@ function collectTargetIds(roomName, taskType) {
 
   if (tasks) {
     for (let i = 0; i < tasks.length; i++) {
-      ids.add(tasks[i].targetId);
+      // null — надгробие задачи, завершённой в этом тике.
+      if (tasks[i]) ids.add(tasks[i].targetId);
     }
   }
 

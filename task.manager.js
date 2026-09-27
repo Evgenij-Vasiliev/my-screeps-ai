@@ -73,7 +73,7 @@ function getExistingKeys(roomName, taskType, fields) {
 
   if (tasks) {
     for (let i = 0; i < tasks.length; i++) {
-      set.add(taskKey(tasks[i], fields));
+      if (tasks[i]) set.add(taskKey(tasks[i], fields)); // null — надгробие
     }
   }
 
@@ -102,11 +102,13 @@ function hasDuplicate(roomName, taskType, candidate, fields) {
 }
 
 /**
- * Индекс одной очереди на текущий тик (задание 9, часть 2).
+ * Индекс одной очереди на текущий тик (задание 9, части 2 и 3).
  *
- * byId хранит ССЫЛКИ на объекты задач из Memory. Ссылки переживают splice:
- * элементы меняют позицию в массиве, но не идентичность. Поэтому индекс
- * остаётся верным и после удаления задач — перестраивать его не нужно.
+ * indexById хранит ПОЗИЦИИ задач в массиве Memory. Позиции стабильны в
+ * пределах тика, потому что завершение задачи больше не сдвигает массив:
+ * на месте удалённой остаётся null-«надгробие» (см. completeTask), а сама
+ * очередь сжимается один раз в конце тика (compactAll) — до сериализации
+ * Memory. Благодаря этому поиск, резервация и завершение стали O(1).
  *
  * free — сколько задач никем не зарезервировано. Позволяет ответить
  * «свободных нет» за O(1), не обходя очередь (в E35S37 до 162 задач).
@@ -116,32 +118,54 @@ function getQueueEntry(roomName, taskType) {
   const key = roomName + "\u0001" + taskType;
 
   const cached = h.queues[key];
-  if (cached) return cached;
+  if (cached && cached.queue === queueRef(roomName, taskType)) return cached;
 
-  const queue =
+  const queue = queueRef(roomName, taskType);
+  const entry = { queue, indexById: new Map(), free: 0, dead: 0, hint: 0 };
+  reindex(entry);
+
+  h.queues[key] = entry;
+  return entry;
+}
+
+/** Массив очереди из Memory (или null, если её нет). */
+function queueRef(roomName, taskType) {
+  return (
     (Memory.rooms &&
       Memory.rooms[roomName] &&
       Memory.rooms[roomName].tasks &&
       Memory.rooms[roomName].tasks[taskType]) ||
-    null;
+    null
+  );
+}
 
-  const byId = new Map();
-  let free = 0;
+/** Пересобирает позиции и счётчики очереди. O(n), вызывается один раз на индекс. */
+function reindex(entry) {
+  const queue = entry.queue;
+  const indexById = entry.indexById;
 
-  if (queue) {
-    for (let i = 0; i < queue.length; i++) {
-      const task = queue[i];
-      byId.set(task.taskId, task);
-      // Свободна не только незарезервированная задача: резервация умершего
-      // крипа — тоже свобода (иначе очередь навсегда застряла бы на
-      // «свободных нет», ведь пересчёт счётчика идёт раз в тик).
-      if (!task.reservedBy || !Game.creeps[task.reservedBy]) free++;
+  indexById.clear();
+  entry.free = 0;
+  entry.dead = 0;
+
+  if (!queue) return;
+
+  for (let i = 0; i < queue.length; i++) {
+    const task = queue[i];
+
+    // null-надгробие: задача завершена в этом тике, массив сожмётся в конце.
+    if (!task) {
+      entry.dead++;
+      continue;
     }
-  }
 
-  const entry = { queue, byId, free, hint: 0 };
-  h.queues[key] = entry;
-  return entry;
+    indexById.set(task.taskId, i);
+
+    // Свободна не только незарезервированная задача: резервация умершего
+    // крипа — тоже свобода (иначе очередь навсегда застряла бы на
+    // «свободных нет», ведь пересчёт счётчика идёт раз в тик).
+    if (!task.reservedBy || !Game.creeps[task.reservedBy]) entry.free++;
+  }
 }
 
 /**
@@ -154,8 +178,11 @@ function getQueueEntry(roomName, taskType) {
  */
 function getTaskById(roomName, taskType, taskId) {
   if (!taskId) return null;
+
   const entry = getQueueEntry(roomName, taskType);
-  return entry.byId.get(taskId) || null;
+  const index = entry.indexById.get(taskId);
+
+  return index === undefined ? null : entry.queue[index] || null;
 }
 
 function initRoomTasks(roomName) {
@@ -211,9 +238,16 @@ function addTask(roomName, taskType, task) {
   const h = heap();
   const entry = h.queues[roomName + "\u0001" + taskType];
   if (entry) {
-    entry.queue = Memory.rooms[roomName].tasks[taskType];
-    entry.byId.set(task.taskId, task);
-    if (!task.reservedBy) entry.free++;
+    const queue = Memory.rooms[roomName].tasks[taskType];
+
+    if (entry.queue !== queue) {
+      // Массив подменили извне — индекс недействителен, пересобираем.
+      entry.queue = queue;
+      reindex(entry);
+    } else {
+      entry.indexById.set(task.taskId, queue.length - 1);
+      if (!task.reservedBy) entry.free++;
+    }
   }
 
   // Дописываем ключ новой задачи в уже построенные кэши этой очереди:
@@ -237,12 +271,16 @@ function getNextTask(roomName, taskType) {
   // Все задачи заняты живыми крипами — обходить очередь незачем.
   if (entry.free <= 0) return null;
 
+  if (entry.hint >= queue.length) entry.hint = 0;
+
   // Обход начинается с прошлой удачной позиции: свободные задачи обычно
   // лежат рядом, поэтому в типичном случае цикл заканчивается сразу.
   const len = queue.length;
   for (let step = 0; step < len; step++) {
     const i = (entry.hint + step) % len;
     const task = queue[i];
+
+    if (!task) continue; // надгробие
 
     // Задача, зарезервированная умершим крипом, считается свободной.
     if (!task.reservedBy || !Game.creeps[task.reservedBy]) {
@@ -259,8 +297,9 @@ function reserveTask(roomName, taskType, task, creepName) {
 
   const entry = getQueueEntry(roomName, taskType);
   // Берём объект ИЗ ОЧЕРЕДИ, а не переданный параметр: индекс хранит
-  // ссылки на Memory, и резервация должна попасть именно туда.
-  const queued = entry.byId.get(task.taskId);
+  // позиции в Memory, и резервация должна попасть именно туда.
+  const index = entry.indexById.get(task.taskId);
+  const queued = index === undefined ? null : entry.queue[index];
 
   if (!queued) return false;
 
@@ -273,7 +312,8 @@ function releaseTask(roomName, taskType, task) {
   if (!task || task.taskId === undefined) return false;
 
   const entry = getQueueEntry(roomName, taskType);
-  const queued = entry.byId.get(task.taskId);
+  const index = entry.indexById.get(task.taskId);
+  const queued = index === undefined ? null : entry.queue[index];
 
   if (!queued) return false;
 
@@ -286,23 +326,62 @@ function completeTask(roomName, taskType, task) {
   if (!task || task.taskId === undefined) return false;
 
   const entry = getQueueEntry(roomName, taskType);
-  const queued = entry.byId.get(task.taskId);
+  const index = entry.indexById.get(task.taskId);
 
+  if (index === undefined) return false;
+
+  const queued = entry.queue[index];
   if (!queued) return false;
 
   if (queued.reservedBy) entry.free++;
   delete queued.reservedBy;
 
-  // splice оставлен намеренно: он держит Memory чистой (никаких null-дыр,
-  // которые уехали бы в сериализацию). Стоит он O(n) сдвига ОДИН раз за
-  // завершение задачи, а не O(n) поиска на каждую операцию, как раньше.
-  const index = entry.queue.indexOf(queued);
-  if (index !== -1) entry.queue.splice(index, 1);
+  // НАДГРОБИЕ вместо splice: массив не сдвигается, поэтому позиции в
+  // indexById остаются верными до конца тика, а завершение задачи — O(1).
+  // Обход очереди его пропускает, а сжимает очередь compactAll() в конце
+  // тика, ДО сериализации Memory, — иначе null-дыры уехали бы в Memory.
+  entry.queue[index] = null;
+  entry.indexById.delete(task.taskId);
+  entry.dead++;
 
-  entry.byId.delete(task.taskId);
-
-  if (entry.hint >= entry.queue.length) entry.hint = 0;
   return true;
+}
+
+/**
+ * Сжатие очередей с надгробиями. Вызывается один раз в конце тика
+ * (empire.js) — обязательно ДО сериализации Memory.
+ *
+ * Сжатие на месте: объекты задач сохраняют идентичность, поэтому позиции
+ * просто пересчитываются (reindex).
+ *
+ * @returns {number} сколько очередей было сжато
+ */
+function compactAll() {
+  const h = global.__taskHeap;
+  // Heap от прошлого тика означает, что задач в этом тике не трогали —
+  // сжимать нечего (в конце прошлого тика всё уже сжато).
+  if (!h || h.tick !== Game.time) return 0;
+
+  let compacted = 0;
+
+  for (const key in h.queues) {
+    const entry = h.queues[key];
+    if (!entry.dead || !entry.queue) continue;
+
+    const queue = entry.queue;
+    let write = 0;
+
+    for (let read = 0; read < queue.length; read++) {
+      const task = queue[read];
+      if (task) queue[write++] = task;
+    }
+
+    queue.length = write;
+    reindex(entry);
+    compacted++;
+  }
+
+  return compacted;
 }
 
 function removeTask(roomName, taskType, task) {
@@ -314,6 +393,7 @@ module.exports = {
   TASK_TYPE_SET,
   hasDuplicate,
   getTaskById,
+  compactAll,
   initRoomTasks,
   addTask,
   getNextTask,

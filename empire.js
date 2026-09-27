@@ -3,6 +3,7 @@
  * Уровень империи: очистка памяти, делегирование всей комнатной
  * логики Room Manager'у, запуск глобального рынка.
  */
+const taskManager = require("task.manager");
 const roomManager = require("room.manager");
 const marketManager = require("market.manager");
 const cpuMonitor = require("cpuMonitor");
@@ -47,6 +48,11 @@ module.exports.run = function () {
 
   // 4. Рынок империального уровня
   cpuMonitor.trackRole("marketManager", () => marketManager.run());
+
+  // 5. Сжатие очередей задач. Завершение задачи оставляет в массиве
+  // null-надгробие (чтобы не сдвигать массив и держать O(1)); дыры надо
+  // убрать ДО конца тика, иначе они уедут в сериализованную Memory.
+  cpuMonitor.trackRole("taskCompact", () => taskManager.compactAll());
 
   cpuMonitor.endTick();
 };
