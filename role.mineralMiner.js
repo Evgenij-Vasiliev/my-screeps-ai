@@ -34,10 +34,11 @@ const roleMineralMiner = {
       return;
     }
 
-    if (!roomState.mineral || !roomState.mineral.id) return;
+    if (!roomState.mineral || !roomState.mineral.extractorId) return;
 
-    const mineral = Game.getObjectById(roomState.mineral.id);
-    if (!mineral || !roomState.mineral.extractorId) return;
+    // Объект минерала уже в состоянии — повторный резолв не нужен.
+    const mineral = roomState.mineral.object;
+    if (!mineral) return;
 
     const harvestResult = creep.harvest(mineral);
     if (harvestResult === ERR_NOT_IN_RANGE) {

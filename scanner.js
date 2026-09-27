@@ -115,6 +115,10 @@ function ensureStructureCache(room) {
   if (roomMemory && roomMemory.structureCache) {
     delete roomMemory.structureCache;
   }
+  // Осиротевший кэш минерала: источником правды стал structureCache.
+  if (roomMemory && roomMemory.mineral) {
+    delete roomMemory.mineral;
+  }
 
   // Один проход по всем структурам вместо четырёх выборок с фильтрами.
   const structures = room.find(FIND_STRUCTURES);

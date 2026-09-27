@@ -71,6 +71,14 @@ function runCreepLogic(roomState) {
   }
 }
 
+/** Добавляет в out повреждённые структуры из списка (hits < hitsMax). */
+function collectDamaged(structures, out) {
+  for (let i = 0; i < structures.length; i++) {
+    const s = structures[i];
+    if (s.hits < s.hitsMax) out.push(s);
+  }
+}
+
 /** Резолвит массив id в объекты, пропуская исчезнувшие. */
 function resolveByIds(ids) {
   const out = [];
@@ -266,9 +274,14 @@ module.exports = {
    * @returns {Room[]}
    */
   getOwnedRooms: function () {
-    return Object.values(Game.rooms).filter(
-      room => room.controller && room.controller.my,
-    );
+    // for...in вместо Object.values().filter(): без массива всех видимых
+    // комнат и без промежуточного массива на фильтрацию.
+    const owned = [];
+    for (const name in Game.rooms) {
+      const room = Game.rooms[name];
+      if (room && room.controller && room.controller.my) owned.push(room);
+    }
+    return owned;
   },
 
   /**
@@ -279,64 +292,51 @@ module.exports = {
   buildRoomState: function (room, precomputedCreeps, precomputedCreepsInRoom) {
     const cache = scanner.getStructureCache(room);
 
+    // Один проход с push вместо map().filter() на каждую группу: было 13 пар
+    // массивов-посредников на комнату за тик, осталось 13 итоговых.
     const grouped = {
-      spawns: cache.spawnIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      towers: cache.towerIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      links: cache.linkIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      labs: cache.labIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      extensions: cache.extensionIds
-        .map(id => Game.getObjectById(id))
-        .filter(Boolean),
-      roads: cache.roadIds.map(id => Game.getObjectById(id)).filter(Boolean),
-      factories: cache.factoryId
-        ? [Game.getObjectById(cache.factoryId)].filter(Boolean)
-        : [],
-      powerSpawns: cache.powerSpawnId
-        ? [Game.getObjectById(cache.powerSpawnId)].filter(Boolean)
-        : [],
-      observers: cache.observerId
-        ? [Game.getObjectById(cache.observerId)].filter(Boolean)
-        : [],
-      extractors: cache.extractorId
-        ? [Game.getObjectById(cache.extractorId)].filter(Boolean)
-        : [],
-      nukers: cache.nukerId
-        ? [Game.getObjectById(cache.nukerId)].filter(Boolean)
-        : [],
+      spawns: resolveByIds(cache.spawnIds),
+      towers: resolveByIds(cache.towerIds),
+      links: resolveByIds(cache.linkIds),
+      labs: resolveByIds(cache.labIds),
+      extensions: resolveByIds(cache.extensionIds),
+      roads: resolveByIds(cache.roadIds),
+      factories: resolveByIds(cache.factoryId ? [cache.factoryId] : null),
+      powerSpawns: resolveByIds(
+        cache.powerSpawnId ? [cache.powerSpawnId] : null,
+      ),
+      observers: resolveByIds(cache.observerId ? [cache.observerId] : null),
+      extractors: resolveByIds(cache.extractorId ? [cache.extractorId] : null),
+      nukers: resolveByIds(cache.nukerId ? [cache.nukerId] : null),
     };
 
-    const allStructuresForRepair = []
-      .concat(grouped.spawns)
-      .concat(grouped.towers)
-      .concat(grouped.extensions)
-      .concat(grouped.links)
-      .concat(grouped.labs)
-      .concat(grouped.roads);
+    const storage = cache.storageId
+      ? Game.getObjectById(cache.storageId)
+      : null;
+    const terminal = cache.terminalId
+      ? Game.getObjectById(cache.terminalId)
+      : null;
 
-    if (grouped.factories[0]) allStructuresForRepair.push(grouped.factories[0]);
-    if (grouped.powerSpawns[0])
-      allStructuresForRepair.push(grouped.powerSpawns[0]);
-    if (cache.storageId) {
-      const s = Game.getObjectById(cache.storageId);
-      if (s) allStructuresForRepair.push(s);
-    }
-    if (cache.terminalId) {
-      const t = Game.getObjectById(cache.terminalId);
-      if (t) allStructuresForRepair.push(t);
-    }
-    if (grouped.observers[0]) allStructuresForRepair.push(grouped.observers[0]);
-    if (grouped.extractors[0])
-      allStructuresForRepair.push(grouped.extractors[0]);
-    if (grouped.nukers[0]) allStructuresForRepair.push(grouped.nukers[0]);
+    // Повреждённые структуры — один проход без промежуточных concat:
+    // раньше здесь собирались 6 массивов ради одного filter().
+    const damagedStructures = [];
 
-    const damagedStructures = allStructuresForRepair.filter(
-      s => s.hits < s.hitsMax,
-    );
+    collectDamaged(grouped.spawns, damagedStructures);
+    collectDamaged(grouped.towers, damagedStructures);
+    collectDamaged(grouped.extensions, damagedStructures);
+    collectDamaged(grouped.links, damagedStructures);
+    collectDamaged(grouped.labs, damagedStructures);
+    collectDamaged(grouped.roads, damagedStructures);
+    collectDamaged(grouped.factories, damagedStructures);
+    collectDamaged(grouped.powerSpawns, damagedStructures);
+    collectDamaged(grouped.observers, damagedStructures);
+    collectDamaged(grouped.extractors, damagedStructures);
+    collectDamaged(grouped.nukers, damagedStructures);
+    if (storage) collectDamaged([storage], damagedStructures);
+    if (terminal) collectDamaged([terminal], damagedStructures);
 
     // Источники энергии — статичны, резолвятся из кэша
-    const sources = cache.sourceIds
-      .map(id => Game.getObjectById(id))
-      .filter(Boolean);
+    const sources = resolveByIds(cache.sourceIds);
 
     // Крипы, приписанные к данной комнате — если список уже собран заранее
     // (buildAllRoomStates группирует всех крипов за один проход, а не за N),
@@ -362,8 +362,8 @@ module.exports = {
       spawn: grouped.spawns[0] || null,
       spawns: grouped.spawns,
       controller: room.controller,
-      storage: cache.storageId ? Game.getObjectById(cache.storageId) : null,
-      terminal: cache.terminalId ? Game.getObjectById(cache.terminalId) : null,
+      storage,
+      terminal,
       towers: grouped.towers,
       extensions: grouped.extensions,
       roads: grouped.roads,

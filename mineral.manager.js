@@ -1,76 +1,36 @@
 const scanner = require("scanner");
 
-function toMineralState(mineral, extractorId) {
+/**
+ * Состояние минерала комнаты (задание 10 плана).
+ *
+ * extractorId берётся из structureCache — он там уже есть и обновляется
+ * вместе с кэшем структур. Раньше здесь был отдельный кэш в
+ * Memory.rooms[name].mineral, который каждый тик резолвил экстрактор
+ * через Game.getObjectById только чтобы проверить его существование,
+ * а результат никуда не использовался.
+ *
+ * Поле object отдаётся потребителям (spawn.manager, role.mineralMiner),
+ * чтобы они не резолвили минерал повторно.
+ *
+ * @param {Room} room
+ * @returns {Object|null} { id, mineralType, amount, extractorId, object }
+ */
+function buildMineralState(room) {
+  const structureCache = scanner.getStructureCache(room);
+  const mineralId = structureCache.mineralId;
+
+  if (!mineralId) return null;
+
+  const mineral = Game.getObjectById(mineralId);
+  if (!mineral) return null;
+
   return {
     id: mineral.id,
     mineralType: mineral.mineralType,
     amount: mineral.mineralAmount,
-    extractorId: extractorId || null,
+    extractorId: structureCache.extractorId || null,
+    object: mineral,
   };
-}
-
-function rebuildMineralState(room) {
-  const roomName = room.name;
-  const structureCache = scanner.getStructureCache(room);
-  const mineralId = structureCache.mineralId;
-
-  if (!mineralId) {
-    if (!room.memory._mineralNoneLogged) {
-      console.log(`[Mineral] ${roomName} : no mineral source`);
-      room.memory._mineralNoneLogged = true;
-    }
-    Memory.rooms[roomName].mineral = { none: true };
-    return null;
-  }
-
-  const mineral = Game.getObjectById(mineralId);
-  const structures = mineral.pos.lookFor(LOOK_STRUCTURES);
-  const extractor = structures.find(
-    s => s.structureType === STRUCTURE_EXTRACTOR,
-  );
-  const extractorId = extractor ? extractor.id : null;
-
-  Memory.rooms[roomName].mineral = {
-    id: mineral.id,
-    mineralType: mineral.mineralType,
-    extractorId,
-  };
-
-  return toMineralState(mineral, extractorId);
-}
-
-function buildMineralState(room) {
-  const roomName = room.name;
-  if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {};
-
-  const cache = Memory.rooms[roomName].mineral;
-
-  if (!cache || typeof cache !== "object") {
-    return rebuildMineralState(room);
-  }
-
-  if (cache.none) {
-    return null;
-  }
-
-  if (!cache.id) {
-    return rebuildMineralState(room);
-  }
-
-  const mineral = Game.getObjectById(cache.id);
-  if (!mineral) {
-    return rebuildMineralState(room);
-  }
-
-  if (cache.extractorId) {
-    const extractor = Game.getObjectById(cache.extractorId);
-    if (!extractor) {
-      return rebuildMineralState(room);
-    }
-    return toMineralState(mineral, extractor.id);
-  }
-
-  return toMineralState(mineral, null);
 }
 
 module.exports = { buildMineralState };

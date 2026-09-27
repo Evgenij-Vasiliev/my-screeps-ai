@@ -81,10 +81,9 @@ function run(roomState) {
       continue;
 
     if (role === "mineralMiner") {
+      // amount уже в состоянии — резолвить минерал заново не нужно.
       if (!roomState.mineral || !roomState.mineral.extractorId) continue;
-      const mineralObj = Game.getObjectById(roomState.mineral.id);
-      if (!mineralObj || mineralObj.mineralAmount < MINERAL_MIN_AMOUNT_TO_SPAWN)
-        continue;
+      if (roomState.mineral.amount < MINERAL_MIN_AMOUNT_TO_SPAWN) continue;
     }
 
     const result = creepFactory.run(
