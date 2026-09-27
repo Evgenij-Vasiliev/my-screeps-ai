@@ -1,3 +1,5 @@
+const { TASK_CONFIG } = require("./constants");
+
 const TASK_CHAIN = [
   "fillSpawnsExtensions",
   "fillPowerSpawnPower",
@@ -31,7 +33,15 @@ const TASK_TYPE_SET = new Set(TASK_CHAIN);
  */
 function heap() {
   if (!global.__taskHeap || global.__taskHeap.tick !== Game.time) {
-    global.__taskHeap = { tick: Game.time, keys: {}, byType: {}, inited: {}, queues: {} };
+    global.__taskHeap = {
+      tick: Game.time,
+      keys: {},
+      byType: {},
+      inited: {},
+      queues: {},
+      // Сколько задач каждого типа уже ДОБАВЛЕНО в этом тике (см. addTask).
+      added: {},
+    };
   }
   return global.__taskHeap;
 }
@@ -226,6 +236,24 @@ function addTask(roomName, taskType, task) {
     return false;
   }
 
+  // ── Потолок постановки задач на тик ──────────────────────────────────
+  // Раньше очередь росла без предела: в E35S37 накопилось 187 задач, в
+  // E37S38 — 137. На комнату с ДВУМЯ воркерами это значит, что воркер берёт
+  // задачу не «следующую по делу», а произвольную из длинного хвоста и едет
+  // через всю комнату, бросая кэш пути. Плюс каждая задача — байты в Memory,
+  // которая сериализуется целиком.
+  //
+  // Потолок НЕ меняет порядок очереди: он только прекращает дописывать новые
+  // задачи того же типа, когда на этот тик их уже достаточно. Уже стоящие
+  // задачи и их приоритет не трогаются, воркеры работают по прежней FIFO.
+  const h = heap();
+  const addedKey = roomName + "\u0001" + taskType;
+  const alreadyAdded = h.added[addedKey] || 0;
+
+  if (alreadyAdded >= TASK_CONFIG.MAX_NEW_TASKS_PER_TYPE_PER_TICK) {
+    return false;
+  }
+
   initRoomTasks(roomName);
 
   if (typeof task.taskId === "undefined") {
@@ -234,8 +262,10 @@ function addTask(roomName, taskType, task) {
 
   Memory.rooms[roomName].tasks[taskType].push(task);
 
+  // Считаем поставленные в этом тике задачи этого типа (см. потолок выше).
+  h.added[addedKey] = alreadyAdded + 1;
+
   // Держим индекс очереди в согласии с Memory (если он уже построен).
-  const h = heap();
   const entry = h.queues[roomName + "\u0001" + taskType];
   if (entry) {
     const queue = Memory.rooms[roomName].tasks[taskType];

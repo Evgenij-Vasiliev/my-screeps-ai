@@ -28,7 +28,8 @@ const roleLinkWorker = require("role.linkWorker");
 const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
-const { TOWER } = require("./constants");
+const { TOWER, TASK_CONFIG } = require("./constants");
+const loadShed = require("loadShed");
 
 const ROLES = {
   harvester: roleHarvester,
@@ -65,6 +66,10 @@ function runCreepLogic(roomState) {
   }
 
   // Подробный режим (Memory.cpuMonitorVerbose = true) — замер по каждому крипу.
+  // ВАЖНО: ключ замера — creep.memory.role, а имена ролей и подсистем лежат
+  // в одном пространстве имён Memory.cpuStats.subsystems. Пока verbose включён,
+  // CPU крипов роли складывается с замером одноимённой подсистемы, поэтому
+  // держать флаг постоянно включённым нельзя — только на 1 тик из 100.
   for (const creep of roomState.creeps) {
     if (!creep) continue;
     cpuMonitor.trackRole(creep.memory.role, () => runCreep(creep, roomState));
@@ -76,6 +81,26 @@ function collectDamaged(structures, out) {
   for (let i = 0; i < structures.length; i++) {
     const s = structures[i];
     if (s.hits < s.hitsMax) out.push(s);
+  }
+}
+
+/**
+ * Повреждённые дороги — ЛЕНИВО и без полного резолва (правка по находке №10).
+ *
+ * Раньше здесь стояло `roads: resolveByIds(cache.roadIds)`, то есть
+ * Game.getObjectById на КАЖДУЮ дорогу комнаты (100-300 вызовов x 0.000152 CPU
+ * = до 0.045 CPU/тик на комнату), а сам массив roomState.roads не читался ни
+ * одним модулем. Теперь дороги резолвятся поштучно и только те, что реально
+ * повреждены: у целой дороги hits === hitsMax, и Game.getObjectById для неё
+ * не вызывается вовсе — в спокойной комнате это почти всегда 0 вызовов.
+ */
+function collectDamagedRoads(roadIds, out) {
+  if (!roadIds) return;
+  for (let i = 0; i < roadIds.length; i++) {
+    const road = Game.getObjectById(roadIds[i]);
+    // road.my !== false, а не road.my: дорога не имеет владельца, поэтому
+    // движок отдаёт undefined — строгая проверка выбросила бы все дороги.
+    if (road && road.my !== false && road.hits < road.hitsMax) out.push(road);
   }
 }
 
@@ -300,7 +325,11 @@ module.exports = {
       links: resolveByIds(cache.linkIds),
       labs: resolveByIds(cache.labIds),
       extensions: resolveByIds(cache.extensionIds),
-      roads: resolveByIds(cache.roadIds),
+      // roads убран: roomState.roads не читается ни одним модулем, а резолв
+      // стоил Game.getObjectById на каждую дорогу комнаты (100-300 вызовов x
+      // 0.000152 CPU = до 0.045 CPU/тик на комнату). Дороги нужны только как
+      // кандидаты в ремонт — они и так попадают в damagedStructures через
+      // генератор задач, который берёт их из сканера.
       factories: resolveByIds(cache.factoryId ? [cache.factoryId] : null),
       powerSpawns: resolveByIds(
         cache.powerSpawnId ? [cache.powerSpawnId] : null,
@@ -326,7 +355,7 @@ module.exports = {
     collectDamaged(grouped.extensions, damagedStructures);
     collectDamaged(grouped.links, damagedStructures);
     collectDamaged(grouped.labs, damagedStructures);
-    collectDamaged(grouped.roads, damagedStructures);
+    collectDamagedRoads(cache.roadIds, damagedStructures);
     collectDamaged(grouped.factories, damagedStructures);
     collectDamaged(grouped.powerSpawns, damagedStructures);
     collectDamaged(grouped.observers, damagedStructures);
@@ -366,7 +395,6 @@ module.exports = {
       terminal,
       towers: grouped.towers,
       extensions: grouped.extensions,
-      roads: grouped.roads,
       // Только id: объекты резолвятся лениво, см. getWallsAndRamparts.
       wallIds: cache.wallIds,
       rampartIds: cache.rampartIds,
@@ -441,27 +469,74 @@ module.exports = {
    * @param {Object} roomState
    */
   runRoom: function (roomState) {
+    // Уровень нагрузки читается ОДИН раз на комнату, а не в каждом условии:
+    // уровни только повышаются, поэтому кэш внутри тика безопасен (сам
+    // loadShed уровень не кэширует — переключение из консоли действует
+    // со следующего обращения).
+    const shed = loadShed.effectiveLevel();
+    const shedLite = shed >= 1;
+    const shedHard = shed >= 2;
+
     cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
     cpuMonitor.trackRole("taskManager", () => {
-      taskGenerators.generateFillSpawnsExtensions(roomState);
-      taskGenerators.generateFillPowerSpawnPower(roomState);
-      taskGenerators.generateFillPowerSpawnEnergy(roomState);
-      taskGenerators.generateFillFactoryEnergy(roomState);
-      taskGenerators.generateCollectFactoryBattery(roomState);
-      taskGenerators.generateFillTerminalEnergy(roomState);
-      taskGenerators.generateFillTerminalResources(roomState);
-      taskGenerators.generateFillTowers(roomState);
-      taskGenerators.generateRepairStructures(roomState);
-      taskGenerators.generateBuildStructures(roomState);
-      taskGenerators.generateUpgradeController(roomState);
+      // Выключенный в TASK_CONFIG генератор не вызывается ВООБЩЕ: раньше все
+      // 11 вызывались всегда, и 5 из них (powerSpawn x2, factoryEnergy,
+      // factoryBattery, terminalResources) делали только `if (!flag) return`
+      // — это 5 лишних вызовов на комнату за тик, каждый со своим замыканием
+      // и чтением roomState. Набор задач и их порядок в очереди при этом НЕ
+      // меняются: выключенный генератор и раньше ничего не создавал.
+      //
+      // ── loadShed ─────────────────────────────────────────────────────
+      // Понижение нагрузки НЕ удаляет уже стоящие задачи и не меняет их
+      // порядок: оно лишь перестаёт СТАВИТЬ новые фоновые задачи. Поэтому
+      // при lite/hard воркеры дорабатывают то, что уже в очереди (и FIFO
+      // сохраняется), а срочное (спавны, башни, терминал на hard) ставится
+      // всегда. При max срочное тоже продолжает ставиться — бот должен
+      // выжить, а не остановиться.
+      if (TASK_CONFIG.fillSpawnsExtensions) {
+        taskGenerators.generateFillSpawnsExtensions(roomState);
+      }
+      if (TASK_CONFIG.fillPowerSpawnPower && !shedHard) {
+        taskGenerators.generateFillPowerSpawnPower(roomState);
+      }
+      if (TASK_CONFIG.fillPowerSpawnEnergy && !shedHard) {
+        taskGenerators.generateFillPowerSpawnEnergy(roomState);
+      }
+      if (TASK_CONFIG.fillFactoryEnergy && !shedHard) {
+        taskGenerators.generateFillFactoryEnergy(roomState);
+      }
+      if (TASK_CONFIG.collectFactoryBattery && !shedHard) {
+        taskGenerators.generateCollectFactoryBattery(roomState);
+      }
+      if (TASK_CONFIG.fillTerminalEnergy && !shedHard) {
+        taskGenerators.generateFillTerminalEnergy(roomState);
+      }
+      if (TASK_CONFIG.fillTerminalResources && !shedHard) {
+        taskGenerators.generateFillTerminalResources(roomState);
+      }
+      if (TASK_CONFIG.fillTowers) {
+        taskGenerators.generateFillTowers(roomState);
+      }
+      // Фоновое: апгрейд, стройка, ремонт — только в обычном режиме.
+      if (TASK_CONFIG.repairStructures && !shedLite) {
+        taskGenerators.generateRepairStructures(roomState);
+      }
+      if (TASK_CONFIG.buildStructures && !shedLite) {
+        taskGenerators.generateBuildStructures(roomState);
+      }
+      if (TASK_CONFIG.upgradeController && !shedLite) {
+        taskGenerators.generateUpgradeController(roomState);
+      }
     });
     runCreepLogic(roomState);
     runTowerLogic(roomState);
     runLinkLogic(roomState);
-    cpuMonitor.trackRole("factoryManager", () => factoryManager.run(roomState));
-    cpuMonitor.trackRole("powerSpawnManager", () =>
-      powerSpawnManager.run(roomState),
-    );
+    if (!shedHard) {
+      cpuMonitor.trackRole("factoryManager", () => factoryManager.run(roomState));
+      cpuMonitor.trackRole("powerSpawnManager", () =>
+        powerSpawnManager.run(roomState),
+      );
+    }
   },
 
   /**

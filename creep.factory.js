@@ -124,7 +124,15 @@ const factory = {
       return ERR_INVALID_ARGS;
     }
 
-    const memory = Object.assign({ role }, blueprint.memory);
+    // homeRoom пишется ВСЕГДА. Раньше его получал только miner, а worker,
+    // linkWorker и mineralMiner — нет. Без homeRoom room.manager.js:419-430
+    // привязывает крипа к ТЕКУЩЕЙ комнате, а spawn.manager.countRoles считает
+    // квоты по homeRoom — такой крип не попадал ни в одну квоту, и комната
+    // спавнила лишнего (каждый лишний worker ≈ 0.19 CPU/тик навсегда).
+    const memory = Object.assign(
+      { role, homeRoom: roomName },
+      blueprint.memory,
+    );
 
     const name = `${role}_${roomName}_${Game.time}`;
 
