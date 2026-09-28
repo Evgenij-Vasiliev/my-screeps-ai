@@ -17,22 +17,51 @@ const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
   return body;
 };
 
+/**
+ * Споты, зарезервированные в текущем тике.
+ *
+ * Зачем: в комнате два спавна, и в одном тике оба выбирают спот. Первый уже
+ * вызвал spawnCreep, но крип ещё не появился в Game.creeps — поэтому проверка
+ * «спот занят» у второго спавна его не видит, и оба берут spots[0].
+ * Живой случай 27.09.2026: после массового переспавна 4 комнаты получили по
+ * паре майнеров на одном споте — второй не мог дойти и не добывал, а второй
+ * источник комнаты остался без майнера.
+ *
+ * Резервация живёт один тик: крипы, созданные в этом тике, на следующем уже
+ * видны в Game.creeps, и проверка занятости работает как раньше.
+ */
+function reservedSpots() {
+  const tick = Game.time;
+  const cached = global.__spotReservations;
+
+  if (cached && cached.tick === tick) return cached.taken;
+
+  const taken = new Set();
+  global.__spotReservations = { tick, taken };
+  return taken;
+}
+
 const factory = {
   blueprints: {
     miner: (spawn, threshold = PRESPAWN_THRESHOLD.miner) => {
-      const roomMemory = Memory.rooms[spawn.room.name] || {};
+      const roomName = spawn.room.name;
+      const roomMemory = Memory.rooms[roomName] || {};
       const spots = roomMemory.minerSpots || [];
 
       if (spots.length === 0) return null;
 
+      const reserved = reservedSpots();
       let assignedSpot = null;
 
       for (const spot of spots) {
+        const key = roomName + ":" + spot.x + "," + spot.y;
+        if (reserved.has(key)) continue;
+
         const taken = _.some(
           Game.creeps,
           c =>
             c.memory.role === "miner" &&
-            c.memory.homeRoom === spawn.room.name &&
+            c.memory.homeRoom === roomName &&
             c.memory.spot &&
             c.memory.spot.x === spot.x &&
             c.memory.spot.y === spot.y &&
@@ -49,10 +78,13 @@ const factory = {
         assignedSpot = spots[Game.time % spots.length];
       }
 
+      // Резервируем выбор до конца тика, чтобы второй спавн комнаты его увидел.
+      reserved.add(roomName + ":" + assignedSpot.x + "," + assignedSpot.y);
+
       return {
         body: prepareBody(CREEP_BODIES.miner),
         memory: {
-          homeRoom: spawn.room.name,
+          homeRoom: roomName,
           spot: assignedSpot,
         },
       };

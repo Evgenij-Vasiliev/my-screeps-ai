@@ -64,7 +64,7 @@ const POWER_SPAWN = {
 const PRESPAWN_THRESHOLD = { miner: 100, linkWorker: 30 };
 
 const SPAWN_QUOTA = {
-  harvester: 0,
+  harvester: 2,
   linkWorker: 1,
   miner: 2,
   towerSupplier: 0,
@@ -77,10 +77,27 @@ const SPAWN_QUOTA = {
 
 const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
 
+// Порог накопления энергии в источнике, при котором майнер тратит действие:
+// одно действие снимает максимум (2 x WORK), поэтому копим до этого уровня.
+const MINER = {
+  HARVEST_MIN_ENERGY: 60,
+};
+
 const CREEP_BODIES = {
-  miner: { work: 5, carry: 12, move: 5 },
+  // Замер на живом шарде (27.09.2026): действие стоит ~0.21 CPU независимо от
+  // того, сколько энергии несёт. 30 WORK снимают 60 энергии за действие
+  // вместо 10 у прежних 5 WORK — втрое меньше действий на ту же добычу.
+  // Источник в этом окружении отдаёт не более 3000 за 300 тиков, поэтому
+  // добыча не падает: майнер вычерпывает его за ~50 тиков и ждёт пополнения.
+  miner: { work: 30, carry: 10, move: 10 },
   towerSupplier: { carry: 4, move: 2 },
-  linkWorker: { carry: 4, move: 2 },
+  // Поклажа линкера равна ёмкости линка (16 CARRY = 800): одно withdraw
+  // опустошает линк целиком, и он сразу готов принимать следующую партию.
+  // Больше 800 смысла нет — накопить сверх этого можно только за несколько
+  // заходов, а пока линкер копит, линк остаётся полным и блокирует
+  // отправителей (linkManager выходит, если у линка хранилища нет места).
+  // MOVE только чтобы дойти до места: у линка и хранилища он не ходит.
+  linkWorker: { carry: 16, move: 4 },
   harvester: { work: 1, carry: 1, move: 1 },
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
@@ -122,6 +139,7 @@ module.exports = {
   FACTORY,
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
+  MINER,
   TOWER,
   TASK_CONFIG,
   POWER_SPAWN,

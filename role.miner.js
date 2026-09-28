@@ -9,6 +9,8 @@
  * поэтому их ID ищутся один раз и кэшируются в memory.
  */
 
+const { MINER } = require("./constants");
+
 module.exports = {
   run: function (creep) {
     const spot = creep.memory.spot;
@@ -43,12 +45,24 @@ module.exports = {
       ? Game.getObjectById(creep.memory.linkId)
       : null;
 
-    if (source) {
+    // Замер роли на живом шарде показал: дорого стоит не чтение, а само
+    // удавшееся объектное действие (~0.21 CPU за harvest/transfer, тогда как
+    // тот же вызов без действия — 0.015). Поэтому каждый интент выдаётся
+    // строго тогда, когда может сработать: harvest требует места в складе и
+    // энергии в источнике, transfer — полного склада и места в линке.
+    const store = creep.store;
+    const free = store.getFreeCapacity(RESOURCE_ENERGY);
+
+    // Копим энергию в источнике: действие стоит одинаково и за 10, и за 60
+    // энергии, поэтому снимаем только накопившееся (2 x WORK = 60). Источник
+    // в этом окружении пополняется раз в 300 тиков, так что добыча не падает,
+    // а число действий сокращается примерно втрое.
+    if (source && free > 0 && source.energy >= MINER.HARVEST_MIN_ENERGY) {
       creep.harvest(source);
     }
 
-    // Сливаем в линк только когда склад полон — реже вызываем transfer()
-    if (link && creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+    // Сливаем в линк только когда склад полон и в линке есть место
+    if (link && free === 0 && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
       creep.transfer(link, RESOURCE_ENERGY);
     }
   },
