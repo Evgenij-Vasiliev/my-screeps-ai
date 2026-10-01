@@ -1,3 +1,10 @@
 node_modules/
 .screeps.json
-tests/
+test.js
+
+# Тесты — часть проекта: механически держат правила CPU
+# (docs/task-system-v3.0/DEVELOPMENT_RULES.md §11.1). На шард они не уезжают
+# независимо от git: выгрузка берёт только SRC = ["*.js", "constants/*.js"]
+# (scripts/deploy.modules.js:43).
+# Агрегат последнего прогона генерируется заново — в git ему не место.
+tests/.last-run.json

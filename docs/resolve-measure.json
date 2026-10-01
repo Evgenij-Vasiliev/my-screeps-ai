@@ -1,0 +1,44 @@
+{
+  "measuredAt": "2026-09-28T20:08:31.030Z",
+  "shard": "shard3",
+  "gameTime": 83294987,
+  "costPerCall": {
+    "room": "E35S37",
+    "id": "68980496533a4a2170c6377c",
+    "warm": 0.000094,
+    "warm2": 0.000047,
+    "missing": 0.000141,
+    "cacheGuard": 0.000088,
+    "cacheRead": 0.000052
+  },
+  "state": {
+    "t": 83294987,
+    "creeps": 26,
+    "rooms": 5,
+    "byRoom": {
+      "E37S38": 5,
+      "E37S37": 6,
+      "E35S37": 5,
+      "E36S38": 5,
+      "E35S39": 5
+    },
+    "roles": {
+      "worker": 10,
+      "mineralMiner": 1,
+      "miner": 10,
+      "linkWorker": 5
+    },
+    "queues": {
+      "E35S37": "2/2",
+      "E35S39": "0/0",
+      "E37S37": "0/0",
+      "E37S38": "1/1",
+      "E36S38": "0/0",
+      "E35S38": "0/0",
+      "E36S37": "0/0"
+    },
+    "avg": 5.106158029268299,
+    "cnt": 82
+  },
+  "cpuGetUsedEach": 0.000244
+}

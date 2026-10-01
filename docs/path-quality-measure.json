@@ -1,0 +1,141 @@
+{
+  "measuredAt": "2026-09-28T20:27:08.834Z",
+  "shard": "shard3",
+  "room": "E35S37",
+  "merged": [
+    {
+      "role": "miner",
+      "range": 44,
+      "lenNoCm": 55,
+      "lenCm": 47,
+      "weightNoCm": 55,
+      "weightCm": 75,
+      "cpuNoCm": 0.7534,
+      "cpuCm": 0.1886,
+      "ops": 38
+    },
+    {
+      "role": "miner",
+      "range": 42,
+      "lenNoCm": 49,
+      "lenCm": 42,
+      "weightNoCm": 49,
+      "weightCm": 69,
+      "cpuNoCm": 0.3289,
+      "cpuCm": 0.1106,
+      "ops": 29
+    },
+    {
+      "role": "linkWorker",
+      "range": 41,
+      "lenNoCm": 54,
+      "lenCm": 46,
+      "weightNoCm": 54,
+      "weightCm": 71,
+      "cpuNoCm": 0.3483,
+      "cpuCm": 0.097,
+      "ops": 46
+    },
+    {
+      "role": "worker",
+      "range": 42,
+      "lenNoCm": 55,
+      "lenCm": 48,
+      "weightNoCm": 55,
+      "weightCm": 73,
+      "cpuNoCm": 0.3518,
+      "cpuCm": 0.1189,
+      "ops": 42
+    },
+    {
+      "role": "worker",
+      "range": 42,
+      "lenNoCm": 57,
+      "lenCm": 49,
+      "weightNoCm": 57,
+      "weightCm": 75,
+      "cpuNoCm": 0.348,
+      "cpuCm": 0.1243,
+      "ops": 44
+    }
+  ],
+  "rawPaths": [
+    {
+      "r": "miner",
+      "d": 44,
+      "la": 55,
+      "lb": 47,
+      "ca": 0.7534,
+      "cb": 0.1886,
+      "ops": 38
+    },
+    {
+      "r": "miner",
+      "d": 42,
+      "la": 49,
+      "lb": 42,
+      "ca": 0.3289,
+      "cb": 0.1106,
+      "ops": 29
+    },
+    {
+      "r": "linkWorker",
+      "d": 41,
+      "la": 54,
+      "lb": 46,
+      "ca": 0.3483,
+      "cb": 0.097,
+      "ops": 46
+    },
+    {
+      "r": "worker",
+      "d": 42,
+      "la": 55,
+      "lb": 48,
+      "ca": 0.3518,
+      "cb": 0.1189,
+      "ops": 42
+    },
+    {
+      "r": "worker",
+      "d": 42,
+      "la": 57,
+      "lb": 49,
+      "ca": 0.348,
+      "cb": 0.1243,
+      "ops": 44
+    }
+  ],
+  "rawWeights": [
+    {
+      "r": "miner",
+      "d": 44,
+      "wa": 55,
+      "wb": 75
+    },
+    {
+      "r": "miner",
+      "d": 42,
+      "wa": 49,
+      "wb": 69
+    },
+    {
+      "r": "linkWorker",
+      "d": 41,
+      "wa": 54,
+      "wb": 71
+    },
+    {
+      "r": "worker",
+      "d": 42,
+      "wa": 55,
+      "wb": 73
+    },
+    {
+      "r": "worker",
+      "d": 42,
+      "wa": 57,
+      "wb": 75
+    }
+  ]
+}

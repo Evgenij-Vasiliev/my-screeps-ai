@@ -1,0 +1,45 @@
+{
+  "measuredAt": "2026-09-28T20:23:08.233Z",
+  "shard": "shard3",
+  "context": {
+    "room": "E35S37",
+    "t": 83295168,
+    "creep": "miner_E35S37_83293715",
+    "creeps": 26,
+    "range": 44,
+    "target": "road",
+    "structs": 349,
+    "bucket": 10000
+  },
+  "longRoute": {
+    "d": 44,
+    "lenNoCm": 55,
+    "lenCm": 47,
+    "same": false,
+    "noCm": 0.7862,
+    "withCm": 0.1619,
+    "ops": 38
+  },
+  "matrixBuild": {
+    "roads": 203,
+    "set": 203,
+    "byCache": 0.0778,
+    "byFind": 0.0886
+  },
+  "pathCache": {
+    "total": 26,
+    "withCache": 23,
+    "ageMin": 21,
+    "ageMax": 1306,
+    "lenSum": 132
+  },
+  "linkWorker": {
+    "hadCache": false,
+    "cacheAfter": false,
+    "rc1": 0,
+    "rc2": 0,
+    "cached": 0.277,
+    "fresh": 0.062,
+    "range": 1
+  }
+}

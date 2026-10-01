@@ -1,60 +1,91 @@
-/**
- * ЛОГИКА ХАРВЕСТЕРА (Harvester Role)
- * Аварийный крип — восстанавливает колонию после коллапса.
- * Энергия: Storage → если пусто → Source напрямую.
- * Доставка: Extensions → Spawn → Storage.
- */
-module.exports = {
-  run: function (creep) {
-    if (creep.memory.working === undefined) creep.memory.working = false;
+const energySource = require("energySource");
+const { MOVE } = require("./constants");
 
-    if (creep.store[RESOURCE_ENERGY] === 0) creep.memory.working = false;
-    if (creep.store.getFreeCapacity() === 0) creep.memory.working = true;
+module.exports = {
+  run: function (creep, roomState) {
+    if (creep.memory.working === undefined) {
+      creep.memory.working = false;
+    }
+
+    if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
+      creep.memory.working = true;
+    } else if (
+      creep.memory.working === true &&
+      creep.store[RESOURCE_ENERGY] === 0
+    ) {
+      creep.memory.working = false;
+    }
 
     if (!creep.memory.working) {
-      this._collect(creep);
-    } else {
-      this._deliver(creep);
-    }
-  },
+      const withdrewFromStorage = energySource.withdrawFromStorage(creep, true);
 
-  _collect: function (creep) {
-    const storage = creep.room.storage;
-    if (storage && storage.store[RESOURCE_ENERGY] > 0) {
-      if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, { reusePath: 10 });
+      if (withdrewFromStorage) {
+        return;
       }
+
+      const terminal = creep.room.terminal;
+
+      if (terminal && terminal.store[RESOURCE_ENERGY] > 0) {
+        if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(terminal, { reusePath: MOVE.STABLE });
+        }
+        return;
+      }
+
+      let source = null;
+      let minRange = Infinity;
+      for (let i = 0; i < roomState.sources.length; i++) {
+        const s = roomState.sources[i];
+        if (s.energy > 0) {
+          const range = creep.pos.getRangeTo(s);
+          if (range < minRange) {
+            minRange = range;
+            source = s;
+          }
+        }
+      }
+
+      if (source) {
+        if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(source, { reusePath: MOVE.STABLE });
+        }
+      }
+
       return;
     }
-    // Storage пуст — добываем напрямую
-    const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
-    if (source && creep.harvest(source) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { reusePath: 10 });
-    }
-  },
 
-  _deliver: function (creep) {
-    // Extensions → Spawn → Storage
-    let target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-      filter: s =>
-        (s.structureType === STRUCTURE_EXTENSION ||
-          s.structureType === STRUCTURE_SPAWN) &&
-        s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-    });
+    let target = null;
+    let minRange = Infinity;
 
-    if (
-      !target &&
-      creep.room.storage &&
-      creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-    ) {
-      target = creep.room.storage;
+    for (let i = 0; i < roomState.extensions.length; i++) {
+      const s = roomState.extensions[i];
+      if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+        const range = creep.pos.getRangeTo(s);
+        if (range < minRange) {
+          minRange = range;
+          target = s;
+        }
+      }
     }
 
-    if (
-      target &&
-      creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE
-    ) {
-      creep.moveTo(target, { reusePath: 10 });
+    if (!target) {
+      minRange = Infinity;
+      for (let i = 0; i < roomState.spawns.length; i++) {
+        const s = roomState.spawns[i];
+        if (s.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+          const range = creep.pos.getRangeTo(s);
+          if (range < minRange) {
+            minRange = range;
+            target = s;
+          }
+        }
+      }
+    }
+
+    if (target) {
+      if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      }
     }
   },
 };

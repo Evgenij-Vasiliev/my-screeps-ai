@@ -1,0 +1,113 @@
+{
+  "measuredAt": "2026-09-28T20:12:57.686Z",
+  "shard": "shard3",
+  "workers": 10,
+  "workersWithTask": 4,
+  "workersWithoutTask": 6,
+  "scanLimit": 8,
+  "resolvesLower": 0,
+  "resolvesUpper": 0,
+  "queues": {
+    "E35S37": {
+      "repairStructures": {
+        "total": 1,
+        "reserved": 1,
+        "free": 0
+      },
+      "fillTerminalEnergy": {
+        "total": 1,
+        "reserved": 1,
+        "free": 0
+      }
+    },
+    "E35S39": {},
+    "E37S37": {},
+    "E37S38": {
+      "fillSpawnsExtensions": {
+        "total": 5,
+        "reserved": 1,
+        "free": 4
+      },
+      "repairStructures": {
+        "total": 1,
+        "reserved": 1,
+        "free": 0
+      }
+    },
+    "E36S38": {},
+    "E35S38": {},
+    "E36S37": {}
+  },
+  "workerList": [
+    {
+      "name": "worker_E35S37_83293559",
+      "homeRoom": "E35S37",
+      "taskIndex": 7,
+      "taskId": "task_194747",
+      "working": true
+    },
+    {
+      "name": "worker_E35S37_83293595",
+      "homeRoom": "E35S37",
+      "taskIndex": 3,
+      "taskId": "task_194746",
+      "working": false
+    },
+    {
+      "name": "worker_E36S38_83293688",
+      "homeRoom": "E36S38",
+      "taskIndex": 9,
+      "taskId": null,
+      "working": false
+    },
+    {
+      "name": "worker_E37S38_83293690",
+      "homeRoom": "E37S38",
+      "taskIndex": 7,
+      "taskId": "task_194748",
+      "working": true
+    },
+    {
+      "name": "worker_E35S39_83293691",
+      "homeRoom": "E35S39",
+      "taskIndex": 9,
+      "taskId": null,
+      "working": false
+    },
+    {
+      "name": "worker_E37S37_83293691",
+      "homeRoom": "E37S37",
+      "taskIndex": 9,
+      "taskId": null,
+      "working": false
+    },
+    {
+      "name": "worker_E35S39_83294665",
+      "homeRoom": "E35S39",
+      "taskIndex": 9,
+      "taskId": null,
+      "working": false
+    },
+    {
+      "name": "worker_E37S37_83294900",
+      "homeRoom": "E37S37",
+      "taskIndex": 0,
+      "taskId": null,
+      "working": false
+    },
+    {
+      "name": "worker_E36S38_83294914",
+      "homeRoom": "E36S38",
+      "taskIndex": 0,
+      "taskId": null,
+      "working": false
+    },
+    {
+      "name": "worker_E37S38_83295025",
+      "homeRoom": "E37S38",
+      "taskIndex": 0,
+      "taskId": "task_194749",
+      "working": false
+    }
+  ]
+}

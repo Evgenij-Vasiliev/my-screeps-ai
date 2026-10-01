@@ -1,212 +1,142 @@
 /**
- * ФАБРИКА КРИПОВ (Creep Factory)
- * Фиксированные тела для каждой роли — энергии достаточно всегда.
- *
- * prepareBody — порядок частей оптимален:
- * TOUGH → WORK → CARRY → ATTACK → RANGED_ATTACK → HEAL → CLAIM → MOVE
+ * CREEP FACTORY (ТЗ №3)
+ * Отвечает на вопрос: "Какое тело создать?" и производит спавн.
+ * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
-const prepareBody = ({
-  work = 0,
-  carry = 0,
-  move = 0,
-  attack = 0,
-  tough = 0,
-  ranged_attack = 0,
-  heal = 0,
-  claim = 0,
-} = {}) => {
+const { CREEP_BODIES } = require("./constants");
+
+const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
   const body = [];
+
   for (let i = 0; i < tough; i++) body.push(TOUGH);
   for (let i = 0; i < work; i++) body.push(WORK);
   for (let i = 0; i < carry; i++) body.push(CARRY);
-  for (let i = 0; i < attack; i++) body.push(ATTACK);
-  for (let i = 0; i < ranged_attack; i++) body.push(RANGED_ATTACK);
-  for (let i = 0; i < heal; i++) body.push(HEAL);
-  for (let i = 0; i < claim; i++) body.push(CLAIM);
   for (let i = 0; i < move; i++) body.push(MOVE);
+
   return body;
 };
 
+/**
+ * Привязка майнера к споту БОЛЬШЕ НЕ ВЫДАЁТСЯ (правка 01.10.2026).
+ *
+ * Раньше здесь были reservedSpots()/takenSpots() и выбор одного спота из
+ * Memory.rooms[room].minerSpots: в комнате стояло два майнера (квота 2), и их
+ * надо было разводить по клеткам. Живой случай 27.09.2026 (E35S37) — оба
+ * майнера на одном споте, второй не мог войти на занятую клетку и не добывал.
+ *
+ * С квотой miner = 1 конкурировать не с кем: майнер в комнате один, рабочие
+ * места (две клетки, по одной на источник) он читает прямо из
+ * Memory.rooms[room].minerSpots и берёт одно из двух — role.miner.js.
+ * Поэтому и резервация, и проверка занятости, и пара спотов в памяти крипа
+ * удалены целиком: они защищали от коллизии, которой при одном майнере быть
+ * не может.
+ */
+
 const factory = {
   blueprints: {
-    // Стоит на рабочей клетке (x,y) в range 1 от источника и линка одновременно.
-    // Свободный слот назначается при спавне — майнер сразу знает куда идти.
-
     miner: spawn => {
-      const roomMemory = Memory.rooms[spawn.room.name] || {};
-      const spots = roomMemory.minerSpots || [];
-      const threshold = (roomMemory.earlySpawnThresholds || {}).miner || 43;
-      let assignedSpot = null;
+      const roomName = spawn.room.name;
+      const roomMemory = Memory.rooms[roomName] || {};
 
-      for (const spot of spots) {
-        // const taken = _.some(
-        //   Game.creeps,
-        //   c =>
-        //     c.memory.role === "miner" &&
-        //     c.memory.spot &&
-        //     c.memory.spot.x === spot.x &&
-        //     c.memory.spot.y === spot.y &&
-        //     c.ticksToLive > threshold,
-        // );
-
-        const taken = _.some(
-          Game.creeps,
-          c =>
-            c.memory.role === "miner" &&
-            c.memory.room === spawn.room.name &&
-            c.memory.spot &&
-            c.memory.spot.x === spot.x &&
-            c.memory.spot.y === spot.y &&
-            c.ticksToLive > threshold,
-        );
-
-        if (!taken) {
-          assignedSpot = spot;
-          break;
-        }
+      // Рабочих мест в комнате нет — майнера не спавним: ему негде работать.
+      // (Спотов два: по одной клетке на источник, Memory.rooms[r].minerSpots.)
+      if (!roomMemory.minerSpots || roomMemory.minerSpots.length === 0) {
+        return null;
       }
 
-      // if (!assignedSpot) return null;
-      if (!assignedSpot) {
-        assignedSpot = spots[Game.time % spots.length];
-      }
-
-      // return {
-      //   body: prepareBody({ work: 5, carry: 1, move: 2 }),
-      //   memory: { role: "miner", spot: assignedSpot },
-      // };
-
+      // Место в памяти НЕ фиксируется: майнер берёт одно из двух рабочих мест
+      // сам (role.miner.js, creep.memory.wp) и переходит на соседнее, когда
+      // источник под ним вычерпан.
       return {
-        body: prepareBody({ work: 5, carry: 1, move: 2 }),
+        body: prepareBody(CREEP_BODIES.miner),
         memory: {
-          role: "miner",
-          spot: assignedSpot,
-          assigned: true,
+          homeRoom: roomName,
         },
       };
     },
-    // Носит энергию в башни. Башни близко — размер поменьше.
+
     towerSupplier: () => ({
-      body: prepareBody({ carry: 8, move: 4 }),
+      body: prepareBody(CREEP_BODIES.towerSupplier),
       memory: {},
     }),
 
     linkWorker: () => ({
-      body: prepareBody({ carry: 8, move: 2 }),
+      body: prepareBody(CREEP_BODIES.linkWorker),
       memory: {},
     }),
 
-    // Перекладывает storage ↔ terminal по очереди terminalNeeds.
-    // Только CARRY и MOVE — ничего не добывает.
-    terminalUnloader: () => ({
-      body: prepareBody({ carry: 5, move: 2 }),
-      memory: {},
+    harvester: () => ({
+      body: prepareBody(CREEP_BODIES.harvester),
+      memory: {
+        state: "harvesting",
+      },
     }),
 
-    factoryWorker: () => ({
-      body: prepareBody({ carry: 1, move: 1 }),
-      memory: {},
-    }),
-
-    labWorker: () => ({
-      body: prepareBody({ carry: 1, move: 1 }),
-      memory: {},
-    }),
-
-    // Аварийный крип — копает и везёт сам. Спавнится только если крипов нет.
-    worker: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 2 }),
+    upgrader: () => ({
+      body: prepareBody(CREEP_BODIES.upgrader),
       memory: {},
     }),
 
     builder: () => ({
-      body: prepareBody({ work: 2, carry: 5, move: 7 }),
+      body: prepareBody(CREEP_BODIES.builder),
       memory: {},
     }),
 
-    mineralMiner: spawn => {
-      let mineralId = null;
-      if (spawn.room.memory.mineralId) {
-        mineralId = spawn.room.memory.mineralId;
-      } else {
-        const minerals = spawn.room.find(FIND_MINERALS);
-        mineralId = minerals.length > 0 ? minerals[0].id : null;
-        spawn.room.memory.mineralId = mineralId;
-      }
-      return {
-        body: prepareBody({ work: 5, carry: 5, move: 5 }),
-        memory: { mineralId },
-      };
-    },
-
-    remoteMiner: (spawn, roleData) => ({
-      body: prepareBody({ work: 5, carry: 1, move: 6 }),
-      memory: { target: roleData.targetRoom || null },
-    }),
-
-    remoteHauler: (spawn, roleData) => ({
-      body: prepareBody({ carry: 20, move: 20 }),
-      memory: { working: false, targetRoom: roleData.targetRoom || null },
-    }),
-
-    reserver: (spawn, roleData) => ({
-      body: prepareBody({ claim: 2, move: 4 }),
-      memory: { working: false, targetRoom: roleData.targetRoom || null },
-    }),
-
-    attacker: spawn => ({
-      body: prepareBody({
-        tough: 0,
-        move: 10,
-        heal: 0,
-        ranged_attack: 10,
-      }),
-      memory: { targetRoom: null, homeRoom: spawn.room.name },
-    }),
-
-    default: () => ({
-      body: prepareBody({ work: 1, carry: 1, move: 1 }),
+    repairer: () => ({
+      body: prepareBody(CREEP_BODIES.repairer),
       memory: {},
+    }),
+
+    worker: () => ({
+      body: prepareBody(CREEP_BODIES.worker),
+      memory: {
+        working: false,
+      },
+    }),
+
+    mineralMiner: () => ({
+      body: prepareBody(CREEP_BODIES.mineralMiner),
+      memory: {
+        working: false,
+      },
     }),
   },
 
   /**
    * @param {StructureSpawn} spawn
-   * @param {string}         role     — название роли
-   * @param {string}         roomName — для memory.room
-   * @param {object}         roleData — доп. параметры (targetRoom и т.д.)
+   * @param {string} role
+   * @param {string} roomName
+   * @returns {ScreepsReturnCode}
    */
-  run: function (spawn, role, roomName, roleData = {}) {
-    const blueprintFn = this.blueprints[role] || this.blueprints.default;
-    const blueprint = blueprintFn(spawn, roleData);
+  run: function (spawn, role, roomName, threshold) {
+    const blueprintFn = this.blueprints[role];
 
-    if (!blueprint) return ERR_INVALID_ARGS;
-
-    if (!blueprint.body || blueprint.body.length === 0) {
-      // console.log(`[factory] Пустое тело для роли ${role} в ${roomName}`);
+    if (!blueprintFn) {
       return ERR_INVALID_ARGS;
     }
 
+    // Имя и threshold передаются в blueprint: threshold используют роли с
+    // предспавном (PRESPAWN_THRESHOLD), имя — для отладки. Минеру с 01.10.2026
+    // ни то, ни другое не нужно: место он берёт сам (role.miner.js).
+    const name = `${role}_${roomName}_${Game.time}`;
+    const blueprint = blueprintFn(spawn, threshold, name);
+
+    if (!blueprint || !blueprint.body || blueprint.body.length === 0) {
+      return ERR_INVALID_ARGS;
+    }
+
+    // homeRoom пишется ВСЕГДА. Раньше его получал только miner, а worker,
+    // linkWorker и mineralMiner — нет. Без homeRoom room.manager.js:419-430
+    // привязывает крипа к ТЕКУЩЕЙ комнате, а spawn.manager.countRoles считает
+    // квоты по homeRoom — такой крип не попадал ни в одну квоту, и комната
+    // спавнила лишнего (каждый лишний worker ≈ 0.19 CPU/тик навсегда).
     const memory = Object.assign(
-      { role, room: roomName, working: false },
+      { role, homeRoom: roomName },
       blueprint.memory,
     );
 
-    const name = `${role}_${roomName}_${Game.time}`;
-    const result = spawn.spawnCreep(blueprint.body, name, { memory });
-
-    if (result === OK) {
-      const parts = _.countBy(blueprint.body);
-      const summary = Object.entries(parts)
-        .map(([p, n]) => `${p}×${n}`)
-        .join(" ");
-      // console.log(`[factory] ${roomName}: +${role} [${summary}]`);
-    } else if (result !== ERR_NOT_ENOUGH_ENERGY && result !== ERR_BUSY) {
-      // console.log(`[factory] Ошибка спавна ${role} в ${roomName}: ${result}`);
-    }
-
-    return result;
+    return spawn.spawnCreep(blueprint.body, name, { memory });
   },
 };
 

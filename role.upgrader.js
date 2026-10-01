@@ -1,35 +1,34 @@
 /**
  * ЛОГИКА АПГРЕЙДЕРА (Upgrader Role)
- * Энергия: Storage → если пусто → Source напрямую.
+ *
+ * ТЗ №2: прямая добыча из источников и контейнеров убрана.
+ * Основной источник — Storage.
  */
+const energySource = require("energySource");
+const { MOVE } = require("./constants");
+
 module.exports = {
   run: function (creep) {
-    if (creep.memory.working === undefined) creep.memory.working = false;
+    if (!creep || !creep.room) return;
 
-    if (creep.store[RESOURCE_ENERGY] === 0) creep.memory.working = false;
-    if (creep.store.getFreeCapacity() === 0) creep.memory.working = true;
+    // Переключение режимов. Запись в Memory — только при смене режима:
+    // значение живёт в памяти крипа тиками и меняется редко.
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+      if (creep.memory.working !== false) creep.memory.working = false;
+    }
+    if (creep.store.getFreeCapacity() === 0) {
+      if (creep.memory.working !== true) creep.memory.working = true;
+    }
 
+    // Режим сбора энергии
     if (!creep.memory.working) {
-      this._collect(creep);
-    } else {
+      energySource.withdrawFromStorage(creep);
+    }
+    // Режим улучшения
+    else {
       if (creep.upgradeController(creep.room.controller) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(creep.room.controller, { reusePath: 10 });
+        creep.moveTo(creep.room.controller, { reusePath: MOVE.VOLATILE });
       }
-    }
-  },
-
-  _collect: function (creep) {
-    const storage = creep.room.storage;
-    if (storage && storage.store[RESOURCE_ENERGY] > 0) {
-      if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, { reusePath: 10 });
-      }
-      return;
-    }
-    // Storage пуст — добываем напрямую
-    const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
-    if (source && creep.harvest(source) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { reusePath: 10 });
     }
   },
 };

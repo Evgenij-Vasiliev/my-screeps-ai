@@ -1,150 +1,257 @@
-const factory = require("creep.factory");
-const empire = require("empire");
+/**
+ * SPAWN MANAGER (ТЗ №3)
+ * Отвечает на вопрос: "Кого создать?"
+ * Хранит очередь/приоритеты ролей, считает текущее количество крипов,
+ * вызывает creep.factory для реального спавна.
+ *
+ * ШЛЮЗ ПРОВЕРОК (правка 30.09.2026). Замер in-loop (профиль ниже, shard3
+ * 30.09.2026) показал, что комната платила 0.069 CPU/тик на проверку, которая
+ * ничего не находила: 0.0378 — счёт ролей, 0.0223 — поиск свободного спавна,
+ * 0.0082 — обход квот. Теперь:
+ *   - комната без недобора перепроверяется раз в SPAWN.SCAN_INTERVAL тиков
+ *     (constants.js), со сдвигом фазы по имени комнаты;
+ *   - комнате, у которой недобор есть (или спавн занят, или не хватило
+ *     энергии), проверка идёт каждый тик, как и раньше;
+ *   - свободный спавн ищется ЛЕНИВО — только когда роль действительно
+ *     недобрана и прошла проверки upgrader/mineralMiner.
+ * Цена шлюза: решение о спавне может опоздать до SCAN_INTERVAL тиков после
+ * неожиданной смерти крипа. Откат поведения — SPAWN.SCAN_INTERVAL: 1.
+ *
+ * ПРОФИЛЬ ПО ТРЕБОВАНИЮ (флаг Memory.cpuSpawnProfile = true, снять —
+ * `delete Memory.cpuSpawnProfile`): run() делится на части и пишет их
+ * стоимость в Memory.cpuStats.subsystems под ключами "spawn.countRoles",
+ * "spawn.find", "spawn.quotaLoop" — тем же механизмом, что поролевой профиль
+ * крипов и "gen.*" у генераторов задач (room.manager.js:757-774). На тиках,
+ * где шлюз комнату пропустил, части не пишутся вовсе, поэтому средние
+ * остаются «CPU за тик».
+ *
+ * Зачем флаг, а не постоянный замер: замер стоит Game.cpu.getUsed() на часть
+ * на комнату, а измеренный профиль сам стоил 0.0205 CPU/тик (23 % от того,
+ * что показывал). Пока флаг не задан, цена профиля — одно чтение Memory на
+ * проверяемую комнату.
+ *
+ * ВНИМАНИЕ: "spawn.quotaLoop" включает и вызов creep.factory, если он был
+ * (в тик спавна там окажется интент 0.2 CPU) — по величине это видно сразу.
+ */
+const creepFactory = require("creep.factory");
+const cpuMonitor = require("cpuMonitor");
+const {
+  SPAWN_QUOTA,
+  SPAWN,
+  MINERAL_MIN_AMOUNT_TO_SPAWN,
+  PRESPAWN_THRESHOLD,
+} = require("./constants");
 
-// Квоты крипов на комнату
-const QUOTA = {
-  worker: 1,
-  miner: 2,
-  towerSupplier: 1,
-  linkWorker: 1,
-  terminalUnloader: 1,
-  attacker: 1,
-  mineralMiner: 1,
-  factoryWorker: 1,
-  labWorker: 1,
+/**
+ * Счётчики крипов по ролям — ОДИН проход по списку (задание 8 плана).
+ *
+ * Раньше countRole(creeps, role) вызывался на каждую роль из SPAWN_QUOTA,
+ * то есть список крипов проходился девять раз с созданием массива и
+ * замыкания на каждый проход. При этом у пяти ролей квота равна нулю —
+ * их счёт не нужен вовсе.
+ *
+ * Правила счёта сохранены прежние:
+ * - роль не из SPAWN_QUOTA или с нулевой квотой не считается;
+ * - крип, чей ticksToLive ниже PRESPAWN_THRESHOLD[role], не считается:
+ *   он «уже уходящий», вместо него нужен новый (иначе спавн опоздает).
+ *
+ * @param {Array} creeps
+ * @returns {Object} role -> количество
+ */
+function countRoles(creeps) {
+  const counts = {};
 
-  // harvester: 1,
-  // upgrader: 0,
-  builder: 1,
-  // repairer: 1,
-  // transporter: 2,
-};
+  for (let i = 0; i < creeps.length; i++) {
+    const creep = creeps[i];
+    if (!creep) continue;
 
-// ТЗ №33: пороги Pre-Spawn (ticksToLive, ниже которого текущий крип роли
-// перестаёт учитываться в счёте quota — досрочный заказ замены).
-const PRESPAWN_THRESHOLD = {
-  remoteMiner: 130,
-  linkWorker: 50,
-};
+    const role = creep.memory.role;
 
-function getPrespawnThreshold(room, role) {
-  if (role === "miner") {
-    const roomMemory = Memory.rooms[room.name] || {};
-    return (roomMemory.earlySpawnThresholds || {}).miner || 43;
+    // !quota отсекает и 0, и роли вне таблицы квот.
+    if (!SPAWN_QUOTA[role]) continue;
+
+    const threshold = PRESPAWN_THRESHOLD[role];
+    if (
+      threshold !== undefined &&
+      creep.ticksToLive !== undefined &&
+      creep.ticksToLive < threshold
+    ) {
+      continue;
+    }
+
+    counts[role] = (counts[role] || 0) + 1;
   }
-  return PRESPAWN_THRESHOLD[role] || null;
+
+  return counts;
 }
 
-// pending — сколько уже "заказано" другими спавнами В ЭТОМ ЖЕ тике,
-// но ещё не попало в Game.creeps (используется, чтобы два спавна в
-// одной комнате не заказали одну и ту же роль дважды за тик).
-function countForQuota(creeps, role, threshold, pending) {
-  const base = _.filter(creeps, c => {
-    if (c.memory.role !== role) return false;
-    if (threshold === null) return true;
-    return c.ticksToLive === undefined || c.ticksToLive > threshold;
-  }).length;
-  return base + (pending[role] || 0);
-}
-
-// ТЗ №35 (несколько спавнов, общая очередь): выбор роли вынесен в
-// отдельную функцию, чтобы её можно было вызвать по разу для КАЖДОГО
-// свободного спавна в комнате — свободный спавн берёт следующую
-// недостающую роль по той же самой очереди приоритетов QUOTA, что и
-// раньше. Порядок ролей и пороги Pre-Spawn не изменились.
-function findNextOrder(room, creeps, pending) {
-  for (const [role, quota] of Object.entries(QUOTA)) {
-    const threshold = getPrespawnThreshold(room, role);
-    const count = countForQuota(creeps, role, threshold, pending);
-    if (count < quota) {
-      // Не спавним mineralMiner если минерал пуст
-      if (role === "mineralMiner") {
-        const mineral = room.find(FIND_MINERALS)[0];
-        if (!mineral || mineral.mineralAmount === 0) continue;
-      }
-      return { role, roleData: {} };
-    }
+/**
+ * Первый свободный спавн комнаты.
+ *
+ * Раньше здесь был `spawns.find(s => !s.spawning)` — замыкание на каждую
+ * комнату каждый тик ради обхода массива из 1-3 спавнов. Цикл даёт тот же
+ * результат без аллокации: микробенчмарк scripts/spawn.ab.bench.js (Node,
+ * 30.09.2026) показал 366.9 нс/вызов против 368.1 у `find`, то есть разница
+ * в пределах шума — правка берётся не за скорость, а за отсутствие мусора.
+ * Проверка `spawn &&` — защита от null: сейчас таких элементов не бывает
+ * (resolveByIds их отсекает, room.manager.js:178-186), но `find` на
+ * null-элементе упал бы, а цикл просто идёт дальше.
+ *
+ * @param {Array} spawns
+ * @returns {StructureSpawn|null}
+ */
+function findFreeSpawn(spawns) {
+  for (let i = 0; i < spawns.length; i++) {
+    const spawn = spawns[i];
+    if (spawn && !spawn.spawning) return spawn;
   }
-
-  // ИСПРАВЛЕНИЕ (ТЗ №26, Блок 4): empire.remoteMining.enabled и
-  // .reserveEnabled были декоративными. Значения по умолчанию (true)
-  // сохраняют прежнее поведение без изменений.
-  if (room.name === "E35S37" && empire.remoteMining.enabled) {
-    const remoteRooms = ["E35S38", "E36S37"];
-    const globalRoles = [
-      {
-        role: "reserver",
-        count: 2,
-        enabled: empire.remoteMining.reserveEnabled,
-      },
-      {
-        role: "remoteMiner",
-        count: 2,
-        enabled: true,
-        prespawnThreshold: PRESPAWN_THRESHOLD.remoteMiner,
-      },
-      { role: "remoteHauler", count: 2, enabled: true },
-    ];
-    for (const { role, count, enabled, prespawnThreshold } of globalRoles) {
-      if (!enabled) continue;
-      const current =
-        _.filter(Game.creeps, c => {
-          if (c.memory.role !== role) return false;
-          if (!prespawnThreshold) return true;
-          return (
-            c.ticksToLive === undefined || c.ticksToLive > prespawnThreshold
-          );
-        }).length + (pending[role] || 0);
-      if (current < count) {
-        const takenRooms = pending[`${role}:rooms`] || [];
-        const targetRoom =
-          remoteRooms.find(
-            r =>
-              !takenRooms.includes(r) &&
-              !_.some(
-                Game.creeps,
-                c =>
-                  c.memory.role === role &&
-                  (c.memory.targetRoom === r || c.memory.target === r),
-              ),
-          ) || remoteRooms[0];
-        return { role, roleData: { targetRoom } };
-      }
-    }
-  }
-
   return null;
 }
 
-module.exports = {
-  run: function (room) {
-    const spawns = room.find(FIND_MY_SPAWNS).filter(s => !s.spawning);
-    if (spawns.length === 0) return;
+/**
+ * Шлюз проверок: до какого тика комнате нечего перепроверять.
+ *
+ * Живёт в heap: рестарт VM его теряет, и первая же проверка проходит как
+ * обычно — отсутствие записи означает «проверять сейчас». Ключей ровно по
+ * числу своих комнат (мёртвых комнат в империи не бывает), поэтому чистка,
+ * о которой предупреждает скилл для кэшей по имени крипа, здесь не нужна.
+ */
+function spawnGate() {
+  return global.__spawnGate || (global.__spawnGate = {});
+}
 
-    const creeps = _.filter(Game.creeps, c => c.memory.room === room.name);
+/**
+ * Сдвиг фазы проверок для комнаты — тот же приём, что rebuildStagger
+ * (scanner.js:106-112): без него все комнаты проверяются в один тик
+ * и дают периодический пик на всю империю.
+ *
+ * @param {string} roomName
+ * @returns {number} 0 .. SPAWN.SCAN_INTERVAL-1
+ */
+function scanStagger(roomName) {
+  let h = 0;
+  for (let i = 0; i < roomName.length; i++) {
+    h = (h * 31 + roomName.charCodeAt(i)) % 9973;
+  }
+  return h % SPAWN.SCAN_INTERVAL;
+}
 
-    if (creeps.length === 0) {
-      factory.run(spawns[0], "harvester", room.name);
-      return;
+/** Следующий тик проверки для комнаты, которой сейчас ничего не нужно. */
+function idleDue(roomName, now, firstScan) {
+  return (
+    now + SPAWN.SCAN_INTERVAL - (firstScan ? scanStagger(roomName) : 0)
+  );
+}
+
+/**
+ * @param {Object} roomState
+ */
+function run(roomState) {
+  const roomName = roomState.roomName;
+  const now = Game.time;
+  const gate = spawnGate();
+  const due = gate[roomName];
+
+  // Шлюз: пока не наступил срок, комната не делает НИЧЕГО — ни счёта ролей,
+  // ни поиска спавна. Проверка — одно чтение heap и сравнение чисел.
+  if (due !== undefined && now < due) return;
+
+  // Комнате нечем спавнить: считать роли незачем. Длина массива читается без
+  // геттеров движка и дешевле, чем .spawning у каждого спавна.
+  if (roomState.spawns.length === 0) {
+    gate[roomName] = idleDue(roomName, now, due === undefined);
+    return;
+  }
+
+  // Профиль по требованию: пока флаг не задан, лишних Game.cpu.getUsed нет.
+  const prof = Memory.cpuSpawnProfile === true;
+  let mark = prof ? Game.cpu.getUsed() : 0;
+
+  // Один проход вместо девяти.
+  const counts = countRoles(roomState.creeps);
+
+  if (prof) {
+    cpuMonitor.acc("spawn.countRoles", Game.cpu.getUsed() - mark);
+    mark = Game.cpu.getUsed();
+  }
+
+  let spawn = null;
+  let findCPU = 0;
+  // Нужен ли комнате хоть один крип: роль ниже квоты, прошедшая проверки.
+  let roomWants = false;
+
+  // Обход остался `for...in` по SPAWN_QUOTA: вариант с предвычисленным
+  // массивом ролей с квотой > 0 проверен локальным микробенчмарком 30.09.2026
+  // (scripts/spawn.ab.bench.js, Node) и оказался на ~16 нс/вызов ДОРОЖЕ — обход
+  // девяти ключей с отсечением пяти нулевых дешевле массива из четырёх, где
+  // роль всё равно ищется в SPAWN_QUOTA. Не возвращать без нового замера.
+  for (const role in SPAWN_QUOTA) {
+    const quota = SPAWN_QUOTA[role];
+
+    // Роль с нулевой квотой не спавнится — незачем её считать и проверять.
+    if (!quota) continue;
+
+    // Квота уже набрана. Проверка идёт ДО дорогих условий ниже: например,
+    // для mineralMiner это экономит Game.getObjectById на каждом тике.
+    if ((counts[role] || 0) >= quota) continue;
+
+    if (
+      role === "upgrader" &&
+      roomState.room.controller.ticksToDowngrade > 100000
+    )
+      continue;
+
+    if (role === "mineralMiner") {
+      // amount уже в состоянии — резолвить минерал заново не нужно.
+      if (!roomState.mineral || !roomState.mineral.extractorId) continue;
+      if (roomState.mineral.amount < MINERAL_MIN_AMOUNT_TO_SPAWN) continue;
     }
 
-    const pending = {};
+    roomWants = true;
 
-    for (const spawn of spawns) {
-      const order = findNextOrder(room, creeps, pending);
-      if (!order) break; // всё укомплектовано — остальным спавнам нечего заказывать
-
-      const result = factory.run(spawn, order.role, room.name, order.roleData);
-
-      if (result === OK) {
-        pending[order.role] = (pending[order.role] || 0) + 1;
-        if (order.roleData && order.roleData.targetRoom) {
-          const key = `${order.role}:rooms`;
-          pending[key] = (pending[key] || []).concat(order.roleData.targetRoom);
-        }
+    // ЛЕНИВЫЙ ПОИСК спавна: до этой строки доходит только комната, которой крип
+    // действительно нужен. Раньше `find` платился в каждой комнате каждый тик —
+    // замер 30.09.2026: 0.0223 CPU/тик, 36 % расхода подсистемы, при том что
+    // империя ничего не спавнила (все спавны свободны, недоборов нет).
+    if (!spawn) {
+      if (prof) {
+        const findStart = Game.cpu.getUsed();
+        spawn = findFreeSpawn(roomState.spawns);
+        findCPU += Game.cpu.getUsed() - findStart;
+      } else {
+        spawn = findFreeSpawn(roomState.spawns);
       }
-      // Если result !== OK (например ERR_NOT_ENOUGH_ENERGY) — pending не
-      // увеличиваем, следующий спавн тоже попробует эту роль.
+      // Спавнить некуда (все заняты) — проверим снова на следующем тике.
+      if (!spawn) break;
     }
-  },
-};
+
+    const result = creepFactory.run(
+      spawn,
+      role,
+      roomName,
+      PRESPAWN_THRESHOLD[role],
+    );
+    // break, а не return: выход ровно тот же (после цикла в функции ничего
+    // нет, кроме шлюза и профиля), но шлюз успевает записать следующий срок.
+    if (result === OK) break;
+  }
+
+  // Следующая проверка. Недобор есть — каждый тик, как и раньше: крип не
+  // появляется мгновенно (тело строится десятки тиков), спавн может быть занят,
+  // энергии может не хватить, а роль может остаться недобранной и после
+  // успешного спавна (квота 2, а в очереди был один). Недобора нет — интервал
+  // со сдвигом по имени комнаты: первый срок сокращён сдвигом, дальше фазы
+  // комнат разнесены по тикам.
+  gate[roomName] = roomWants
+    ? now + 1
+    : idleDue(roomName, now, due === undefined);
+
+  if (prof) {
+    cpuMonitor.acc("spawn.find", findCPU);
+    cpuMonitor.acc("spawn.quotaLoop", Game.cpu.getUsed() - mark - findCPU);
+  }
+}
+
+module.exports.run = run;
+// Экспортируется для офлайн-тестов (tests/spawn.count.test.js).
+module.exports.countRoles = countRoles;

@@ -1,53 +1,52 @@
+const { TOWER } = require("./constants");
+
 module.exports = {
-  run: function (tower) {
+  /**
+   * @param {StructureTower} tower
+   * @param {Object} roomData
+   *   { hostiles, woundedCreep, repairTarget, repairTowerId, canRepair }
+   *   canRepair — тик ремонта ЭТОЙ комнаты (room.manager.isTowerRepairTick).
+   *   repairTarget / repairTowerId — одна цель на комнату и одна башня под неё
+   *   (room.manager.pickRepairTarget): интент стоит 0.2 CPU, поэтому 16 башен
+   *   по одной цели (пик 4.5031 CPU раз в 15 тиков, замер 29.09.2026) заменены
+   *   на одно действие ближайшей башней.
+   */
+  run: function (tower, roomData) {
     if (!tower) return;
 
-    // Атака вражеских крипов
-    const closestHostile = tower.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
-    if (closestHostile) {
-      tower.attack(closestHostile);
+    // Memory.towerState убран (задание 5 плана): он дублировал флаг
+    // Memory.rooms[room].underAttack и переписывался на каждую башню
+    // каждый тик. Заодно ушла задержка реакции: прежнее условие
+    // shouldCheckAttack пропускало атаку до TOWER.HOSTILE_CHECK_INTERVAL
+    // тиков, пока флаг не проставится в предыдущем тике.
+    const hostiles = roomData.hostiles;
+    const hasHostiles = hostiles && hostiles.length > 0;
+
+    if (hasHostiles) {
+      const closestHostile = tower.pos.findClosestByRange(hostiles);
+      if (closestHostile) {
+        tower.attack(closestHostile);
+        return;
+      }
+    }
+
+    if (roomData.canRepair !== true) return;
+    if (tower.store[RESOURCE_ENERGY] <= TOWER.REPAIR_ENERGY_MIN) return;
+
+    // Ремонт: цель и башня выбраны уровнем комнаты (room.manager.pickRepairTarget
+    // и isTowerRepairTick). Бьёт ТОЛЬКО выбранная башня — ближайшая к цели;
+    // остальные в этот тик не тратят интент (0.2 CPU каждая). Стены в цели не
+    // попадают вовсе: они не распадаются (см. комментарий в room.manager.js).
+    if (roomData.repairTarget) {
+      if (tower.id === roomData.repairTowerId) {
+        tower.repair(roomData.repairTarget);
+      }
       return;
     }
 
-    // Ремонт стен и валов с пошаговым увеличением прочности
-    const wallThreshold = tower.room.memory.wallThreshold || 1000;
-    const wallsAndRamparts = tower.room.find(FIND_STRUCTURES, {
-      filter: structure =>
-        (structure.structureType === STRUCTURE_WALL ||
-          structure.structureType === STRUCTURE_RAMPART) &&
-        structure.hits < wallThreshold,
-    });
-
-    if (wallsAndRamparts.length > 0) {
-      wallsAndRamparts.sort((a, b) => a.hits - b.hits);
-      tower.repair(wallsAndRamparts[0]);
-      return;
-    } else {
-      tower.room.memory.wallThreshold = wallThreshold + 1000;
-    }
-
-    // Ремонт самого повреждённого здания (кроме стен и валов)
-    const damagedStructure = tower.room
-      .find(FIND_STRUCTURES, {
-        filter: structure =>
-          structure.hits < structure.hitsMax &&
-          structure.structureType !== STRUCTURE_WALL &&
-          structure.structureType !== STRUCTURE_RAMPART,
-      })
-      .sort((a, b) => a.hits - b.hits)[0];
-
-    if (damagedStructure) {
-      tower.repair(damagedStructure);
-      return;
-    }
-
-    // Лечение раненых союзников
-    const woundedCreep = tower.room.find(FIND_MY_CREEPS, {
-      filter: creep => creep.hits < creep.hitsMax,
-    })[0];
-
-    if (woundedCreep) {
-      tower.heal(woundedCreep);
+    // Лечение союзников
+    if (roomData.woundedCreep) {
+      tower.heal(roomData.woundedCreep);
     }
   },
 };

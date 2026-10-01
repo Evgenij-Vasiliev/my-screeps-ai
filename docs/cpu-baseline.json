@@ -1,0 +1,116 @@
+{
+  "capturedAt": "2026-09-27T16:32:34.579Z",
+  "shard": "shard3",
+  "general": {
+    "t": 83271254,
+    "lim": 20,
+    "bkt": 10000,
+    "creeps": 28,
+    "rooms": 5,
+    "spawns": 10,
+    "memBytes": 33992,
+    "avg": 6.768848485714387,
+    "cnt": 98,
+    "memKb": 33.2,
+    "cpuPerTick": 6.769,
+    "cpuPerCreep": 0.242,
+    "overLimit": -13.231
+  },
+  "apiCosts": {
+    "getUsed_x500": 0.1232,
+    "getUsed_each": 0.000246,
+    "getObjectById": 0.0209,
+    "valuesCreeps": 0.7344,
+    "getObjectById_each": 0.000104,
+    "valuesCreeps_each": 0.003672,
+    "n": 314,
+    "cold": 0.0058,
+    "cached": 0.0646,
+    "rooms": 0.0046,
+    "findStructures_cached_each": 0.00323,
+    "valuesRooms_each": 0.00023,
+    "bytes": 33512,
+    "cost": 0.002
+  },
+  "memory": {
+    "top": {
+      "creeps": 5682,
+      "market": 42,
+      "labs": 109,
+      "remoteRooms": 19,
+      "cpuMonitorEnabled": 4,
+      "spawns": 61,
+      "rooms": 26323,
+      "tradeEnabled": 4,
+      "empire": 549,
+      "stopMarket": 4,
+      "_taskIdSeq": 6,
+      "remoteRoleCacheUpdatedAt": 8,
+      "attackerNamesCacheUpdatedAt": 8,
+      "attackerNamesCache": 109,
+      "attackerNamesCacheCount": 2,
+      "remoteRoleCache": 112,
+      "remoteRoleCacheCount": 2,
+      "cpuMonitorRoles": 4,
+      "cpuStats": 281,
+      "keepTemp": 4
+    },
+    "rooms": {
+      "E35S37": 12718,
+      "E35S39": 4000,
+      "E37S37": 3059,
+      "E37S38": 3753,
+      "E36S38": 2640,
+      "E35S38": 60,
+      "E36S37": 60
+    },
+    "taskQueues": {
+      "E35S37": {
+        "tasks": 104,
+        "bytes": 9756,
+        "cache": 0
+      },
+      "E35S39": {
+        "tasks": 13,
+        "bytes": 1993,
+        "cache": 0
+      },
+      "E37S37": {
+        "tasks": 1,
+        "bytes": 202,
+        "cache": 0
+      },
+      "E37S38": {
+        "tasks": 6,
+        "bytes": 955,
+        "cache": 0
+      },
+      "E36S38": {
+        "tasks": 1,
+        "bytes": 202,
+        "cache": 0
+      },
+      "E35S38": {
+        "tasks": 0,
+        "bytes": 0,
+        "cache": 0
+      },
+      "E36S37": {
+        "tasks": 0,
+        "bytes": 0,
+        "cache": 0
+      }
+    },
+    "creepMemory": {
+      "n": 29,
+      "bytes": 5003,
+      "withTask": 0
+    }
+  },
+  "again": {
+    "t": 83271271,
+    "avg": 6.8892711833336255,
+    "cnt": 18,
+    "bkt": 10000
+  }
+}

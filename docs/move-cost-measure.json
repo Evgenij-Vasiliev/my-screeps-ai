@@ -1,0 +1,38 @@
+{
+  "measuredAt": "2026-09-28T20:23:58.079Z",
+  "shard": "shard3",
+  "context": {
+    "room": "E35S37",
+    "creep": "miner_E35S37_83293901",
+    "role": "miner",
+    "range": 11,
+    "bucket": 10000,
+    "t": 83295178
+  },
+  "withCache": {
+    "had": true,
+    "after": true,
+    "rc": -11,
+    "cost": 0.0117,
+    "range": 10
+  },
+  "freshSearch": {
+    "after": true,
+    "rc": -11,
+    "cost": 0.0084,
+    "range": 9
+  },
+  "cacheState": {
+    "creeps": 26,
+    "noCache": 3,
+    "ageMin": 2,
+    "ageMed": 325,
+    "ageMax": 1318,
+    "nAges": 23
+  },
+  "freshRate": {
+    "now": 83295185,
+    "fresh": 4,
+    "stale": 20
+  }
+}

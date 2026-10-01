@@ -1,52 +1,60 @@
+const roleBuilder = require("./role.builder");
+const energySource = require("energySource");
+const { MOVE } = require("./constants");
+
 /**
- * ЛОГИКА РЕМОНТНИКА (Repairer Role)
- * Энергия: Storage → если пусто → Source напрямую.
- * Если чинить нечего — помогает строителю.
+ * Список повреждённых структур комнаты.
+ *
+ * roomState.damagedStructures — ленивый геттер (room.manager.js): список
+ * собирается по факту обращения, потому что башни читают его раз в
+ * TOWER.REPAIR_INTERVAL тиков. Роль repairer сейчас не спавнится
+ * (SPAWN_QUOTA.repairer = 0, constants.js:88), так что в бою этот путь не
+ * исполняется. Обращение через само поле (а не через require room.manager)
+ * нужно и здесь: циклический require уронил бы загрузку модулей на шарде.
  */
-const roleBuilder = require("role.builder");
+function damagedList(roomState) {
+  return roomState.damagedStructures || [];
+}
 
 module.exports = {
-  run: function (creep) {
-    if (creep.memory.working === undefined) creep.memory.working = false;
+  run: function (creep, roomState) {
+    if (creep.memory.working === undefined) {
+      creep.memory.working = false;
+    }
 
-    if (creep.store[RESOURCE_ENERGY] === 0) creep.memory.working = false;
-    if (creep.store.getFreeCapacity() === 0) creep.memory.working = true;
+    if (creep.memory.working === false && creep.store.getFreeCapacity() === 0) {
+      creep.memory.working = true;
+    } else if (
+      creep.memory.working === true &&
+      creep.store[RESOURCE_ENERGY] === 0
+    ) {
+      creep.memory.working = false;
+    }
 
     if (!creep.memory.working) {
-      this._collect(creep);
+      energySource.withdrawFromStorage(creep);
     } else {
-      this._repair(creep);
-    }
-  },
+      let target = null;
+      let minRange = Infinity;
 
-  _collect: function (creep) {
-    const storage = creep.room.storage;
-    if (storage && storage.store[RESOURCE_ENERGY] > 0) {
-      if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, { reusePath: 10 });
-      }
-      return;
-    }
-    // Storage пуст — добываем напрямую
-    const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
-    if (source && creep.harvest(source) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { reusePath: 10 });
-    }
-  },
+      const damaged = damagedList(roomState);
 
-  _repair: function (creep) {
-    const target = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-      filter: s =>
-        s.hits < s.hitsMax &&
-        s.structureType !== STRUCTURE_WALL &&
-        s.structureType !== STRUCTURE_RAMPART,
-    });
-    if (target) {
-      if (creep.repair(target) === ERR_NOT_IN_RANGE) {
-        creep.moveTo(target, { reusePath: 10 });
+      for (let i = 0; i < damaged.length; i++) {
+        const s = damaged[i];
+        const range = creep.pos.getRangeTo(s);
+        if (range < minRange) {
+          minRange = range;
+          target = s;
+        }
       }
-    } else {
-      roleBuilder.run(creep);
+
+      if (target) {
+        if (creep.repair(target) === ERR_NOT_IN_RANGE) {
+          creep.moveTo(target, { reusePath: MOVE.VOLATILE });
+        }
+      } else {
+        roleBuilder.run(creep, roomState);
+      }
     }
   },
 };

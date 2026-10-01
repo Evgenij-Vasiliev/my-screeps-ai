@@ -1,0 +1,341 @@
+{
+  "measuredAt": "2026-09-29T07:24:45.638Z",
+  "shard": "shard3",
+  "gameTime": 83305672,
+  "state": {
+    "t": 83305672,
+    "lim": 20,
+    "bkt": 10000,
+    "avg": 4.454201809999972,
+    "cnt": 20,
+    "sub": {
+      "spawnManager": 0.0965,
+      "taskManager": 1.1773,
+      "towers": 0.4789,
+      "linkManager": 0.0945,
+      "factoryManager": 0.057,
+      "powerSpawnManager": 0.0303,
+      "marketManager": 0.1968,
+      "taskCompact": 0.0107
+    },
+    "creeps": 25,
+    "mine": 5,
+    "towers": 16,
+    "host": 0,
+    "structs": 424
+  },
+  "perRoom": [
+    "E35S37 t4 h0 s350",
+    "E35S39 t4 h0 s252",
+    "E36S38 t3 h0 s252",
+    "E37S37 t2 h0 s217",
+    "E37S38 t3 h0 s270"
+  ],
+  "findCost": {
+    "n": 0,
+    "cold": 0.00244,
+    "rep": 0.000224
+  },
+  "dmgCost": {
+    "structs": 350,
+    "dmg": 259,
+    "first": 0.19587,
+    "rep": 0.030359
+  },
+  "closeCost": {
+    "towers": 4,
+    "list": 350,
+    "per": 0.04999,
+    "empty": 0.00043
+  },
+  "closeScale": {
+    "1": 0.001787,
+    "4": 0.000925,
+    "10": 0.001587,
+    "25": 0.003615,
+    "50": 0.00633,
+    "100": 0.013459,
+    "350": 0.050503
+  },
+  "types": [
+    {
+      "room": "E35S37",
+      "total": 350,
+      "count": {
+        "constructedWall": 47,
+        "road": 204,
+        "controller": 1,
+        "rampart": 11,
+        "extension": 60,
+        "extractor": 1,
+        "storage": 1,
+        "terminal": 1,
+        "tower": 4,
+        "link": 6,
+        "lab": 10,
+        "factory": 1,
+        "powerSpawn": 1,
+        "spawn": 2
+      },
+      "damaged": {
+        "constructedWall": 47,
+        "road": 201,
+        "rampart": 11
+      }
+    },
+    {
+      "room": "E35S39",
+      "total": 252,
+      "count": {
+        "constructedWall": 31,
+        "road": 145,
+        "controller": 1,
+        "tower": 4,
+        "extension": 47,
+        "rampart": 4,
+        "extractor": 1,
+        "lab": 10,
+        "factory": 1,
+        "storage": 1,
+        "terminal": 1,
+        "spawn": 2,
+        "link": 3,
+        "powerSpawn": 1
+      },
+      "damaged": {
+        "constructedWall": 31,
+        "road": 145,
+        "rampart": 4
+      }
+    },
+    {
+      "room": "E36S38",
+      "total": 252,
+      "count": {
+        "constructedWall": 24,
+        "road": 139,
+        "controller": 1,
+        "extension": 60,
+        "rampart": 4,
+        "storage": 1,
+        "extractor": 1,
+        "terminal": 1,
+        "spawn": 2,
+        "tower": 3,
+        "link": 3,
+        "lab": 10,
+        "observer": 1,
+        "factory": 1,
+        "powerSpawn": 1
+      },
+      "damaged": {
+        "constructedWall": 24,
+        "road": 139,
+        "rampart": 4
+      }
+    },
+    {
+      "room": "E37S37",
+      "total": 217,
+      "count": {
+        "constructedWall": 20,
+        "road": 115,
+        "controller": 1,
+        "spawn": 2,
+        "extension": 55,
+        "tower": 2,
+        "rampart": 3,
+        "storage": 1,
+        "terminal": 1,
+        "extractor": 1,
+        "link": 3,
+        "lab": 10,
+        "nuker": 1,
+        "factory": 1,
+        "powerSpawn": 1
+      },
+      "damaged": {
+        "constructedWall": 20,
+        "road": 115,
+        "rampart": 3
+      }
+    },
+    {
+      "room": "E37S38",
+      "total": 270,
+      "count": {
+        "constructedWall": 40,
+        "road": 152,
+        "controller": 1,
+        "spawn": 2,
+        "extension": 50,
+        "tower": 3,
+        "rampart": 4,
+        "storage": 1,
+        "terminal": 1,
+        "extractor": 1,
+        "link": 3,
+        "lab": 10,
+        "factory": 1,
+        "powerSpawn": 1
+      },
+      "damaged": {
+        "constructedWall": 40,
+        "road": 152,
+        "rampart": 4
+      }
+    }
+  ],
+  "windows": [],
+  "dmgRoads": [
+    [
+      "E35S37",
+      201,
+      201,
+      0.05202
+    ],
+    [
+      "E35S39",
+      145,
+      145,
+      0.02196
+    ],
+    [
+      "E36S38",
+      139,
+      139,
+      0.02165
+    ],
+    [
+      "E37S37",
+      115,
+      115,
+      0.01741
+    ],
+    [
+      "E37S38",
+      152,
+      152,
+      0.02623
+    ]
+  ],
+  "dmgGroups": [
+    [
+      "E35S37",
+      82,
+      0,
+      0.05291
+    ],
+    [
+      "E35S39",
+      66,
+      0,
+      0.0242
+    ],
+    [
+      "E36S38",
+      78,
+      0,
+      0.0247
+    ],
+    [
+      "E37S37",
+      72,
+      0,
+      0.02343
+    ],
+    [
+      "E37S38",
+      68,
+      0,
+      0.02413
+    ]
+  ],
+  "repairPass": [
+    [
+      "E35S37",
+      201,
+      0,
+      0,
+      0.0147
+    ],
+    [
+      "E35S39",
+      145,
+      0,
+      0,
+      0.01002
+    ],
+    [
+      "E36S38",
+      139,
+      0,
+      0,
+      0.01023
+    ],
+    [
+      "E37S37",
+      115,
+      0,
+      0,
+      0.00825
+    ],
+    [
+      "E37S38",
+      152,
+      0,
+      0,
+      0.0111
+    ]
+  ],
+  "numbersPass": [
+    [
+      "E35S37",
+      201,
+      0,
+      0,
+      0.01291
+    ],
+    [
+      "E35S39",
+      145,
+      0,
+      0,
+      0.00647
+    ],
+    [
+      "E36S38",
+      139,
+      0,
+      0,
+      0.00847
+    ],
+    [
+      "E37S37",
+      115,
+      0,
+      0,
+      0.004
+    ],
+    [
+      "E37S38",
+      152,
+      0,
+      0,
+      0.00558
+    ]
+  ],
+  "derived": {
+    "towersSubsystemCpuPerTick": 0.4789,
+    "hypotheticalPerTowerFindCpu": 0.00246,
+    "closestByRangeCpuPerElement": 0.000144,
+    "damagedListRoadsCpuPerTick": 0.13927,
+    "damagedListGroupsCpuPerTick": 0.14937,
+    "damagedListTotalCpuPerTick": 0.28864,
+    "repairGeneratorCpuPerTick": 0.0543,
+    "repairGeneratorBelowThreshold": 0,
+    "repairGeneratorDuplicates": 0,
+    "numbersPathCpuPerTick": 0.03743,
+    "numbersPathSavingCpuPerTick": 0.01687
+  }
+}
