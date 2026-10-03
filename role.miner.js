@@ -54,6 +54,59 @@ const HARVEST_PER_WORK = typeof HARVEST_POWER === "number" ? HARVEST_POWER : 2;
  *  линк могли построить позже, а findInRange — это вызов API. */
 const LINK_RECHECK = 100;
 
+/**
+ * Сила ОДНОГО действия harvest по телу: сумма по ЖИВЫМ WORK-частям, где каждая
+ * даёт HARVEST_PER_WORK, умноженный на BOOSTS.work[boost].harvest.
+ *
+ * Формула повторяет движковую calcBodyEffectiveness (engine src/utils.js:623-636) —
+ * ровно ту, которой пользуется обработчик harvest (`amount = min(target.energy,
+ * calcBodyEffectiveness(body, WORK, 'harvest', HARVEST_POWER))`). Часть считается
+ * живой при `hits > 0`, как и в движке.
+ *
+ * BOOSTS — глобал движка; в офлайн-тестах его может не быть (guard через typeof,
+ * тот же приём, что у HARVEST_PER_WORK выше).
+ * @param {Array} body
+ * @returns {number}
+ */
+function harvestPowerOf(body) {
+  let power = 0;
+
+  for (let i = 0; i < body.length; i++) {
+    const part = body[i];
+    if (part.type !== WORK || !part.hits) continue;
+
+    let partPower = HARVEST_PER_WORK;
+    if (part.boost && typeof BOOSTS !== "undefined" && BOOSTS[WORK]) {
+      const entry = BOOSTS[WORK][part.boost];
+      if (entry && entry.harvest) partPower *= entry.harvest;
+    }
+    power += partPower;
+  }
+
+  return power;
+}
+
+/**
+ * Подпись тела для кэша удара: сколько ЖИВЫХ WORK-частей и сколько из них с
+ * бустом. Одним числом (alive × 100 + boosted) — дешевле хранить в Memory и
+ * сравнивать, чем строкой; при ≤50 частях тела значения не пересекаются.
+ * @param {Array} body
+ * @returns {number}
+ */
+function workSignature(body) {
+  let alive = 0;
+  let boosted = 0;
+
+  for (let i = 0; i < body.length; i++) {
+    const part = body[i];
+    if (part.type !== WORK || !part.hits) continue;
+    alive++;
+    if (part.boost) boosted++;
+  }
+
+  return alive * 100 + boosted;
+}
+
 function spotCache() {
   return (global.__minerSpots = global.__minerSpots || {});
 }
@@ -177,12 +230,37 @@ module.exports = {
     // 01.10.2026 ({23,10,17} -> {35,7,8}, см. constants.js CREEP_BODIES.miner), и
     // майнеры старого поколения доживают свой срок рядом с новыми. Константа тут
     // дала бы старому майнеру неверный удар (ждал бы 70, а снимает 46).
-    // Значение кэшируется в памяти крипа при первом вызове: тело за жизнь не
-    // меняется, а `getActiveBodyparts(WORK)` стоит 0.000851 CPU за вызов (замер
-    // 01.10.2026, K=200). Бустов WORK у майнеров нет; если появятся — кэш надо
-    // сбрасывать вместе с бустом.
+    //
+    // УДАР СЧИТЫВАЕТСЯ С БУСТОМ (правка 02.10.2026, T1-контур). Прежний текст
+    // «Бустов WORK у майнеров нет; если появятся — кэш надо сбрасывать вместе с
+    // бустом» перестал быть верным: политика выдаёт майнеру UO
+    // (BOOSTS.work.UO.harvest = 3, constants.js LAB_BOOST.BOOST_POLICY.miner).
+    // Считает движок — calcBodyEffectiveness (engine src/utils.js:623-636): сила
+    // ЖИВОЙ части умножается на BOOSTS[WORK][boost].harvest. Здесь повторена та же
+    // формула, иначе роль планирует удар 70, а движок отдаёт 90 и больше: рюкзак
+    // переполняется, и лишнее СБРАСЫВАЕТСЯ НА ПОЛ (engine
+    // src/processor/intents/creeps/harvest.js, ветка sum > storeCapacity → drop).
+    // При 5 бустнутых частях терялось бы 10 единиц из 350 (2.9 %), при 35 — 70
+    // (20 %), и мешало бы поднять parts в BOOST_POLICY.
+    //
+    // Кэш в памяти крипа остаётся (тело за жизнь не меняется), но привязан к
+    // ПОДПИСИ тела — «сколько живых WORK и сколько из них с бустом». Подпись ловит
+    // и буст, и потерянные части, а запись в Memory происходит только при её смене
+    // (в обычном тике Memory не трогается). Цена — один проход по телу (~50
+    // элементов) вместо getActiveBodyparts (0.000851 CPU за вызов, замер
+    // 01.10.2026, K=200); любой из вариантов на порядки дешевле интента (0.2 CPU).
+    const body = creep.body;
     let take = creep.memory.harvestTake;
-    if (take === undefined) {
+
+    if (body) {
+      const signature = workSignature(body);
+      if (take === undefined || creep.memory.harvestSignature !== signature) {
+        take = harvestPowerOf(body);
+        creep.memory.harvestTake = take;
+        creep.memory.harvestSignature = signature;
+      }
+    } else if (take === undefined) {
+      // Тело недоступно (мок/симулятор без body) — прежнее поведение.
       take = creep.getActiveBodyparts(WORK) * HARVEST_PER_WORK;
       creep.memory.harvestTake = take;
     }

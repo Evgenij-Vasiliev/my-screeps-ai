@@ -4,7 +4,7 @@
  * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
-const { CREEP_BODIES } = require("./constants");
+const { CREEP_BODIES, BOOST_BODIES, boostReadyForSpawn } = require("./constants");
 
 const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
   const body = [];
@@ -35,7 +35,7 @@ const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
 
 const factory = {
   blueprints: {
-    miner: spawn => {
+    miner: (spawn, threshold, name, boostedBody) => {
       const roomName = spawn.room.name;
       const roomMemory = Memory.rooms[roomName] || {};
 
@@ -49,54 +49,62 @@ const factory = {
       // сам (role.miner.js, creep.memory.wp) и переходит на соседнее, когда
       // источник под ним вычерпан.
       return {
-        body: prepareBody(CREEP_BODIES.miner),
+        body: prepareBody(boostedBody || CREEP_BODIES.miner),
         memory: {
           homeRoom: roomName,
         },
       };
     },
 
-    towerSupplier: () => ({
-      body: prepareBody(CREEP_BODIES.towerSupplier),
+    towerSupplier: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.towerSupplier),
       memory: {},
     }),
 
-    linkWorker: () => ({
-      body: prepareBody(CREEP_BODIES.linkWorker),
+    linkWorker: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.linkWorker),
       memory: {},
     }),
 
-    harvester: () => ({
-      body: prepareBody(CREEP_BODIES.harvester),
+    // Курьер лабораторных троек (lab.worker.js). Память пустая: задача курьера
+    // целиком выводится из конфигов троек в Memory.rooms[room].labs* и из
+    // содержимого его рюкзака, отдельного состояния в Memory роль не держит.
+    labWorker: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.labWorker),
+      memory: {},
+    }),
+
+    harvester: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.harvester),
       memory: {
         state: "harvesting",
       },
     }),
 
-    upgrader: () => ({
-      body: prepareBody(CREEP_BODIES.upgrader),
+    upgrader: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.upgrader),
       memory: {},
     }),
 
-    builder: () => ({
-      body: prepareBody(CREEP_BODIES.builder),
+    builder: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.builder),
       memory: {},
     }),
 
-    repairer: () => ({
-      body: prepareBody(CREEP_BODIES.repairer),
+    repairer: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.repairer),
       memory: {},
     }),
 
-    worker: () => ({
-      body: prepareBody(CREEP_BODIES.worker),
+    worker: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.worker),
       memory: {
         working: false,
       },
     }),
 
-    mineralMiner: () => ({
-      body: prepareBody(CREEP_BODIES.mineralMiner),
+    mineralMiner: (spawn, threshold, name, boostedBody) => ({
+      body: prepareBody(boostedBody || CREEP_BODIES.mineralMiner),
       memory: {
         working: false,
       },
@@ -109,18 +117,30 @@ const factory = {
    * @param {string} roomName
    * @returns {ScreepsReturnCode}
    */
-  run: function (spawn, role, roomName, threshold) {
+  run: function (spawn, role, roomName, threshold, roomState) {
     const blueprintFn = this.blueprints[role];
 
     if (!blueprintFn) {
       return ERR_INVALID_ARGS;
     }
 
+    // ТЕЛО ПО НАЛИЧИЮ БУСТА (правка 02.10.2026). Если в буст-лабе комнаты уже
+    // лежит оплаченный комплект под первый ресурс политики роли, спавним
+    // СОКРАЩЁННОЕ тело (BOOST_BODIES): с UO часть WORK даёт 6 вместо 2, с KH
+    // часть CARRY — 100 вместо 50, поэтому работы столько же при меньшем теле
+    // (меньше энергии на спавн, короче спавн). Буста нет — полное тело
+    // CREEP_BODIES, как раньше: крип с сокращённым телом без буста проработал бы
+    // всю жизнь втрое слабее.
+    const boostedBody =
+      roomState && BOOST_BODIES[role] && boostReadyForSpawn(roomState, role)
+        ? BOOST_BODIES[role]
+        : null;
+
     // Имя и threshold передаются в blueprint: threshold используют роли с
     // предспавном (PRESPAWN_THRESHOLD), имя — для отладки. Минеру с 01.10.2026
     // ни то, ни другое не нужно: место он берёт сам (role.miner.js).
     const name = `${role}_${roomName}_${Game.time}`;
-    const blueprint = blueprintFn(spawn, threshold, name);
+    const blueprint = blueprintFn(spawn, threshold, name, boostedBody);
 
     if (!blueprint || !blueprint.body || blueprint.body.length === 0) {
       return ERR_INVALID_ARGS;

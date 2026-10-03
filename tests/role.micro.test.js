@@ -74,10 +74,14 @@ check("нет _.sum", !/_\.sum/.test(mm));
 check("нет Object.keys(creep.store)", !/Object\.keys\(creep\.store\)/.test(mm));
 check("используется getUsedCapacity", /getUsedCapacity\(\)/.test(mm));
 
-console.log("\n4. empire.js не тянет заглушку terminalNetwork");
+console.log("\n4. empire.js подключает terminalNetwork (с 01.10.2026 — не заглушка)");
 const empire = fs.readFileSync(path.join(ROOT, "empire.js"), "utf8");
-check("нет require(\"terminalNetwork\")", !/require\("terminalNetwork"\)/.test(empire));
-check("нет активного вызова terminalNetwork.run", !/^\s*[^/]*terminalNetwork\.run/m.test(empire));
+check("есть require(\"terminalNetwork\")", /require\("terminalNetwork"\)/.test(empire));
+check("есть вызов terminalNetwork.run()", /terminalNetwork\.run\(\)/.test(empire));
+check(
+  "вызов идёт под замером подсистемы",
+  /trackRole\("terminalNetwork"/.test(empire),
+);
 
 /* ── 5. Поведение ролей ───────────────────────────────────────────────── */
 global.RESOURCE_ENERGY = "energy";

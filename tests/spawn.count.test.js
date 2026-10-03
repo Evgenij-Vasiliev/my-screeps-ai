@@ -49,7 +49,12 @@ global.Game = {
   cpu: { getUsed: () => 0, bucket: 10000, limit: 20 },
 };
 
-const { SPAWN_QUOTA, SPAWN, PRESPAWN_THRESHOLD } = require("../constants");
+const {
+  SPAWN_QUOTA,
+  SPAWN,
+  PRESPAWN_THRESHOLD,
+  MINERAL_MIN_AMOUNT_TO_SPAWN,
+} = require("../constants");
 const spawnManager = require("../spawn.manager");
 const { countRoles } = spawnManager;
 
@@ -117,7 +122,7 @@ for (const role in SPAWN_QUOTA) {
   if (now !== before) mismatch = `${role}: было ${before}, стало ${now}`;
 }
 check("по всем спавнящимся ролям счёт совпал", mismatch === null, mismatch);
-check("сравнено 4 роли с квотой > 0", compared === 4, String(compared));
+check("сравнено 5 ролей с квотой > 0", compared === 5, String(compared));
 
 console.log("\n2. Роли с нулевой квотой и чужие роли не считаются");
 const counts = countRoles(creeps);
@@ -302,14 +307,10 @@ console.log("\n9. Ленивый find: при полных квотах спис
 const spawnReads = { n: 0 };
 const savedSpawns2 = roomState.spawns;
 roomState.spawns = countingArray([spawn], spawnReads);
-roomState.creeps = [
-  creep("mineralMiner", 1000),
-  creep("miner", 1400),
-  creep("miner", 1400),
-  creep("linkWorker", 800),
-  creep("worker", 1200),
-  creep("worker", 1100),
-];
+// Состав берём ПО КВОТАМ (fullFleet), а не списком: 01.10.2026 добавилась роль
+// labWorker с квотой 1, и жёсткий список перестал закрывать все квоты —
+// проверка «список спавнов не читается» падала на живом недоборе курьера.
+roomState.creeps = fullFleet();
 roomState.mineral = { id: "min1", extractorId: "ex1", amount: 0 }; // заблокирован
 resetGate();
 spawnReads.n = 0;
@@ -327,14 +328,7 @@ check("и крип заспавнен", spawnCalls.length === 1, spawnCalls.join
 roomState.spawns = savedSpawns2;
 
 console.log("\n10. Шлюз: комната без недобора не считает роли до срока");
-roomState.creeps = [
-  creep("mineralMiner", 1000),
-  creep("miner", 1400),
-  creep("miner", 1400),
-  creep("linkWorker", 800),
-  creep("worker", 1200),
-  creep("worker", 1100),
-];
+roomState.creeps = fullFleet();
 roomState.mineral = { id: "min1", extractorId: "ex1", amount: 0 }; // mineralMiner заблокирован
 const creepReads = { n: 0 };
 resetGate();
@@ -452,6 +446,54 @@ check(
 );
 delete Memory.cpuSpawnProfile;
 resetGate();
+
+/**
+ * 15. Порог минерала (правка 02.10.2026): роль выходит на МАЛОМ остатке.
+ *
+ * Замер shard3 (node scripts/measure.mineral.js shard3, Game.time 83376031):
+ * amount = 130/300/810/380/415 при extractor.cooldown = 0 и живых
+ * mineralMiner 0 — все пять комнат были ниже прежнего порога 1500, и добыча
+ * не шла вовсе (global.__spawnGate показывал ветку простоя).
+ *
+ * Значение 130 — МИНИМУМ замера, а не «на глаз»: если проверка проходит на
+ * нём, она проходит и на остальных четырёх комнатах. Возврат порога к 1500
+ * (или любое значение > 130) роняет п.15.
+ */
+console.log("\n15. mineralMiner выходит на малом остатке минерала (замер: 130)");
+roomState.creeps = fullFleet().filter(c => c.memory.role !== "mineralMiner");
+roomState.mineral = { id: "min1", extractorId: "ex1", amount: 130 };
+spawnCalls.length = 0;
+resetGate();
+spawnManager.run(roomState);
+check(
+  "amount 130 выше порога — mineralMiner заспавнен",
+  spawnCalls.length === 1 && spawnCalls[0] === "mineralMiner",
+  `порог ${MINERAL_MIN_AMOUNT_TO_SPAWN}, спавны: ${spawnCalls.join(",") || "(нет)"}`,
+);
+
+console.log("\n16. Исчерпанный минерал по-прежнему не спавнит (amount 0)");
+roomState.creeps = fullFleet().filter(c => c.memory.role !== "mineralMiner");
+roomState.mineral = { id: "min1", extractorId: "ex1", amount: 0 };
+spawnCalls.length = 0;
+resetGate();
+spawnManager.run(roomState);
+check(
+  "amount 0 — mineralMiner не спавнится",
+  spawnCalls.length === 0,
+  spawnCalls.join(",") || "(нет)",
+);
+
+console.log("\n17. Без экстрактора mineralMiner не спавнится");
+roomState.creeps = fullFleet().filter(c => c.memory.role !== "mineralMiner");
+roomState.mineral = { id: "min1", extractorId: null, amount: 99999 };
+spawnCalls.length = 0;
+resetGate();
+spawnManager.run(roomState);
+check(
+  "extractorId = null — mineralMiner не спавнится",
+  spawnCalls.length === 0,
+  spawnCalls.join(",") || "(нет)",
+);
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);
 process.exit(failed === 0 ? 0 : 1);

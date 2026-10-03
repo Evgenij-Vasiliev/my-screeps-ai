@@ -368,26 +368,64 @@ function isDuplicateFillTerminalResourceTask(roomName, candidate) {
 }
 
 function generateFillTerminalResources(roomState) {
-  if (!TASK_CONFIG.fillTerminalResources) return;
   const { storage, terminal, roomName } = roomState;
 
   if (!storage || !terminal) {
     return;
   }
 
+  // ── ЗАЯВКИ ТЕРМИНАЛЬНОЙ СЕТИ (Memory.rooms[room].terminalExports) ────────
+  // Terminal.send списывает объём из terminal.store, поэтому ресурс, которого
+  // в терминале нет, сеть отправить НЕ МОЖЕТ — заявка без воркера остаётся
+  // в Memory и висит вечно. Порядок такой: terminalNetwork.addExport пишет
+  // «ресурс → объём» на комнату-донора, а этот генератор превращает заявку в
+  // задачу «привези resourceType из storage в terminal».
+  //
+  // Пока флаг TASK_CONFIG.fillTerminalResources выключен (по умолчанию false),
+  // грузятся ТОЛЬКО заявки сети. Раньше в этом режиме генератор не работал
+  // вовсе (`if (!TASK_CONFIG.fillTerminalResources) return`), то есть механизм
+  // terminalExports был оборван на середине. Включённый флаг сохраняет прежнее
+  // поведение: лить в терминал всё, чего меньше RESOURCE_TERMINAL_MAX.
+  const exports =
+    (Memory.rooms &&
+      Memory.rooms[roomName] &&
+      Memory.rooms[roomName].terminalExports) ||
+    {};
+  const exportTypes = Object.keys(exports);
+
+  if (!TASK_CONFIG.fillTerminalResources && exportTypes.length === 0) {
+    return;
+  }
+
   const RESOURCE_TERMINAL_MAX = 10000;
 
-  for (const resourceType in storage.store) {
+  // Цель терминала — максимум из базового лимита (при включённом флаге) и
+  // заявки сети. Заявка НЕ должна опускать цель ниже базовой: иначе излишек,
+  // который ждёт рынок, не доехал бы ни до сети, ни до продажи.
+  const baseCap = TASK_CONFIG.fillTerminalResources ? RESOURCE_TERMINAL_MAX : 0;
+  const resourceTypes = TASK_CONFIG.fillTerminalResources
+    ? Object.keys(storage.store)
+    : exportTypes;
+
+  for (let i = 0; i < resourceTypes.length; i++) {
+    const resourceType = resourceTypes[i];
     if (resourceType === RESOURCE_ENERGY || resourceType === RESOURCE_POWER) {
       continue;
     }
 
-    if (storage.store[resourceType] === 0) {
+    if ((storage.store[resourceType] || 0) === 0) {
+      continue;
+    }
+
+    // cap === 0 бывает только в режиме заявок: ресурс есть в storage, но сеть
+    // его не просила — в терминал он не едет (этим и управляет флаг).
+    const cap = Math.max(baseCap, exports[resourceType] || 0);
+    if (cap === 0) {
       continue;
     }
 
     const currentInTerminal = terminal.store[resourceType] || 0;
-    if (currentInTerminal >= RESOURCE_TERMINAL_MAX) {
+    if (currentInTerminal >= cap) {
       continue;
     }
 

@@ -3,8 +3,15 @@
  * Автоматическая продажа избыточных ресурсов через Market.
  */
 
-const { TERMINAL_SUPPLY, MARKET } = require("./constants");
+const {
+  TERMINAL_SUPPLY,
+  MARKET,
+  LAB_BOOST,
+  MARKET_BUY,
+  TERMINAL_NETWORK,
+} = require("./constants");
 const loadShed = require("loadShed");
+const labWorker = require("./lab.worker");
 
 // Единый источник порогов терминала — TERMINAL_SUPPLY из constants.js.
 // Продаём всё, что превышает эти же значения, которые Task System
@@ -87,6 +94,169 @@ function findAffordableBuyOrders(resourceType, maxPriceRatio = 1.2) {
   return orders
     .filter(o => o.price <= maxAcceptable)
     .sort((a, b) => a.price - b.price);
+}
+
+/**
+ * ── ЗАКУПКА НЕДОСТАЮЩИХ ИНГРЕДИЕНТОВ (MARKET_BUY, правка 02.10.2026) ─────
+ * Поручение владельца: «недостающие ингредиенты, если их нет в империи,
+ * закупать на рынке». Числа и обоснование — в constants.js (MARKET_BUY).
+ *
+ * Порядок действий намеренный: СНАЧАЛА проверка запаса по империи, и только
+ * потом getAllOrders. В установившемся режиме (запас выше цели) проход рынка не
+ * платит за закупку ни одного вызова API — а getAllOrders стоит 0.16-0.89 CPU за
+ * вызов (docs/CPU-BASELINE.md).
+ */
+
+/**
+ * Запас ресурса по ИМПЕРИИ: терминалы + склады своих комнат с терминалом.
+ *
+ * Почему не лаборатории и не room.find: room.find(FIND_*_STRUCTURES) в проходе
+ * рынка — лишний обход всех структур каждой комнаты (правило CPU,
+ * DEVELOPMENT_RULES §11.1), а содержимое лабораторий это рабочий буфер на
+ * единицы тиков реакции, который закрывается реагентными заявками сети
+ * (terminalNetwork.collectLabRequests). Терминал и склад — то, что реально
+ * хранит закупленное.
+ * @param {string} resourceType
+ * @param {Array} terminals
+ * @returns {number}
+ */
+function empireStockOf(resourceType, terminals) {
+  let total = 0;
+  for (let i = 0; i < terminals.length; i++) {
+    const terminal = terminals[i];
+    total += terminal.store[resourceType] || 0;
+    const room = Game.rooms[terminal.room.name];
+    const storage = room && room.storage;
+    if (storage) total += storage.store[resourceType] || 0;
+  }
+  return total;
+}
+
+/**
+ * Ордера на продажу не дороже потолка, от дешёвых к дорогим.
+ *
+ * Отличие от findAffordableBuyOrders (там коэффициент от минимальной цены):
+ * закупке нужен АБСОЛЮТНЫЙ потолок цены. «Дешёвый относительно рынка» ордер при
+ * этом может стоить в разы больше расчётной цены ресурса — а цена здесь внешняя
+ * и меняется без нашего участия.
+ * @param {string} resourceType
+ * @param {number} maxPrice
+ * @returns {Array}
+ */
+function findCheapSellOrders(resourceType, maxPrice) {
+  const orders = getOrders(ORDER_SELL, resourceType);
+  const out = [];
+  for (let i = 0; i < orders.length; i++) {
+    if (orders[i].price <= maxPrice) out.push(orders[i]);
+  }
+  out.sort((a, b) => a.price - b.price);
+  return out;
+}
+
+/**
+ * Комната-получатель: свой терминал с НАИМЕНЬШИМ запасом ресурса, способный
+ * принять поставку — есть свободное место под объём и есть энергия на комиссию
+ * с полом MARKET_BUY.ENERGY_FLOOR (комиссию движок списывает из терминала
+ * получателя, а не из кошелька).
+ *
+ * Минимум запаса выбран потому, что закупка нужна там, где ресурса нет; развоз
+ * по остальным комнатам делает терминальная сеть.
+ * @param {string} resourceType
+ * @param {number} amount
+ * @param {Array} terminals
+ * @param {string} orderRoomName
+ * @returns {StructureTerminal|null}
+ */
+function pickBuyDestination(resourceType, amount, terminals, orderRoomName) {
+  let best = null;
+  let bestStock = Infinity;
+
+  for (let i = 0; i < terminals.length; i++) {
+    const terminal = terminals[i];
+    if (terminal.store.getFreeCapacity() < amount) continue;
+
+    const cost = getTransactionCost(amount, terminal.room.name, orderRoomName);
+    if (
+      (terminal.store[RESOURCE_ENERGY] || 0) <
+      cost + MARKET_BUY.ENERGY_FLOOR
+    ) {
+      continue;
+    }
+
+    const room = Game.rooms[terminal.room.name];
+    const storage = room && room.storage;
+    const stock =
+      (terminal.store[resourceType] || 0) +
+      (storage ? storage.store[resourceType] || 0 : 0);
+
+    if (stock < bestStock) {
+      bestStock = stock;
+      best = terminal;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Одна закупка: недостача до цели, не больше MAX_AMOUNT_PER_DEAL, по цене не выше
+ * потолка ресурса и с потолком расхода за проход рынка.
+ *
+ * ВЫБОР ОРДЕРА — С МИНИМАЛЬНОЙ ПАРТИЕЙ. Живой dry-run (tick 83374021) показал,
+ * как это ломается без правила: самым дешёвым ордером на H оказался лот из
+ * 37 единиц, бот купил его и потратил на это одну из MAX_BUYS_PER_TICK сделок
+ * прохода — при недостаче 28 556 единиц. Поэтому берётся первый по цене ордер,
+ * который закрывает партию не меньше MIN_SEND_AMOUNT (1000 — то же число, что у
+ * сети: комиссия пересылки и кулдаун терминала не окупаются мелочью), либо, если
+ * сама недостача меньше, — недостача целиком.
+ * @param {string} resourceType
+ * @param {{target: number, maxPrice: number}} spec
+ * @param {{terminals: Array, spent: number}} context
+ * @returns {boolean} true — сделка совершена
+ */
+function tryBuyResource(resourceType, spec, context) {
+  if (!spec || !spec.target) return false;
+
+  const stock = empireStockOf(resourceType, context.terminals);
+  if (stock >= spec.target) return false;
+
+  const orders = findCheapSellOrders(resourceType, spec.maxPrice);
+  if (orders.length === 0) return false;
+
+  const need = spec.target - stock;
+  const minDeal = Math.min(need, TERMINAL_NETWORK.MIN_SEND_AMOUNT);
+
+  let order = null;
+  let amount = 0;
+  for (let i = 0; i < orders.length; i++) {
+    const candidate = Math.min(
+      need,
+      orders[i].amount,
+      MARKET_BUY.MAX_AMOUNT_PER_DEAL,
+    );
+    if (candidate < minDeal) continue;
+    order = orders[i];
+    amount = candidate;
+    break;
+  }
+  if (!order) return false;
+
+  const cost = amount * order.price;
+  if (context.spent + cost > MARKET_BUY.MAX_CREDITS_PER_PASS) return false;
+
+  const destination = pickBuyDestination(
+    resourceType,
+    amount,
+    context.terminals,
+    order.roomName,
+  );
+  if (!destination) return false;
+
+  const result = Game.market.deal(order.id, amount, destination.room.name);
+  if (result !== OK) return false;
+
+  context.spent += cost;
+  return true;
 }
 
 /**
@@ -177,6 +347,89 @@ function findBestOrder(resourceType) {
 // ключей объекта, и лимит MAX_DEALS_PER_TICK может каждый тик
 // расходоваться на одну и ту же группу, не давая другим шанса.
 const GROUP_ORDER = ["ENERGY", "BATTERY", "MINERALS", "COMPOUNDS"];
+
+/**
+ * Ресурсы, которые НЕЛЬЗЯ продавать даже при формальном излишке в терминале.
+ *
+ * Зачем. Правило продажи в этом файле простое: всё, что в терминале выше
+ * резерва группы (TERMINAL_SUPPLY.MINERAL_MAX / COMPOUND_MAX и т.д.), считается
+ * излишком и уходит на рынок. Для лаб это неверно: терминал — ЕДИНСТВЕННЫЙ
+ * буфер, из которого lab.worker добирает реагенты (лабы их не производят).
+ * Живой пример из замера: в терминале E35S39 лежало KO 15630 при
+ * TERMINAL_SUPPLY.COMPOUND_MAX = 10000 (constants.js:20) — то есть 5630 единиц
+ * формально «излишек», хотя терминал обслуживает тройки всей комнаты.
+ *
+ * Что защищено:
+ *   - power — катализатор PowerSpawn;
+ *   - реагенты ОБОИХ рецептов каждой тройки и ПРОДУКТЫ обоих рецептов
+ *     (конфиги Memory.rooms[*].labs* через lab.worker.getConfigs). Именно обоих:
+ *     тройка переключается между recipeA и recipeB по дефициту (lab.recipes),
+ *     поэтому реагент неактивного сейчас рецепта — сырьё под следующее
+ *     переключение, а продукт — цель производства комнаты;
+ *   - бусты буст-лабы комнаты (config.boost, политика LAB_BOOST) — расходный
+ *     материал бустирования;
+ *   - ресурсы резервов LAB_BOOST.ROOM_RESERVE и HUB_RESERVE (XKH2O, XZHO2,
+ *     XUHO2): это ПОЛ, ниже которого бусты не выдаются.
+ *   - X (RESOURCE_CATALYST) — сырьё финальных реакций, которого империя не
+ *     добывает вовсе. В ветке-источнике он защищался, пока хаб голоден
+ *     (X_PURCHASE.HIGH + market.buy); закупки X здесь нет, поэтому он защищён
+ *     ВСЕГДА — сознательно консервативнее. Откат — убрать строку ниже.
+ *
+ * Чего здесь НЕТ: KO и прочие соединения, не входящие ни в один рецепт
+ * LAB_PLAN и ни в одну политику бустов, остаются «излишком» и продаются как
+ * раньше — защита не должна останавливать рынок целиком.
+ *
+ * Стоимость: один проход по своим комнатам ЗА ПРОХОД РЫНКА
+ * (MARKET.INTERVAL = 30 тиков, constants.js), а не за тик.
+ *
+ * @returns {Object<string, boolean>} ресурс → true (продавать нельзя)
+ */
+function collectProtectedResources() {
+  /** @type {Object<string, boolean>} */
+  const protectedResources = {};
+  protectedResources[RESOURCE_POWER] = true;
+  protectedResources[RESOURCE_CATALYST] = true;
+
+  for (const roomName in Game.rooms) {
+    const room = Game.rooms[roomName];
+    if (!room.controller || !room.controller.my) continue;
+
+    const configs = labWorker.getConfigs(room);
+    for (let i = 0; i < configs.length; i++) {
+      const config = configs[i].config;
+
+      if (config.reagent1) protectedResources[config.reagent1] = true;
+      if (config.reagent2) protectedResources[config.reagent2] = true;
+
+      if (config.recipeA) {
+        protectedResources[config.recipeA.reagent1] = true;
+        protectedResources[config.recipeA.reagent2] = true;
+        protectedResources[config.recipeA.product] = true;
+      }
+      if (config.recipeB) {
+        protectedResources[config.recipeB.reagent1] = true;
+        protectedResources[config.recipeB.reagent2] = true;
+        protectedResources[config.recipeB.product] = true;
+      }
+
+      if (config.boost) {
+        for (let b = 0; b < config.boost.length; b++) {
+          protectedResources[config.boost[b]] = true;
+        }
+      }
+    }
+  }
+
+  // Ресурсы резервов бустов: HUB_RESERVE (комната-финишёр) и ROOM_RESERVE
+  // (рабочая комната) держат пол запаса, ниже которого буст не выдаётся.
+  const reserveMaps = [LAB_BOOST.ROOM_RESERVE, LAB_BOOST.HUB_RESERVE];
+  for (let m = 0; m < reserveMaps.length; m++) {
+    const map = reserveMaps[m];
+    for (const resourceType in map) protectedResources[resourceType] = true;
+  }
+
+  return protectedResources;
+}
 
 function trySellResource(terminal, resourceType, surplus) {
   const order = findBestOrder(resourceType);
@@ -270,7 +523,50 @@ function run() {
   const terminals = getEmpireTerminals();
   if (terminals.length === 0) return;
 
+  // Ресурсы лаб/бустов считаются «излишком» только формально: их продажа
+  // морит голодом тройки и буст-лабы (см. collectProtectedResources).
+  const protectedResources = collectProtectedResources();
+
   let dealsCount = 0;
+
+  // ── ЗАКУПКА — ПЕРЕД ПРОДАЖЕЙ ────────────────────────────────────────────
+  // Почему закупка раньше: у империи нет K, H, O и U для T1-контура (замер
+  // tick 83373733), и без них лабы стоят. Продажа — операция над ИЗЛИШКОМ,
+  // закупка — над дефицитом: при общем лимите сделок
+  // (CONFIG.MAX_DEALS_PER_TICK) первым идёт то, без чего производство встанет.
+  // Откат: убрать этот блок — продажа вернётся к прежнему порядку.
+  //
+  // РОТАЦИЯ РЕСУРСОВ (правка 02.10.2026, живой дефект фазы накопления).
+  // При жёстком порядке списка H и K — расходники KH-троек, они уходят ниже цели
+  // КАЖДЫЙ тик, поэтому занимали оба слота сделок на каждом проходе, а U, O и UO
+  // не покупались НИКОГДА (живой замер: O 695 при цели 10 000). Указатель
+  // round-robin в heap сдвигает начало обхода после каждой удачной закупки,
+  // поэтому каждый ресурс получает свою сделку не реже, чем раз в длину списка
+  // проходов (5 × 30 = 150 тиков).
+  if (MARKET_BUY.ENABLED) {
+    const context = { terminals: terminals, spent: 0 };
+    const names = Object.keys(MARKET_BUY.RESOURCES);
+    if (!global._marketBuyCursor) global._marketBuyCursor = { at: 0 };
+
+    let cursor = global._marketBuyCursor.at % names.length;
+    let buys = 0;
+
+    for (let k = 0; k < names.length; k++) {
+      if (buys >= MARKET_BUY.MAX_BUYS_PER_TICK) break;
+      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+
+      const resourceType = names[cursor];
+      cursor = (cursor + 1) % names.length;
+
+      if (tryBuyResource(resourceType, MARKET_BUY.RESOURCES[resourceType], context)) {
+        buys++;
+        dealsCount++;
+        // Следующий проход начнёт со СЛЕДУЮЩЕГО ресурса: расходные ресурсы не
+        // вытесняют из очереди те, до которых проход ещё не доходил.
+        global._marketBuyCursor.at = cursor;
+      }
+    }
+  }
 
   for (const group of GROUP_ORDER) {
     if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
@@ -285,6 +581,7 @@ function run() {
       for (const resourceType in terminal.store) {
         if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
         if (getResourceGroup(resourceType) !== group) continue;
+        if (protectedResources[resourceType]) continue;
 
         const surplus = terminal.store[resourceType] - reserve;
         if (surplus <= 0) continue;
@@ -307,5 +604,32 @@ function run() {
   }
 }
 
+/**
+ * Стоимость пересылки ресурса терминалом (в энергии) — обёртка над
+ * `Game.market.calcTransactionCost(amount, fromRoomName, toRoomName)`.
+ *
+ * Зачем обёртка, а не прямой вызов на месте: правило проекта
+ * (tests/rules.test.js:225-227) требует, чтобы `Game.market` встречался
+ * ТОЛЬКО в этом файле. terminalNetwork (terminalNetwork.fitSendAmount)
+ * считает этой функцией комиссию каждой отправки, поэтому вызов идёт сюда.
+ *
+ * Формула движка: ceil(amount × (1 − exp(−d/30))), где d — расстояние между
+ * комнатами (docs/market.html, engine src/utils.js calcTerminalEnergyCost).
+ * Кэша нет намеренно: это чистая арифметика, состояние игры она не читает.
+ *
+ * @param {number} amount объём отправки
+ * @param {string} fromRoomName комната-отправитель
+ * @param {string} toRoomName комната-получатель
+ * @returns {number} энергия, которую спишет движок за пересылку
+ */
+function getTransactionCost(amount, fromRoomName, toRoomName) {
+  return Game.market.calcTransactionCost(amount, fromRoomName, toRoomName);
+}
+
 module.exports.CONFIG = CONFIG;
 module.exports.run = run;
+module.exports.getTransactionCost = getTransactionCost;
+// Внутренняя функция отдаётся наружу только ради офлайн-теста
+// (tests/market.lab.protection.test.js): какая именно защита строится по
+// конфигам троек и политике бустов.
+module.exports.collectProtectedResources = collectProtectedResources;
