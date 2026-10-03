@@ -35,6 +35,7 @@
  */
 const creepFactory = require("creep.factory");
 const cpuMonitor = require("cpuMonitor");
+const systems = require("systems");
 const {
   SPAWN_QUOTA,
   SPAWN,
@@ -191,6 +192,10 @@ function run(roomState) {
     // Роль с нулевой квотой не спавнится — незачем её считать и проверять.
     if (!quota) continue;
 
+    // Тумблер роли (systems.js): miner: false — роль не спавнится, как при
+    // квоте 0. Живые крипы доживают свой срок сами (AGENTS.md:7).
+    if (systems[role] === false) continue;
+
     // Квота уже набрана. Проверка идёт ДО дорогих условий ниже: например,
     // для mineralMiner это экономит Game.getObjectById на каждом тике.
     if ((counts[role] || 0) >= quota) continue;
@@ -225,11 +230,14 @@ function run(roomState) {
       if (!spawn) break;
     }
 
+    // roomState передаётся пятым аргументом: фабрика решает, можно ли спавнить
+    // сокращённое (бустнутое) тело — ей нужны буст-лабы комнаты.
     const result = creepFactory.run(
       spawn,
       role,
       roomName,
       PRESPAWN_THRESHOLD[role],
+      roomState,
     );
     // break, а не return: выход ровно тот же (после цикла в функции ничего
     // нет, кроме шлюза и профиля), но шлюз успевает записать следующий срок.

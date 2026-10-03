@@ -28,9 +28,13 @@ const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
 const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
+const labManager = require("lab.manager");
+const labWorker = require("lab.worker");
+const boostManager = require("boost.manager");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER, TASK_CONFIG } = require("./constants");
 const loadShed = require("loadShed");
+const systems = require("systems");
 
 const ROLES = {
   harvester: roleHarvester,
@@ -40,13 +44,36 @@ const ROLES = {
   miner: roleMiner,
   towerSupplier: roleTowerSupplier,
   linkWorker: roleLinkWorker,
+  labWorker: labWorker,
   mineralMiner: roleMineralMiner,
   worker: workerRunner,
 };
 
 function runCreep(creep, roomState) {
-  const roleModule = ROLES[creep.memory.role];
+  const role = creep.memory.role;
+
+  // Тумблер роли (systems.js): miner: false — роль не исполняется; она же
+  // не спавнится (spawn.manager.js). Живые крипы доживают свой срок сами.
+  if (systems[role] === false) return;
+
+  const roleModule = ROLES[role];
   if (!roleModule) return;
+
+  // ── БУСТ ПОДАВЛЯЕТ РОЛЬ (boost.manager) ────────────────────────────────
+  // Пока крип едет к буст-лабе, набирает буст-ресурс или стоит у лабы в
+  // процессе creep.boost(), его роль НЕ выполняется: worker.runner иначе увёл
+  // бы его в задачу посреди процедуры, а часть буста к этому моменту уже
+  // списана (LAB_BOOST_MINERAL 30 и LAB_BOOST_ENERGY 20 на часть тела).
+  // true — действие тика сделано бустом; false — крип не бустится (нет строки
+  // политики для роли, запас ниже MIN_STOCK, рюкзак уже бустнут), управление
+  // уходит роли как обычно.
+  let boosting = false;
+  if (systems.boostManager !== false) {
+    cpuMonitor.trackRole("boostManager", () => {
+      boosting = boostManager.run(roomState, creep) === true;
+    });
+  }
+  if (boosting) return;
 
   try {
     roleModule.run(creep, roomState);
@@ -73,7 +100,9 @@ function runCreepLogic(roomState) {
   // держать флаг постоянно включённым нельзя — только на 1 тик из 100.
   for (const creep of roomState.creeps) {
     if (!creep) continue;
-    cpuMonitor.trackRole(creep.memory.role, () => runCreep(creep, roomState));
+    cpuMonitor.trackRole(creep.memory.role, () =>
+      runCreep(creep, roomState),
+    );
   }
 }
 
@@ -752,7 +781,30 @@ module.exports = {
     const shedLite = shed >= 1;
     const shedHard = shed >= 2;
 
-    cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
+    // Тумблеры систем — в systems.js. Выключатель и loadShed складываются
+    // по ИЛИ: выключенную систему loadShed не включает.
+
+    // ── ЛАБОРАТОРИИ ИДУТ ПЕРВЫМИ В ТИКЕ ──────────────────────────────────
+    // labManager делает три вещи, от которых зависят ОСТАЛЬНЫЕ подсистемы
+    // этого же тика: чинит привязку троек по LAB_BINDING (ensureTriples),
+    // восстанавливает Memory.rooms[room].boostLab (ensureBoostLab) и дописывает
+    // план реакций в конфиги троек (sync). Порядок важен: reagentList
+    // терминальной сети строится из этих конфигов, поэтому сеть, рынок и
+    // буст-менеджер обязаны увидеть их уже заполненными.
+    // Гейта loadShed здесь нет намеренно: это производство, а не фоновая
+    // уборка; в установившемся тике стоимость — проверки по tick-кэшу.
+    // Выключатель `labManager: { scope: "room", on: false }` (systems.js)
+    // гасит блок целиком: тройки не перепривязываются, boostLab не
+    // восстанавливается, план реакций не дописывается — конфиги в Memory
+    // остаются в последнем состоянии, и terminalNetwork продолжает работать
+    // по ним (порядок шагов не меняется).
+    if (systems.labManager !== false) {
+      cpuMonitor.trackRole("labManager", () => labManager.run(roomState.room));
+    }
+
+    if (systems.spawnManager !== false) {
+      cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
+    }
     cpuMonitor.trackRole("taskManager", () => {
       // ── Замер цены КАЖДОГО генератора задач ──────────────────────────
       // Включается флагом Memory.cpuGenProfile = true (снять —
@@ -780,6 +832,9 @@ module.exports = {
       // и чтением roomState. Набор задач и их порядок в очереди при этом НЕ
       // меняются: выключенный генератор и раньше ничего не создавал.
       //
+      // Тумблер генератора (systems.js): upgradeController: false перестаёт
+      // ставить НОВЫЕ задачи этого типа, стоящие в очереди доигрываются.
+      //
       // ── loadShed ─────────────────────────────────────────────────────
       // Понижение нагрузки НЕ удаляет уже стоящие задачи и не меняет их
       // порядок: оно лишь перестаёт СТАВИТЬ новые фоновые задачи. Поэтому
@@ -787,72 +842,128 @@ module.exports = {
       // сохраняется), а срочное (спавны, башни, терминал на hard) ставится
       // всегда. При max срочное тоже продолжает ставиться — бот должен
       // выжить, а не остановиться.
-      if (TASK_CONFIG.fillSpawnsExtensions) {
+      if (TASK_CONFIG.fillSpawnsExtensions && systems.fillSpawnsExtensions !== false) {
         gen("fillSpawnsExtensions", taskGenerators.generateFillSpawnsExtensions);
       }
-      if (TASK_CONFIG.fillPowerSpawnPower && !shedHard) {
+      if (
+        TASK_CONFIG.fillPowerSpawnPower &&
+        !shedHard &&
+        systems.fillPowerSpawnPower !== false
+      ) {
         gen("fillPowerSpawnPower", taskGenerators.generateFillPowerSpawnPower);
       }
-      if (TASK_CONFIG.fillPowerSpawnEnergy && !shedHard) {
+      if (
+        TASK_CONFIG.fillPowerSpawnEnergy &&
+        !shedHard &&
+        systems.fillPowerSpawnEnergy !== false
+      ) {
         gen("fillPowerSpawnEnergy", taskGenerators.generateFillPowerSpawnEnergy);
       }
-      if (TASK_CONFIG.fillFactoryEnergy && !shedHard) {
+      if (
+        TASK_CONFIG.fillFactoryEnergy &&
+        !shedHard &&
+        systems.fillFactoryEnergy !== false
+      ) {
         gen("fillFactoryEnergy", taskGenerators.generateFillFactoryEnergy);
       }
-      if (TASK_CONFIG.collectFactoryBattery && !shedHard) {
+      if (
+        TASK_CONFIG.collectFactoryBattery &&
+        !shedHard &&
+        systems.collectFactoryBattery !== false
+      ) {
         gen(
           "collectFactoryBattery",
           taskGenerators.generateCollectFactoryBattery,
         );
       }
-      if (TASK_CONFIG.fillTerminalEnergy && !shedHard) {
+      if (
+        TASK_CONFIG.fillTerminalEnergy &&
+        !shedHard &&
+        systems.fillTerminalEnergy !== false
+      ) {
         gen("fillTerminalEnergy", taskGenerators.generateFillTerminalEnergy);
       }
-      if (TASK_CONFIG.fillTerminalResources && !shedHard) {
+      if (
+        TASK_CONFIG.fillTerminalResources &&
+        !shedHard &&
+        systems.fillTerminalResources !== false
+      ) {
         gen(
           "fillTerminalResources",
           taskGenerators.generateFillTerminalResources,
         );
       }
-      if (TASK_CONFIG.fillTowers) {
+      if (TASK_CONFIG.fillTowers && systems.fillTowers !== false) {
         gen("fillTowers", taskGenerators.generateFillTowers);
       }
       // Фоновое: апгрейд, стройка, ремонт — только в обычном режиме.
-      if (TASK_CONFIG.repairStructures && !shedLite) {
+      if (
+        TASK_CONFIG.repairStructures &&
+        !shedLite &&
+        systems.repairStructures !== false
+      ) {
         gen("repairStructures", taskGenerators.generateRepairStructures);
       }
-      if (TASK_CONFIG.buildStructures && !shedLite) {
+      if (
+        TASK_CONFIG.buildStructures &&
+        !shedLite &&
+        systems.buildStructures !== false
+      ) {
         gen("buildStructures", taskGenerators.generateBuildStructures);
       }
-      if (TASK_CONFIG.upgradeController && !shedLite) {
+      if (
+        TASK_CONFIG.upgradeController &&
+        !shedLite &&
+        systems.upgradeController !== false
+      ) {
         gen("upgradeController", taskGenerators.generateUpgradeController);
       }
     });
-    runCreepLogic(roomState);
-    runTowerLogic(roomState);
-    runLinkLogic(roomState);
+    // Рубильники систем комнаты. Выключенная система не вызывается вовсе —
+    // это не «пустой вызов», а отсутствие вызова и его замыкания.
+    if (systems.creeps !== false) runCreepLogic(roomState);
+    if (systems.towers !== false) runTowerLogic(roomState);
+    if (systems.linkManager !== false) runLinkLogic(roomState);
     // Шаг 8: проверка читается В ТОЧКЕ ВЫЗОВА, а не из `shed` выше (он прочитан
     // в начале комнаты, room.manager.js:610). Фабрика и powerSpawn идут ПОСЛЕ
     // ролевой логики и башен, поэтому пик внутри этой же комнаты иначе в гейт не
     // попадёт. Цена — один Game.cpu.getUsed() на комнату за тик
     // (0.000256–0.000310 CPU за вызов, docs/PROFILING-ON-DEMAND.md:82).
     if (!shedHard && !loadShed.overBudget()) {
-      cpuMonitor.trackRole("factoryManager", () => factoryManager.run(roomState));
-      cpuMonitor.trackRole("powerSpawnManager", () =>
-        powerSpawnManager.run(roomState),
-      );
+      if (systems.factoryManager !== false) {
+        cpuMonitor.trackRole("factoryManager", () =>
+          factoryManager.run(roomState),
+        );
+      }
+      if (systems.powerSpawnManager !== false) {
+        cpuMonitor.trackRole("powerSpawnManager", () =>
+          powerSpawnManager.run(roomState),
+        );
+      }
     }
   },
 
   /**
    * Главный метод уровня комнат: строит состояния и запускает
    * логику для каждой собственной комнаты.
+   *
+   * ── Тумблер комнаты (systems.js) ────────────────────────────────────
+   * Комната с тумблером false (`E35S37: false`) теряет ВСЮ логику: спавн,
+   * задачи, роли, башни, линки, лабы, фабрику. Её крипы перестают получать
+   * команды, задачи в очереди замирают. Уборка памяти мёртвых крипов в
+   * empire.js работает независимо и продолжает убирать.
+   *
+   * Сборка roomState для выключенной комнаты пока оплачивается (scanner +
+   * резолвы): фильтр стоит здесь, а не в buildAllRoomStates, чтобы контракт
+   * «состояние всех комнат» не зависел от тумблера.
+   *
    * @returns {Object[]} массив roomState
    */
   run: function () {
     const roomStates = this.buildAllRoomStates();
 
     for (const roomState of roomStates) {
+      if (systems[roomState.roomName] === false) continue;
       this.runRoom(roomState);
     }
 

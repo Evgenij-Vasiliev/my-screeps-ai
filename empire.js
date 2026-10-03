@@ -6,7 +6,9 @@
 const taskManager = require("task.manager");
 const roomManager = require("room.manager");
 const marketManager = require("market.manager");
+const terminalNetwork = require("terminalNetwork");
 const cpuMonitor = require("cpuMonitor");
+const systems = require("systems");
 
 module.exports.run = function () {
   cpuMonitor.startTick();
@@ -39,19 +41,32 @@ module.exports.run = function () {
   // towerState переехал в heap (задание 5), structureCache — в scanner.
   if (Memory.towerState) delete Memory.towerState;
 
-  // 2. Уровень комнат — вся комнатная логика внутри roomManager
-  roomManager.run();
+  // 2. Уровень комнат — вся комнатная логика внутри roomManager.
+  // Тумблеры систем — в systems.js: roomManager: false выключает этот вызов.
+  if (systems.roomManager !== false) roomManager.run();
 
-  // 3. TerminalNetwork — заглушка, не подключена. Импорт убран: модуль
-  // загружался на каждом рестарте и висел в выгрузке мёртвым грузом.
-  // Когда межкомнатная логистика появится, require вернётся сюда же.
+  // 3. TerminalNetwork — межкомнатная логистика (подключено 01.10.2026).
+  // Порядок важен: roomManager уже отработал, поэтому конфиги троек
+  // (Memory.rooms[*].labs*/boostLab) заполнены labManager'ом в этом же тике —
+  // именно из них сеть строит список реагентов, которые надо развезти.
+  // Гейта по bucket здесь нет намеренно: в этой ветке marketManager ниже
+  // вызывается так же безусловно, а loadShed гейтит только фоновые генераторы
+  // задач. Если понадобится — обёртка одна: if (!bucketLow) { ... }.
+  if (systems.terminalNetwork !== false) {
+    cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+  }
 
   // 4. Рынок империального уровня
-  cpuMonitor.trackRole("marketManager", () => marketManager.run());
+  if (systems.marketManager !== false) {
+    cpuMonitor.trackRole("marketManager", () => marketManager.run());
+  }
 
   // 5. Сжатие очередей задач. Завершение задачи оставляет в массиве
   // null-надгробие (чтобы не сдвигать массив и держать O(1)); дыры надо
   // убрать ДО конца тика, иначе они уедут в сериализованную Memory.
+  //
+  // У taskCompact выключателя НЕТ и быть не должно: выключенное сжатие
+  // оставляет надгробия в Memory навсегда — это утечка, а не экономия.
   cpuMonitor.trackRole("taskCompact", () => taskManager.compactAll());
 
   cpuMonitor.endTick();
