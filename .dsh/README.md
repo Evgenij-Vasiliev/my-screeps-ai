@@ -94,5 +94,5 @@ config (`persona.prefix`, `plan-mode.section`, `tool-subagent.provider`).
 
 Ни один файл бота (`main.js`, `*.manager.js`, `role.*.js`, `task.*.js`) этим
 каталогом не затрагивается, и на шард он не уезжает: выгрузка берёт только
-`["*.js", "constants/*.js"]` (`scripts/deploy.modules.js:43`), а `Gruntfile.js`
+`["*.js", "constants/*.js", "room/*.js", "task/*.js"]` (`scripts/deploy.modules.js:49`), а `Gruntfile.js`
 лишь вызывает эту сборку.

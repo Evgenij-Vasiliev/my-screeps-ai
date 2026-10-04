@@ -31,6 +31,9 @@
 
 const { resolveTokenSource } = require("../screeps.token");
 const { ScreepsAPI } = require("screeps-api");
+// Квоты — из того же модуля, что читает бот: зашитое число уже один раз
+// отстало от квоты (была 2, стала 1), и верхняя граница считалась по старой.
+const { SPAWN_QUOTA } = require("../constants");
 
 const SHARD = process.argv[2] || "shard3";
 const PAUSE_MS = 2500;
@@ -137,10 +140,12 @@ async function main() {
     );
     console.log("— Роли:", JSON.stringify(s.roles));
     console.log("— Очереди задач (всего/зарезервировано) по комнатам:", JSON.stringify(s.queues));
+    const workersPerRoom = SPAWN_QUOTA.worker;
+    const rooms = Object.keys(s.queues).length;
     console.log(
-      `— Верхняя граница вызовов исполнителей за тик: число воркеров с задачей ` +
-        `(квота worker = 2 на комнату, constants.js:91) × 2 резолва = не более ` +
-        `${2 * Object.keys(s.queues).length * 2} вызовов; при ленивом source — вдвое меньше у полных крипов`,
+      `— Верхняя граница вызовов исполнителей за тик: ${workersPerRoom} воркер на комнату ` +
+        `(SPAWN_QUOTA.worker, constants/spawn.js:30) × ${rooms} комнат(ы) × 2 резолва = ` +
+        `не более ${workersPerRoom * rooms * 2} вызовов; при ленивом source — вдвое меньше у полных крипов`,
     );
 
     const out = {

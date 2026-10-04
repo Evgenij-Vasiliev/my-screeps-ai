@@ -26,12 +26,7 @@ module.exports = {
   boostManager: false, // буст крипов
 
   // ── роли (false — роль не работает и не спавнится) ─────────
-  harvester: false,
-  upgrader: false,
-  builder: false,
-  repairer: false,
   miner: true,
-  towerSupplier: false,
   linkWorker: true,
   labWorker: true,
   mineralMiner: true,
@@ -39,10 +34,10 @@ module.exports = {
 
   // ── генераторы задач (false — новые задачи не ставятся) ────
   fillSpawnsExtensions: true,
-  fillPowerSpawnPower: false,
-  fillPowerSpawnEnergy: false,
-  fillFactoryEnergy: false,
-  collectFactoryBattery: false,
+  fillPowerSpawnPower: true,
+  fillPowerSpawnEnergy: true,
+  fillFactoryEnergy: true,
+  collectFactoryBattery: true,
   fillTerminalEnergy: true,
   fillTerminalResources: true,
   fillTowers: true,

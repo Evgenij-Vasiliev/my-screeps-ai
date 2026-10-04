@@ -174,15 +174,17 @@ Registry хранит состояние.
 
 `Game.getObjectById` по прогретому id стоит 0.000094 CPU, по несуществующему —
 0.000141 (замер на shard3, `Game.time` 83294987, `docs/resolve-measure.json`;
-вывод продублирован в `task.executors.js:8-12`).
+вывод продублирован в `task/exec.common.js:21-24`).
 
 - id, нужный только одной ветке, резолвится внутри этой ветки, а не в начале
   исполнителя: `sourceId` нужен фазе забора и ветке обратного сброса — резолв
-  стоит в самих ветках (`task.executors.js:394`, `:479`, `:630`, `:670`);
+  стоит в самих ветках (`task/exec.terminal.js:32`, `:117`,
+  `task/exec.powerSpawn.js:155`, `:195`);
 - мёртвый резолв запрещён: результат `resolveTarget` обязан использоваться
-  (в `task.executors.js` таких было три — комментарии `:100-102`, `:152`, `:315`);
+  (механически проверяет `tests/rules.test.js`, проверка «нет мёртвых резолвов»;
+  в прежнем едином `task.executors.js` таких было три);
 - известное исключение: `executeCollectFactoryBattery` резолвит `source` вместе с
-  `target` в общей проверке задачи до фазовой проверки (`task.executors.js:237-244`).
+  `target` в общей проверке задачи до фазовой проверки (`task/exec.factory.js:109-112`).
   Исключение перечислено в `tests/rules.test.js` (`SOURCE_EARLY_KNOWN`) и
   проверяется на актуальность: исчезнет — тест потребует убрать запись.
 
@@ -191,20 +193,21 @@ Registry хранит состояние.
 - `creep.memory.X = ...` не исполняется безусловно: запись стоит внутри `if` или
   `case` (иначе Memory переписывается каждый тик);
 - значение-константа (`true`/`false`/`null`/число) пишется только под условием,
-  которое сверяется с текущим значением того же поля — `role.upgrader.js:17,20`,
-  `worker.runner.js:138,231`, `role.builder.js:12-19`;
+  которое сверяется с текущим значением того же поля — `task/exec.factory.js:31-42`
+  (фазы `creep.memory.working`), `task/runner.js:78-79` (`taskIndex`),
+  `task/runner.js:43` и `:138` (`taskId = null` под `if (memory.taskId)`);
 - `delete creep.memory.X` — только под условием либо после чтения этого поля
-  (`task.executors.js:521` — конец цепочки ранних `return`).
+  (`task/exec.terminal.js:159` — конец цепочки ранних `return`).
 
 **8. `reusePath` — только из `MOVE.*` и всегда у `moveTo`.**
 
 - числовых литералов в `reusePath` нет: значение берётся из единой политики
-  (`constants.js:136-160` — `STABLE` 50 / `NORMAL` 20 / `VOLATILE` 5 / `OFF` 0);
+  (`constants/system.js:65-70` — `STABLE` 50 / `NORMAL` 20 / `VOLATILE` 5 / `OFF` 0);
 - каждый `moveTo` рантайма задаёт `reusePath` явно: без опции движок берёт
-  значение по умолчанию 5 (`constants.js:153-155`), то есть VOLATILE-режим даже
+  значение по умолчанию 5 (`constants/system.js:53-55`), то есть VOLATILE-режим даже
   для неизменной цели — лишние пересчёты пути (один пересчёт на 42 тайла —
-  0.33-0.75 CPU, `constants.js:158-159`);
-- использованный `MOVE.<KEY>` обязан быть объявлен в `constants.js`.
+  0.33-0.75 CPU, `constants/system.js:58-60`);
+- использованный `MOVE.<KEY>` обязан быть объявлен в `constants/system.js`.
 
 ---
 

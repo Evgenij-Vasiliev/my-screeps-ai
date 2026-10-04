@@ -7,13 +7,13 @@
  *
  * 1) 29.09.2026 — генератор не обходит 285 объектов империи, когда свободного
  *    места нет ни в одном из них (`energyAvailable === energyCapacityAvailable`,
- *    task.generators.js:77-83). Замер, из которого это выросло
+ *    task/gen.spawns.js:76-82). Замер, из которого это выросло
  *    (scripts/cpu.peaks.measure.js, флаг Memory.cpuGenProfile, 92 окна):
  *    gen.fillSpawnsExtensions = 0.7921 CPU/тик, 77 % блока taskManager.
  *
  * 2) 30.09.2026 — «нужна ли энергия» проверяется алиасами .energy/.energyCapacity
  *    вместо вызова store.getFreeCapacity(RESOURCE_ENERGY)
- *    (task.generators.js, needsEnergy). Замер на живом shard3
+ *    (task/gen.spawns.js:28-58, needsEnergy). Замер на живом shard3
  *    (scripts/task.manager.bench.js, N=300, реплика этого же цикла): скан
  *    62 объектов комнаты стоил 0.0209-0.0240 CPU с вызовом getFreeCapacity и
  *    0.0034-0.0061 CPU с алиасами. Живая сверка эквивалентности: 282 объекта

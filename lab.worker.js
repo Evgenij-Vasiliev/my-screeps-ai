@@ -57,7 +57,7 @@
  * ===================================================
  */
 
-const { LAB_WORKER, LAB_BOOST, STORAGE, MOVE } = require("./constants");
+const { LAB_WORKER, LAB_BOOST, STORAGE } = require("./constants");
 const recipes = require("./lab.recipes");
 
 const LAB_CAPACITY = LAB_WORKER.CAPACITY;
@@ -115,10 +115,12 @@ function boostResources() {
  */
 function actIfNear(creep, target, fn) {
   if (!creep.pos.isNearTo(target)) {
-    // АДАПТАЦИЯ ПОД ЭТУ ВЕТКУ: traveler.js здесь нет, а правило
-    // tests/rules.test.js:426-478 требует reusePath из MOVE.* на каждом moveTo.
-    // Цели роли (терминал, склад, лаборатория) статичны — STABLE.
-    creep.moveTo(target, { reusePath: MOVE.STABLE });
+    // ОБНОВЛЕНО после порта Traveler: библиотека движения теперь ЕСТЬ в этой
+    // ветке (traveler.js, подключается в main.js), поэтому путь ведёт она, а
+    // политика MOVE.* здесь больше не применяется — её место заняла внутренняя
+    // логика библиотеки (путь в creep.memory._travel по пункту назначения).
+    // Цели роли (терминал, склад, лаборатория) статичны, маршрут переиспользуется.
+    creep.travelTo(target);
     return ERR_NOT_IN_RANGE;
   }
   return fn();

@@ -56,11 +56,6 @@ const factory = {
       };
     },
 
-    towerSupplier: (spawn, threshold, name, boostedBody) => ({
-      body: prepareBody(boostedBody || CREEP_BODIES.towerSupplier),
-      memory: {},
-    }),
-
     linkWorker: (spawn, threshold, name, boostedBody) => ({
       body: prepareBody(boostedBody || CREEP_BODIES.linkWorker),
       memory: {},
@@ -71,28 +66,6 @@ const factory = {
     // содержимого его рюкзака, отдельного состояния в Memory роль не держит.
     labWorker: (spawn, threshold, name, boostedBody) => ({
       body: prepareBody(boostedBody || CREEP_BODIES.labWorker),
-      memory: {},
-    }),
-
-    harvester: (spawn, threshold, name, boostedBody) => ({
-      body: prepareBody(boostedBody || CREEP_BODIES.harvester),
-      memory: {
-        state: "harvesting",
-      },
-    }),
-
-    upgrader: (spawn, threshold, name, boostedBody) => ({
-      body: prepareBody(boostedBody || CREEP_BODIES.upgrader),
-      memory: {},
-    }),
-
-    builder: (spawn, threshold, name, boostedBody) => ({
-      body: prepareBody(boostedBody || CREEP_BODIES.builder),
-      memory: {},
-    }),
-
-    repairer: (spawn, threshold, name, boostedBody) => ({
-      body: prepareBody(boostedBody || CREEP_BODIES.repairer),
       memory: {},
     }),
 
@@ -147,7 +120,7 @@ const factory = {
     }
 
     // homeRoom пишется ВСЕГДА. Раньше его получал только miner, а worker,
-    // linkWorker и mineralMiner — нет. Без homeRoom room.manager.js:419-430
+    // linkWorker и mineralMiner — нет. Без homeRoom room/state.js:150-176
     // привязывает крипа к ТЕКУЩЕЙ комнате, а spawn.manager.countRoles считает
     // квоты по homeRoom — такой крип не попадал ни в одну квоту, и комната
     // спавнила лишнего (каждый лишний worker ≈ 0.19 CPU/тик навсегда).

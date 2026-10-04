@@ -152,6 +152,12 @@ class Creep {
     );
     return OK;
   }
+  // Порт Traveler (04.10.2026): роль двигается через creep.travelTo. В тесте
+  // библиотеки нет, поэтому мок ведёт себя как moveTo и пишет в тот же
+  // счётчик — проверки «пока далеко, только движение» ниже не меняются.
+  travelTo(target) {
+    return this.moveTo(target);
+  }
   withdraw(target, resource, amount) {
     const near = this.pos.isNearTo(target);
     this.withdrawCalls.push({ id: target.id, resource, amount, near });

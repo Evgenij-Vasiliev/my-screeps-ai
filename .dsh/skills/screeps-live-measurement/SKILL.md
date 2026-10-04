@@ -28,13 +28,13 @@ whenToUse: Когда нужна цифра с живого шарда (CPU, Mem
 |---|---|---|
 | Запрет действий | ни одной правки, выгрузки, спавна, suicide без явной команды человека | `AGENTS.md:4-5` |
 | Флот | никаких массовых операций над флотом (suicide, переспавн, квоты) — никогда | `AGENTS.md:7` |
-| Task-система | изменения только по отдельному согласованию: `task.manager.js`, `task.executors.js`, `task.generators.js`, `task.types.js`, `worker.runner.js` | `AGENTS.md:8-10` |
+| Task-система | изменения только по отдельному согласованию: `task.manager.js`, `task.executors.js`, `task.generators.js`, `worker.runner.js` | `AGENTS.md:8-10` |
 | Утверждение | либо `файл:строка`, либо цифра из замера с командой; без ссылки — гипотеза, не основание | `AGENTS.md:13-14` |
 | Нет данных | говорить «не знаю»; оценка вместо факта запрещена | `AGENTS.md:15` |
 | Поведение бота | проверять замером на живом шарде, а не выводить из чтения кода | `AGENTS.md:16` |
 | Шаг | один шаг — одно действие, у каждого шага есть точка отката | `AGENTS.md:19` |
 | Порядок | read-only замер → предложение → согласование → правка → тесты → выгрузка | `AGENTS.md:20-21` |
-| Тесты | перед правкой прогнать `node tests/<файл>.test.js` (всего 13 файлов) | `AGENTS.md:22-23` |
+| Тесты | перед правкой прогнать `node tests/<файл>.test.js` (всего 27 файлов) или всё разом: `node scripts/check.all.js` | `AGENTS.md:22-23`, `scripts/check.all.js:1-40` |
 | Деплой | `./node_modules/.bin/grunt screeps` (ветка `test`) — всегда отдельная команда человека | `AGENTS.md:21,27` |
 | CPU-правила | обязательные правила §11.1, механически проверяются `tests/rules.test.js` | `docs/task-system-v3.0/DEVELOPMENT_RULES.md:128-132` |
 | Правила CPU по сути | рынок только через кэш на тик; `Object.values(Game.*)` не в per-creep коде; Memory — только переживающее рестарт и только при смене значения; `room.find` не в горячем пути; замер до и после | `DEVELOPMENT_RULES.md:134-166` |
@@ -46,9 +46,9 @@ whenToUse: Когда нужна цифра с живого шарда (CPU, Mem
 | `screeps.token.js` | единая точка получения токена: env → `.screeps.json` корня → `~/.screeps.json` | `screeps.token.js:1-16,54-77` |
 | `scripts/baseline.js` | замеры на живом шарде без выгрузки кода: общее состояние, стоимость API, рынок, разбор Memory | `scripts/baseline.js:1-26` |
 | `scripts/memory.audit.js` | читает ключи Memory с размерами, ищет мёртвые `__*` и ключи без ссылок в коде | `scripts/memory.audit.js:7-34` |
-| `scripts/deploy.modules.js` | карта выгрузки: что уезжает и под каким именем | `scripts/deploy.modules.js:43,51` |
+| `scripts/deploy.modules.js` | карта выгрузки: что уезжает и под каким именем | `scripts/deploy.modules.js:49,57` |
 | `Gruntfile.js` | задача `screeps`: собирает модули, проверяет `require`, вызывает `api.code.set("test", modules)` | `Gruntfile.js:27-73` |
-| `tests/*.test.js` | 13 офлайн-тестов, `node tests/<файл>.test.js`, код возврата = результат | `AGENTS.md:22-23`; `tests/.last-run.json:2` |
+| `tests/*.test.js` | 27 офлайн-тестов, `node tests/<файл>.test.js`, код возврата = результат; все разом — `node scripts/check.all.js` | `AGENTS.md:22-23`; `scripts/check.all.js:1-40` |
 | `docs/cpu-baseline.json` | результат последнего прогона baseline | `scripts/baseline.js:315-316` |
 
 ### 3. Токен: приоритет источников
@@ -59,7 +59,7 @@ whenToUse: Когда нужна цифра с живого шарда (CPU, Mem
 | 2 | `.screeps.json` в корне проекта, ключи `token`, `SCREEPS_TOKEN`, `authToken` | `screeps.token.js:23,40-45,62-63` |
 | 3 | `~/.screeps.json` — резервный, с предупреждением в stderr о потенциальной утечке | `screeps.token.js:65-74` |
 | — | `requireToken()` бросает понятную ошибку, если токена нет | `screeps.token.js:91-100` |
-| — | `.screeps.json` в `.gitignore` и вне каталогов выгрузки | `.gitignore:2`; `scripts/deploy.modules.js:43` |
+| — | `.screeps.json` в `.gitignore` и вне каталогов выгрузки | `.gitignore:2`; `scripts/deploy.modules.js:49` |
 
 `resolveTokenSource()` возвращает `{token, source}`, где `source` — `"env" |
 "project-file" | "home-file" | null` (`screeps.token.js:49-53`); `scripts/baseline.js`
@@ -73,7 +73,7 @@ whenToUse: Когда нужна цифра с живого шарда (CPU, Mem
 | Пауза между командами | `PAUSE_MS = 2500` мс | `scripts/baseline.js:32` |
 | Предел длины команды | `CONSOLE_LIMIT = 1000`; при превышении — явная ошибка до отправки | `scripts/baseline.js:34-35,56-61` |
 | Повторы | до 3 попыток на выражение: консоль изредка молча теряет команду | `scripts/baseline.js:64-72` |
-| Флаг уборки | на время замеров `Memory.keepTemp = true`, иначе боевой `empire.js` вычистит `__*` поля | `scripts/baseline.js:282-285`; `empire.js:30-37` |
+| Флаг уборки | на время замеров `Memory.keepTemp = true`, иначе боевой `empire.js` вычистит `__*` поля | `scripts/baseline.js:282-285`; `empire.js:32-39` |
 | Результат | файл `docs/cpu-baseline.json` (перезаписывается целиком) | `scripts/baseline.js:313-317` |
 | Аудит Memory | `node scripts/memory.audit.js` → `/tmp/memkeys.json` | `scripts/memory.audit.js:11-16` |
 | Аккаунт проекта | играет на `shard3`, лимит CPU 20 | `docs/CPU-BASELINE.md:136,24` |
@@ -94,8 +94,8 @@ const command =
 | 2 | скрипт читает поле обратно через API: `api.memory.get(key, SHARD)` | `scripts/baseline.js:67` |
 | 3 | поле удаляется: `delete Memory.__bench_<field>` | `scripts/baseline.js:74` |
 | 4 | в конце — `delete Memory.keepTemp` и удаление остатков `__probe*`, `__bench*` | `scripts/baseline.js:295-302` |
-| Почему | `Memory` сериализуется целиком каждый тик: мёртвое поле — постоянный налог на CPU | `empire.js:20-23`; `DEVELOPMENT_RULES.md:147-153` |
-| Почему | конвенция проекта: поле верхнего уровня с `__` — временное и вычищается каждый тик | `empire.js:25-36`; `tests/rules.test.js:129-130` |
+| Почему | `Memory` сериализуется целиком каждый тик: мёртвое поле — постоянный налог на CPU | `empire.js:21-25`; `DEVELOPMENT_RULES.md:147-153` |
+| Почему | конвенция проекта: поле верхнего уровня с `__` — временное и вычищается каждый тик | `empire.js:32-39`; `tests/rules.test.js:300-304` |
 | Итог | боевая Memory не засоряется, следов замера в ней не остаётся | `scripts/baseline.js:9-11,295-302` |
 
 Ошибка выражения не теряется: она приезжает строкой `"ERR: ..."`, и `section()`
@@ -120,13 +120,13 @@ const command =
 | Факт | Значение | Источник |
 |---|---|---|
 | Запуск | `node tests/<файл>.test.js` | `AGENTS.md:22-23` |
-| Всего файлов | 13 | `tests/.last-run.json:2` |
-| Последний прогон | 13/13 PASS, 262 проверки, 0 FAIL | `tests/.last-run.json:3-16` |
-| Прогон всех | `for f in tests/*.test.js; do node "$f"; done` | `tests/.last-run.json:11` |
-| Код возврата | `process.exit(failed === 0 ? 0 : 1)` — ненулевой код = FAIL | `tests/rules.test.js:153-154` |
-| `tests/rules.test.js` | механически держит правила CPU: рынок, `getAllOrders`, `Object.values(Game.*)`, `room.find`, Memory/heap, `subsystems` | `tests/rules.test.js:91-151` |
-| Что проверяется | 6 групп: рынок изолирован, кэш ордеров, per-creep код, горячий путь ролей, Memory и heap-кэши, наблюдаемость | `tests/rules.test.js:91-151` |
-| `tests/` в `.gitignore` | тесты не коммитятся и на шард не уезжают | `.gitignore:3`; `scripts/deploy.modules.js:43` |
+| Всего файлов | 27 | `scripts/check.all.js` (агрегат `tests/.last-run.json`) |
+| Последний прогон | 27/27 PASS, 756 проверок, 0 FAIL | `tests/.last-run.json` (03.10.2026) |
+| Прогон всех | `node scripts/check.all.js` (тесты + циклы require + загрузка + скиллы) | `scripts/check.all.js:1-40` |
+| Код возврата | `process.exit(failed === 0 ? 0 : 1)` — ненулевой код = FAIL | `tests/rules.test.js:535` |
+| `tests/rules.test.js` | механически держит правила CPU: рынок, `getAllOrders`, `Object.values(Game.*)`, `room.find`, Memory/heap, `subsystems` | `tests/rules.test.js:258-325` |
+| Что проверяется | 9 групп: рынок изолирован (`:258`), кэш ордеров (`:262`), per-creep код (`:273`), горячий путь ролей (`:292`), Memory и heap-кэши (`:300`), наблюдаемость (`:321`), ленивый резолв в executors (`:327`), запись `creep.memory` (`:390`), политика `reusePath` (`:466`) | `tests/rules.test.js:258-532` |
+| `tests/` в `.gitignore` | тесты не коммитятся и на шард не уезжают | `.gitignore:3`; `scripts/deploy.modules.js:49` |
 
 ### 8. Деплой
 
@@ -134,9 +134,9 @@ const command =
 |---|---|---|
 | Команда | `./node_modules/.bin/grunt screeps` — только по отдельной явной команде человека | `AGENTS.md:21,27` |
 | Ветка | `BRANCH = "test"` | `Gruntfile.js:27,59-60` |
-| Что выгружается | `SRC = ["*.js", "constants/*.js"]` — корневые модули и `constants/*` | `scripts/deploy.modules.js:43` |
-| Что исключено | `Gruntfile.js`, `screeps.token.js`, `eslint.config.js` | `scripts/deploy.modules.js:51` |
-| `.screeps.json` | не попадает ни в `SRC` (это `.json`), ни в git | `scripts/deploy.modules.js:43`; `.gitignore:2` |
+| Что выгружается | `SRC = ["*.js", "constants/*.js", "room/*.js", "task/*.js"]` — корневые модули, `constants/*`, `room/*` и `task/*` | `scripts/deploy.modules.js:49` |
+| Что исключено | `Gruntfile.js`, `screeps.token.js`, `eslint.config.js` | `scripts/deploy.modules.js:57` |
+| `.screeps.json` | не попадает ни в `SRC` (это `.json`), ни в git | `scripts/deploy.modules.js:49`; `.gitignore:2` |
 | Страховка | перед выгрузкой проверяются все литеральные `require`: неразрешимые отменяют выгрузку | `Gruntfile.js:43-56` |
 | Имена модулей | путь без `.js` (например `constants/logistics`), поэтому папки не разворачиваются в корень | `Gruntfile.js:14-26` |
 
@@ -235,8 +235,8 @@ async function evalInGame(field, expression) {
 ### Р5. Прогнать тесты перед правкой
 
 ```bash
-node tests/rules.test.js          # 16 проверок правил CPU (tests/.last-run.json:24)
-for f in tests/*.test.js; do node "$f"; done   # все 13 файлов (tests/.last-run.json:11)
+node scripts/check.all.js   # всё разом: 27 тестов (756 проверок) + циклы require + загрузка + скиллы
+node tests/rules.test.js    # только правила CPU: 30 проверок
 ```
 
 ### Р6. Выгрузка (только по отдельной явной команде человека)
@@ -271,10 +271,10 @@ CPU/крип: 0.242 при 28 крипах (docs/cpu-baseline.json:16)
    (`docs/CPU-BASELINE.md:128-130`). Всегда проверять длину до отправки и читать
    результат обратно из `Memory`.
 2. **Забытый `Memory.keepTemp`** отключает уборку `__*` навсегда — боевая Memory
-   начнёт расти (`empire.js:30-37`). Снимать флаг тем же прогоном
+   начнёт расти (`empire.js:32-39`). Снимать флаг тем же прогоном
    (`scripts/baseline.js:296`).
 3. **Забытое `Memory.__bench_*`** остаётся в боевой Memory и сериализуется каждый
-   тик (`scripts/baseline.js:74`; `empire.js:20-23`). После замера — проверять
+   тик (`scripts/baseline.js:74`; `empire.js:21-25`). После замера — проверять
    остатки (Р3).
 4. **Замер не равен правке**: `scripts/baseline.js` не выгружает код и не меняет
    боевые поля (`scripts/baseline.js:19-20`; `docs/CPU-BASELINE.md:5-6`).
@@ -282,8 +282,8 @@ CPU/крип: 0.242 при 28 крипах (docs/cpu-baseline.json:16)
    (`docs/cpu-baseline-8.53.json:12` против `docs/cpu-baseline.json:15`). Сравнивать
    средние с одинаковым окном (`count`) и указывать окно в отчёте.
 6. **`tests/` в `.gitignore`** (`:.gitignore:3`): тесты не попадут в git и не уедут
-   на шард — выгрузка берёт только `*.js` корня и `constants/*.js`
-   (`scripts/deploy.modules.js:43`).
+   на шард — выгрузка берёт только `*.js` корня, `constants/*.js`, `room/*.js`
+   и `task/*.js` (`scripts/deploy.modules.js:49`).
 7. **Токен из `~/.screeps.json`** — резервный источник и потенциальная утечка;
    скрипт печатает предупреждение, о нём нужно сообщить человеку
    (`screeps.token.js:65-74`).
@@ -304,15 +304,16 @@ CPU/крип: 0.242 при 28 крипах (docs/cpu-baseline.json:16)
 - `scripts/memory.audit.js:7-34` — сканирование ключей Memory и мёртвых `__*`.
 - `scripts/deploy.modules.js:10-33,43,51` — что уезжает, исключения, семантика `require` на шарде.
 - `Gruntfile.js:14-27,36,43-60` — ветка `test`, сборка модулей, проверка `require`, `api.code.set`.
-- `tests/rules.test.js:1-19,24,33-38,91-151,153-154` — 6 групп правил CPU и код возврата.
-- `tests/.last-run.json:2-4,11-16,17-31` — 13 файлов, 13 PASS, 262 проверки, команда прогона.
+- `tests/rules.test.js:1-30,40-257,258-532,535` — 9 групп правил CPU и код возврата (шапка со списком правил, сбор рантайм-файлов и хелперы, блок проверок 258-532, выход по `failed`). Рантайм-файлы берутся из SRC деплоя, то есть проверяются корень, `constants/`, `task/` и `room/`.
+- `scripts/check.all.js:1-40` — единая команда проверок: 27 тестов + `check.require.cycles` + `check.boot` + `validate.skills`, пишет агрегат `tests/.last-run.json` (27 файлов, 756 проверок, 0 FAIL, 03.10.2026).
+- `tests/citations.test.js:1-40` — механический страж ссылок `file:line`: строка не за концом файла, нет ссылок на удалённые модули (реестр `REMOVED_MODULES`), исторические `docs/*.md` — предупреждения.
 - `docs/CPU-BASELINE.md:23-32,40-50,76-79,126-136` — цифры замеров, стоимость API, ограничения консоли, `cpuShard: {shard3: 20}`.
 - `docs/cpu-baseline.json:5-16,19-34` — сырые результаты последнего прогона (шард, тик, CPU/тик, bucket, стоимость API).
 - `docs/cpu-baseline-8.53.json:4-16` — предыдущий прогон (8.53 CPU/тик) для сравнения.
 - `docs/task-system-v3.0/DEVELOPMENT_RULES.md:128-166` — §11.1, обязательные правила по CPU.
-- `empire.js:14-17,20-37,50,55,57` — уборка мёртвых крипов и `__*`, `keepTemp`, порядок вызовов.
+- `empire.js:14-19,21-39,80,89,91` — уборка мёртвых крипов и `__*`, `keepTemp`, порядок вызовов.
 - `cpuMonitor.js:106-111,120-125,132-144,153-169` — накопители в heap, запись `Memory.cpuStats` раз в `CPU.REPORT_INTERVAL`.
-- `constants.js:123,129-131` — `MARKET.INTERVAL = 10`, `CPU.REPORT_INTERVAL = 10`, `CPU.AVERAGE_WINDOW = 100`, `CPU.BUCKET_CRITICAL = 500`.
+- `constants/market.js:25`, `constants/system.js:73-75` — `MARKET.INTERVAL = 30`, `CPU.REPORT_INTERVAL = 10`, `CPU.AVERAGE_WINDOW = 100`, `CPU.BUCKET_CRITICAL = 500`.
 - `loadShed.js:136-144,182-194` — пороги экономии по bucket (9000/7000/5000).
 - `main.js:5-9` — точка входа `module.exports.loop` → `empire.run()`.
 - `.gitignore:1-4` — `node_modules/`, `.screeps.json`, `tests/`, `test.js`.

@@ -810,7 +810,7 @@ class TerminalNetwork {
 
     for (let i = 0; i < 8; i++) {
       // АДАПТАЦИЯ ПОД ЭТУ ВЕТКУ: Game.market разрешён только в market.manager.js
-      // (tests/rules.test.js:225-227), поэтому расчёт идёт через его обёртку.
+      // (tests/rules.test.js:258-260), поэтому расчёт идёт через его обёртку.
       const cost = marketManager.getTransactionCost(
         amount,
         terminal.room.name,

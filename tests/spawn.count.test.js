@@ -7,7 +7,8 @@
  *   1) список крипов проходится РОВНО ОДИН раз (раньше — девять);
  *   2) результат совпадает с прежней реализацией на фильтрах
  *      (эталон ниже повторяет старый countRole один в один);
- *   3) роли с нулевой квотой не считаются;
+ *   3) роли, которых нет в SPAWN_QUOTA (в том числе удалённые 03.10.2026
+ *      builder/harvester/repairer/towerSupplier/upgrader), не считаются;
  *   4) крип ниже PRESPAWN_THRESHOLD не считается;
  *   5) run() не трогает Game.getObjectById по минералу, когда квота
  *      mineralMiner уже набрана, и вообще не спавнит, когда все квоты полны;
@@ -99,11 +100,13 @@ const creeps = [
   creep("linkWorker", 20), // ниже порога 30
   creep("linkWorker", 800),
   creep("mineralMiner", 1000),
-  creep("harvester", 1000), // квота 0
-  creep("builder", 1000), // квота 0
-  creep("upgrader", 1000), // квота 0
-  creep("repairer", 1000), // квота 0
-  creep("towerSupplier", 1000), // квота 0
+  // Имена удалённых ролей (03.10.2026) — для счётчика это чужие имена: записей
+  // в SPAWN_QUOTA у них больше нет, и они не должны попасть в counts (п.2).
+  creep("harvester", 1000),
+  creep("builder", 1000),
+  creep("upgrader", 1000),
+  creep("repairer", 1000),
+  creep("towerSupplier", 1000),
   creep("unknownRole", 1000), // роли нет в квотах
 ];
 
@@ -124,7 +127,7 @@ for (const role in SPAWN_QUOTA) {
 check("по всем спавнящимся ролям счёт совпал", mismatch === null, mismatch);
 check("сравнено 5 ролей с квотой > 0", compared === 5, String(compared));
 
-console.log("\n2. Роли с нулевой квотой и чужие роли не считаются");
+console.log("\n2. Удалённые и чужие роли не считаются");
 const counts = countRoles(creeps);
 for (const role of [
   "harvester",
@@ -250,14 +253,14 @@ resetGate();
 spawnManager.run(roomState);
 check("заспавнен miner", spawnCalls.length === 1 && spawnCalls[0] === "miner", spawnCalls.join(","));
 
-console.log("\n7. Роль с нулевой квотой не спавнится никогда");
+console.log("\n7. Роль без квоты не спавнится никогда");
 spawnCalls.length = 0;
 roomState.creeps = []; // вообще никого — все квоты пусты
 Memory.rooms.W1N1 = { minerSpots: [{ x: 10, y: 10 }] };
 resetGate();
 spawnManager.run(roomState);
 check(
-  "первым заспавнен не harvester/builder/upgrader",
+  "первым заспавнен только тот, у кого квота > 0",
   spawnCalls.length === 1 && SPAWN_QUOTA[spawnCalls[0]] > 0,
   spawnCalls.join(","),
 );

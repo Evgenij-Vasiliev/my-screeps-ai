@@ -137,6 +137,14 @@ function makeCreep(opts) {
       intents.push(["moveTo", obj.id]);
       return OK;
     },
+    // Порт Traveler (04.10.2026): исполнители двигаются через creep.travelTo
+    // (traveler.js, main.js). В офлайн-тесте его нет, поэтому мок повторяет
+    // moveTo и пишет ТО ЖЕ имя интента — проверки наборов интентов ниже не
+    // меняются.
+    travelTo: obj => {
+      intents.push(["moveTo", obj.id]);
+      return OK;
+    },
   };
   return { creep: creep, intents: intents };
 }

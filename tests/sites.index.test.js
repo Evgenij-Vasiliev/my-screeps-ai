@@ -8,8 +8,11 @@
  *   2) на новом тике индекс пересобирается (объекты валидны только в тике);
  *   3) площадки разложены по своим комнатам;
  *   4) generateBuildStructures не дублирует задачи и не плодит их повторно;
- *   5) задача не создаётся на уже стоящую в очереди площадку;
- *   6) role.builder выбирает ближайшую площадку и не перебирает Империю.
+ *   5) задача не создаётся на уже стоящую в очереди площадку.
+ *
+ * Секция «role.builder выбирает ближайшую площадку» удалена 03.10.2026 вместе с
+ * самой ролью: потребителем индекса остался только generateBuildStructures
+ * (task.generators.js), а он проверяется секциями 1-5.
  *
  * Запуск: node tests/sites.index.test.js
  */
@@ -153,41 +156,6 @@ check("добавлена только новая", q.length === 4, String(q.len
 check(
   "новая площадка e в очереди",
   q.some(t => t.targetId === "e"),
-);
-
-console.log("\n6. role.builder: ближайшая площадка, без перебора Империи");
-const roleBuilder = require("../role.builder");
-const energySource = require("../energySource");
-// Строитель с полным запасом энергии — идёт в ветку строительства.
-const creep = {
-  name: "b1",
-  memory: { role: "builder", working: true, homeRoom: "W1N1" },
-  store: { energy: 50, getFreeCapacity: () => 0 },
-  room: { name: "W1N1" },
-  pos: {
-    findClosestByRange(list) {
-      return list[0]; // «ближайшая» — первая; проверяем, что список из roomState
-    },
-    getRangeTo: () => {
-      throw new Error("перебор вручную не должен вызываться");
-    },
-  },
-  build: () => global.ERR_NOT_IN_RANGE,
-  moveTo: () => global.OK,
-};
-
-let built = null;
-creep.build = target => {
-  built = target;
-  return global.ERR_NOT_IN_RANGE;
-};
-
-const before = JSON.stringify(Object.keys(global.Game.constructionSites));
-roleBuilder.run(creep, { roomName: "W1N1", constructionSites: idx4.W1N1 });
-check("цель выбрана из roomState", built !== null && idx4.W1N1.includes(built));
-check(
-  "перебора Game.constructionSites не было (состав не изменился)",
-  JSON.stringify(Object.keys(global.Game.constructionSites)) === before,
 );
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);

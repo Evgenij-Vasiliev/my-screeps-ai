@@ -21,6 +21,8 @@ const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 
+const { listSourceFiles } = require("./deploy.modules");
+
 const ROOT = path.join(__dirname, "..");
 
 /* ── Константы движка, нужные коду на этапе загрузки ──────────────────── */
@@ -115,23 +117,34 @@ Module._resolveFilename = function (request, ...rest) {
   return origResolve.call(this, request, ...rest);
 };
 
-const files = fs
-  .readdirSync(ROOT)
-  .filter(f => f.endsWith(".js") && !["Gruntfile.js", "screeps.token.js"].includes(f));
+/**
+ * Модули ровно в том составе, в каком они уедут на шард: SRC деплоя
+ * (корень, constants/*, room/*) минус EXCLUDE. Файл из подпапки грузится
+ * так же, как на шарде, — по имени с путём ("constants/spawn"); его
+ * относительные require Node разрешает от своего каталога, а движок получает
+ * уже переведённые в корневые имена (scripts/deploy.modules.js).
+ */
+const files = listSourceFiles(ROOT);
 
 let failed = 0;
 
 /* 1. Каждый модуль по отдельности — константы и таблицы строятся на загрузке. */
-for (const f of files) {
+for (const rel of files) {
   try {
-    require(path.join(ROOT, f));
+    require(path.join(ROOT, rel));
   } catch (e) {
     failed++;
-    console.log(`ОШИБКА загрузки ${f}: ${e.message}`);
+    console.log(`ОШИБКА загрузки ${rel}: ${e.message}`);
     if (e.stack) console.log(e.stack.split("\n").slice(1, 4).join("\n"));
   }
 }
-if (!failed) console.log(`Загрузка всех ${files.length} модулей по отдельности: OK`);
+if (!failed) {
+  const inFolders = files.filter(rel => rel.includes("/")).length;
+  console.log(
+    `Загрузка всех ${files.length} модулей по отдельности: OK ` +
+      `(корень ${files.length - inFolders}, в подпапках ${inFolders})`,
+  );
+}
 
 /* 2. Цепочка main -> empire -> room.manager (как её тянет движок). */
 try {

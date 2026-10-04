@@ -41,6 +41,25 @@ module.exports.run = function () {
   // towerState переехал в heap (задание 5), structureCache — в scanner.
   if (Memory.towerState) delete Memory.towerState;
 
+  // ── Мёртвый кэш пути движка ─────────────────────────────────────────
+  // Ключ `_move` в памяти крипа пишет ТОЛЬКО нативный `creep.moveTo`
+  // (engine src/game/creeps.js: `memory._move` при reusePath). После порта
+  // Traveler (04.10.2026) во всём рантайме не осталось ни одного `moveTo` —
+  // движение ведёт `creep.travelTo`, который держит путь в `_travel`. Значит
+  // `_move` больше никем не обновляется и никем не читается, но и сам не
+  // исчезает: движок его не чистит, а `delete Memory.creeps[name]` срабатывает
+  // только на смерти крипа.
+  //
+  // Замер shard3 04.10.2026: `_move` у 15 крипов из 20 — 1313 байт, тогда как
+  // живой `_travel` — 2875 байт. Ключ вычищается, а не переписывается: если
+  // `moveTo` когда-нибудь вернётся (откат порта), движок создаст `_move` заново.
+  //
+  // Уборка идёт после удаления памяти мёртвых крипов (шаг 1) — иначе ключи
+  // умерших пришлось бы обходить дважды.
+  for (const name in Memory.creeps) {
+    if (Memory.creeps[name]._move) delete Memory.creeps[name]._move;
+  }
+
   // 2. Уровень комнат — вся комнатная логика внутри roomManager.
   // Тумблеры систем — в systems.js: roomManager: false выключает этот вызов.
   if (systems.roomManager !== false) roomManager.run();

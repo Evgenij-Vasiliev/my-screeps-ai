@@ -320,7 +320,8 @@ function invalidateStructureCache(roomName) {
 /**
  * Индекс стройплощадок по комнатам (задание 6 плана).
  *
- * Раньше и role.builder, и generateBuildStructures перебирали
+ * Раньше и строитель (тогда — отдельная роль role.builder, удалена
+ * 03.10.2026), и generateBuildStructures перебирали
  * Object.values(Game.constructionSites) целиком — Object.values на
  * каждую комнату и на каждого строителя, то есть O(B x S) с аллокацией
  * массива на каждый вызов.

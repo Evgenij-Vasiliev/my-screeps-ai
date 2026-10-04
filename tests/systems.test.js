@@ -21,6 +21,8 @@
 const fs = require("fs");
 const path = require("path");
 
+const { listSourceFiles } = require("../scripts/deploy.modules");
+
 const ROOT = path.join(__dirname, "..");
 const SWITCH_FILE = path.join(ROOT, "systems.js");
 
@@ -42,18 +44,17 @@ function check(label, cond, extra) {
   }
 }
 
-/** Рантайм-модули: то же, что уезжает на шард (scripts/deploy.modules.js:43). */
+/**
+ * Рантайм-модули: ровно то, что уезжает на шард (SRC деплоя — корневые *.js,
+ * constants/*.js, room/*.js и task/*.js, scripts/deploy.modules.js:49). Список берётся у самого
+ * деплоя: иначе файлы из подпапок выпадают из скана тумблеров.
+ */
 function runtimeFiles() {
-  return fs
-    .readdirSync(ROOT)
-    .filter(f => f.endsWith(".js"))
-    .filter(f => f !== "systems.js")
-    .filter(
-      f => !["Gruntfile.js", "screeps.token.js", "eslint.config.js"].includes(f),
-    )
-    .map(f => {
-      const text = fs.readFileSync(path.join(ROOT, f), "utf8");
-      return { name: f, text, code: blank(text) };
+  return listSourceFiles(ROOT)
+    .filter(rel => rel !== "systems.js")
+    .map(rel => {
+      const text = fs.readFileSync(path.join(ROOT, rel), "utf8");
+      return { name: rel, text, code: blank(text) };
     });
 }
 
@@ -73,7 +74,7 @@ const ROOM_KEY = /^[A-Z]\d+[NS]\d+$/; // E35S37, W12N4 — имя комнаты
 const systemKeys = keys.filter(k => !ROOM_KEY.test(k));
 const roomKeys = keys.filter(k => ROOM_KEY.test(k));
 
-check("тумблеров систем: 32", systemKeys.length === 32, String(systemKeys.length));
+check("тумблеров систем: 27", systemKeys.length === 27, String(systemKeys.length));
 check(
   "в файле нет функций",
   !/\bfunction\b/.test(switchCode) && switchCode.indexOf("=>") === -1,
@@ -95,7 +96,7 @@ const REQUIRED = [
   "labManager", "spawnManager", "creeps", "towers", "linkManager",
   "factoryManager", "powerSpawnManager",
   "boostManager",
-  "harvester", "upgrader", "builder", "repairer", "miner", "towerSupplier",
+  "miner",
   "linkWorker", "labWorker", "mineralMiner", "worker",
   "fillSpawnsExtensions", "fillPowerSpawnPower", "fillPowerSpawnEnergy",
   "fillFactoryEnergy", "collectFactoryBattery", "fillTerminalEnergy",
@@ -156,7 +157,18 @@ check(
 
 console.log("\n3. Тумблеры ↔ код (механически)");
 const EMPIRE = files.find(f => f.name === "empire.js");
-const ROOM = files.find(f => f.name === "room.manager.js");
+/**
+ * Слой комнаты целиком: фасад room.manager.js + каталог room/*.js (разбиение
+ * 04.10.2026). Тумблеры читаются в room/run.js, карта ролей живёт в
+ * room/creeps.js — проверка одного фасада была бы ложно-зелёной.
+ */
+const roomLayerFiles = files.filter(
+  f => f.name === "room.manager.js" || f.name.startsWith("room/"),
+);
+const ROOM = {
+  name: "room.manager.js + room/*.js",
+  code: roomLayerFiles.map(f => f.code).join("\n"),
+};
 const SPAWN = files.find(f => f.name === "spawn.manager.js");
 
 check(
@@ -181,10 +193,16 @@ const roleKeys = new Set(
       )
     : [],
 );
-/** Ключи таблицы SPAWN_QUOTA: по ним идёт цикл спавна. */
-const quotaMatch = blank(
-  fs.readFileSync(path.join(ROOT, "constants.js"), "utf8"),
-).match(/const SPAWN_QUOTA = \{([\s\S]*?)\n\};/);
+/**
+ * Ключи таблицы SPAWN_QUOTA: по ним идёт цикл спавна. Файл не зашит: таблица
+ * лежит в constants/spawn.js (разбиение 04.10.2026), и поиск идёт по тому же
+ * списку, что уезжает на шард, — иначе переезд константы ломает тест, а не
+ * ловится им.
+ */
+const quotaFile = files.find(f => /const SPAWN_QUOTA = \{/.test(f.code));
+const quotaMatch = quotaFile
+  ? quotaFile.code.match(/const SPAWN_QUOTA = \{([\s\S]*?)\n\};/)
+  : null;
 const quotaKeys = new Set(
   quotaMatch
     ? (quotaMatch[1].match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/gm) || []).map(s =>
@@ -202,8 +220,8 @@ const unknownGates = [...literalGates].filter(
 );
 check("каждое подключение есть в файле тумблеров", unknownGates.length === 0, unknownGates.join(","));
 
-check("ROLES найдена (защита от ложной зелени)", roleKeys.size === 10, String(roleKeys.size));
-check("SPAWN_QUOTA найдена (защита от ложной зелени)", quotaKeys.size === 10, String(quotaKeys.size));
+check("ROLES найдена (защита от ложной зелени)", roleKeys.size === 5, String(roleKeys.size));
+check("SPAWN_QUOTA найдена (защита от ложной зелени)", quotaKeys.size === 5, String(quotaKeys.size));
 check(
   "имена ролей в файле совпадают с картой ROLES",
   [...roleKeys].every(r => Object.prototype.hasOwnProperty.call(systems, r)) &&

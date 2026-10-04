@@ -6,10 +6,11 @@
  * Read-only замер перед возможным шагом «ленивый резолв / кэш id в worker.runner.js».
  *
  * Что делает: читает через API Memory крипов и Memory.rooms[*].tasks, находит
- * воркеров БЕЗ зарезервированной задачи (именно они уходят в nearestTypeIndex,
- * worker.runner.js:68-101) и считает, сколько задач-кандидатов они могут
+ * воркеров БЕЗ зарезервированной задачи (именно они уходят в bestQueue,
+ * task/runner.pick.js:203-241) и считает, сколько задач-кандидатов они могут
  * просмотреть за тик, а значит — сколько раз вызовут Game.getObjectById
- * (rangeToNextStop, worker.runner.js:53-62 резолвит nextStopId каждой задачи).
+ * (routePointId, task/runner.pick.js:84-102 резолвит id точки маршрута каждой
+ * задачи).
  *
  * Почему это считается по Memory, а не меряется обёрткой: обернуть
  * Game.getObjectById счётчиком из консоли нельзя — консоль и код бота
@@ -34,7 +35,7 @@ const { resolveTokenSource } = require("../screeps.token");
 const { ScreepsAPI } = require("screeps-api");
 
 const SHARD = process.argv[2] || "shard3";
-const SCAN_LIMIT = 8; // TASK_CONFIG.NEAREST_SCAN_LIMIT, constants.js:57
+const SCAN_LIMIT = 8; // TASK_CONFIG.NEAREST_SCAN_LIMIT, constants/tasks.js:52
 const COST_MIN = 0.000047; // повторный резолв в том же тике
 const COST_MAX = 0.000141; // резолв по несуществующему id (сверху)
 

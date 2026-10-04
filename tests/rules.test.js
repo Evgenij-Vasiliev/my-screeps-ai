@@ -7,7 +7,7 @@
  * docs/task-system-v3.0/DEVELOPMENT_RULES.md, разделы 7-9 — правилам 6-8 §11.1.
  * Этот тест следит за ними МЕХАНИЧЕСКИ: правила, которые проверяются
  * глазами, перестают соблюдаться. Проверяется рантайм-код, который уезжает
- * на шард (корневые модули и constants/*).
+ * на шард (корневые модули, constants/* и room/*).
  *
  *   1) Game.market.* — только в market.manager.js;
  *   2) getAllOrders — только через кэш на тик (getOrders);
@@ -21,9 +21,11 @@
  *
  * Правила 7-9 введены шагом «каждое новое правило CPU — механическим тестом» и
  * опираются на практику, уже зафиксированную в рантайме:
- *   ленивый резолв — task.executors.js:394, 479, 630, 670 (комментарии-обоснования);
- *   запись Memory при смене значения — role.upgrader.js:17,20,
- *   worker.runner.js:138,231; единая политика reusePath — constants.js:136-160.
+ *   ленивый резолв — task/exec.terminal.js:32, :117, task/exec.powerSpawn.js:155,
+ *   :195 (резолв source стоит в самой ветке, где он нужен);
+ *   запись Memory при смене значения — task/exec.factory.js:31-42,
+ *   запись taskIndex при смене значения — task/runner.js:78-79;
+ *   единая политика reusePath — constants/system.js:65-70.
  *
  * Опорные цифры: 8.53 CPU/тик при 27 крипах (docs/cpu-baseline-8.53.json,
  * 2026-09-27) против 6.22 при 36 — замер человека от 29.09.2026, в docs/ не
@@ -52,18 +54,49 @@ function runtimeFiles() {
     )
     .map(f => ({ name: f, text: fs.readFileSync(path.join(ROOT, f), "utf8") }));
 
-  const constDir = path.join(ROOT, "constants");
-  const consts = fs.existsSync(constDir)
-    ? fs
-        .readdirSync(constDir)
-        .filter(f => f.endsWith(".js"))
-        .map(f => ({
-          name: "constants/" + f,
-          text: fs.readFileSync(path.join(constDir, f), "utf8"),
-        }))
-    : [];
+  // Подкаталоги рантайма. task/ добавлен 04.10.2026 вместе с разбиением
+  // системы задач: логика уехала в task/*.js, а корневые task.manager.js,
+  // task.executors.js и worker.runner.js стали тонкими фасадами. Без этого
+  // правила CPU (per-creep код, ленивый резолв, creep.memory, reusePath)
+  // перестали бы видеть перемещённый код и остались бы зелёными вхолостую.
+  //
+  // room/ добавлен тогда же отдельным шагом по находке: каталог уезжает на
+  // шард (SRC деплоя), но правилами не сканировался вообще. Прогон с ним дал
+  // 30/30 PASS — нарушений в room/*.js нет, расширение области ничего не
+  // ломает, но теперь файловые проверки (рынок, Memory/heap, creep.memory,
+  // reusePath) видят 6 файлов / 1060 строк, которых не видели раньше.
+  //
+  // Список каталогов обязан совпадать с SRC деплоя (scripts/deploy.modules.js):
+  // расхождение = код уезжает на шард непроверенным.
+  const subs = [];
+  for (const dir of ["constants", "task", "room"]) {
+    const full = path.join(ROOT, dir);
+    if (!fs.existsSync(full)) continue;
+    for (const f of fs.readdirSync(full).filter(f => f.endsWith(".js"))) {
+      subs.push({
+        name: dir + "/" + f,
+        text: fs.readFileSync(path.join(full, f), "utf8"),
+      });
+    }
+  }
 
-  return root.concat(consts);
+  return root.concat(subs);
+}
+
+/**
+ * Текст корневого модуля ВМЕСТЕ с его подкаталогом. После разбиения 04.10.2026
+ * корневой файл — тонкий фасад на те же экспорты, поэтому проверять только его
+ * бессмысленно: `function compactAll(` в фасаде нет, и «зелёный» результат
+ * ничего не подтверждал бы.
+ *
+ * @param {string} name имя корневого модуля ("task.manager.js")
+ * @param {string} dir каталог его модулей ("task")
+ */
+function moduleCode(name, dir) {
+  const files = FILES.filter(f => f.name === name)
+    .concat(FILES.filter(f => f.name.startsWith(dir + "/")))
+    .map(f => f.text);
+  return files.join("\n");
 }
 
 /** Убирает комментарии и строковые литералы, чтобы правила не срабатывали на текст. */
@@ -238,9 +271,16 @@ check(
 );
 
 console.log("\n3. Object.values(Game.*) не в per-creep коде");
-// Роли и worker.runner исполняются на каждого крипа — там такого быть не должно.
+// Per-creep код — тот, что исполняется в цикле по крипам: роли (их зовёт
+// runCreepLogic), worker.runner, task/runner* (тот же код после разбиения
+// 04.10.2026) и сам драйвер цикла room/creeps.js:61-80 — если Object.values
+// попадёт в его тело, он умножится на число крипов ровно так же.
 const perCreep = FILES.filter(
-  f => f.name.startsWith("role.") || f.name === "worker.runner.js",
+  f =>
+    f.name.startsWith("role.") ||
+    f.name === "worker.runner.js" ||
+    f.name.startsWith("task/runner") ||
+    f.name === "room/creeps.js",
 );
 const perCreepHits = perCreep.filter(f => /Object\.(values|keys)\(Game\./.test(code(f.text)));
 check(
@@ -273,7 +313,7 @@ check(
     !/roomMemory\.structureCache\s*=/.test(scannerCode),
 );
 
-const taskCode = code(FILES.find(f => f.name === "task.manager.js").text);
+const taskCode = code(moduleCode("task.manager.js", "task"));
 check("индекс задач живёт в heap", /global\.__taskHeap/.test(taskCode));
 check("очереди сжимаются (compactAll)", /function compactAll\(/.test(taskCode));
 check("splice из completeTask убран", !/\.splice\(/.test(taskCode));
@@ -285,7 +325,7 @@ check("накопители живут в heap", /global\.__cpuMonitor/.test(mon
 check("Memory.cpuStats пишется не каждый тик", /REPORT_INTERVAL/.test(monitorCode));
 
 console.log("\n7. Executors: id резолвится только в ветке, где нужен");
-const executorSrc = blank(FILES.find(f => f.name === "task.executors.js").text);
+const executorSrc = blank(moduleCode("task.executors.js", "task"));
 const executorFns = functionBodies(executorSrc).filter(f =>
   f.name.startsWith("execute"),
 );
@@ -293,7 +333,7 @@ const executorFns = functionBodies(executorSrc).filter(f =>
 /**
  * Известное исключение: в executeCollectFactoryBattery source (сама фабрика)
  * резолвится вместе с target в общей проверке задачи, до фазовой проверки —
- * task.executors.js:237-244. Список ровно на одну запись и проверяется на
+ * task/exec.factory.js:109-112. Список ровно на одну запись и проверяется на
  * актуальность: если исключение исчезнет, тест об этом скажет.
  */
 const SOURCE_EARLY_KNOWN = ["executeCollectFactoryBattery"];
@@ -384,7 +424,7 @@ for (const f of FILES) {
     }
   }
 
-  // delete в конце цепочки ранних return (task.executors.js:521) синтаксически
+  // delete в конце цепочки ранних return (task/exec.terminal.js:159) синтаксически
   // стоит вне блока, но исполняется только условно. Поэтому нарушением считаем
   // delete и без условия, и без чтения того же поля выше: это чистка поля,
   // которого в этом тике никто не видел.
@@ -424,9 +464,13 @@ check(
 );
 
 console.log("\n9. reusePath: только MOVE.* и всегда у moveTo");
-const moveDecl = blank(FILES.find(f => f.name === "constants.js").text).match(
-  /MOVE\s*=\s*\{([\s\S]*?)\}/,
+/** Файл не зашит: словарь MOVE живёт в constants/system.js (разбиение 04.10.2026). */
+const moveFile = FILES.map(f => ({ name: f.name, code: blank(f.text) })).find(f =>
+  /(^|\n)const MOVE = \{/.test(f.code),
 );
+const moveDecl = moveFile
+  ? moveFile.code.match(/MOVE\s*=\s*\{([\s\S]*?)\}/)
+  : null;
 const declaredMove = new Set(
   (moveDecl ? moveDecl[1].match(/[A-Z_]+\s*:/g) || [] : []).map(s =>
     s.replace(/\s*:$/, ""),
@@ -462,17 +506,27 @@ for (const f of FILES) {
   }
 }
 
-check("политика MOVE объявлена в constants.js", declaredMove.size >= 4, [...declaredMove].join(","));
 check(
+  `политика MOVE объявлена в ${moveFile ? moveFile.name : "constants"}`,
+  declaredMove.size >= 4,
+  [...declaredMove].join(","),
+);
+check(
+  // Порог опущен до 0 после порта Traveler (04.10.2026): вызовов creep.moveTo
+  // в рантайме не осталось, движение ведёт creep.travelTo, и reusePath в нём не
+  // применяется. Проверки ниже остаются в силе для любого вызова moveTo, который
+  // появится снова: значение обязано быть из MOVE.*, не числовым литералом и
+  // задаваться явно. Инвариант самого порта держит tests/role.micro.test.js
+  // («вызовов creep.moveTo в рантайме не осталось»).
   "reusePath-опций найдено (защита от ложной зелени)",
-  reuseSites >= 25,
+  reuseSites >= 0,
   String(reuseSites),
 );
 check("нет литеральных reusePath", reuseLiterals.length === 0, reuseLiterals.join(", "));
 check("reusePath берётся только из MOVE.*", reuseUnknown.length === 0, reuseUnknown.join(", "));
 check(
   "moveTo-вызовов найдено (защита от ложной зелени)",
-  moveCalls >= 25,
+  moveCalls >= 0,
   String(moveCalls),
 );
 check("каждый moveTo задаёт reusePath", missingReuse.length === 0, missingReuse.join(", "));

@@ -7,7 +7,7 @@
  * `cpuMonitor.trackRole` (room.manager.js: towers, linkManager, spawnManager,
  * taskManager, factoryManager, powerSpawnManager; empire.js: marketManager,
  * taskCompact) и роли крипов в подробном режиме. Сборка состояний комнат
- * (`room.manager.js:853` → `buildAllRoomStates` → `buildRoomState`) не обёрнута
+ * (`room/run.js:219` → `room/state.js:143` → `room/state.js:39`) не обёрнута
  * ничем, а разница «всего расхода минус сумма подсистем» на shard3 01.10.2026
  * давала ≈1.8-2.5 CPU/тик — то есть эта часть была самой крупной и невидимой.
  *
@@ -158,7 +158,7 @@ async function section(title, fn) {
     ),
   );
 
-  // ── 4. Уборка памяти и временных полей (empire.js:14-37) ──
+  // ── 4. Уборка памяти и временных полей (empire.js:17-42) ──
   await take(
     "memCleanup",
     rep(

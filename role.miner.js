@@ -41,7 +41,7 @@
  * Источник и линк кэшируются в HEAP по ключу клетки: id постоянны, а объекты
  * Game пересобираются каждый тик, поэтому в Memory они не пишутся вовсе.
  */
-const { MINER, MOVE } = require("./constants");
+const { MINER } = require("./constants");
 
 /**
  * Энергии за одно действие harvest на одну WORK-часть. Глобальная константа
@@ -205,7 +205,7 @@ module.exports = {
 
     // Стоим на рабочем месте или идём на него.
     if (!creep.pos.isEqualTo(wp.x, wp.y)) {
-      creep.moveTo(wp.x, wp.y, { reusePath: MOVE.STABLE });
+      creep.travelTo(creep.room.getPositionAt(wp.x, wp.y));
       return;
     }
 

@@ -47,7 +47,7 @@
  * ===================================================
  */
 
-const { LAB_BOOST, MOVE } = require("./constants");
+const { LAB_BOOST } = require("./constants");
 
 // Индекс буст-лабы в roomState.labs: scanner собирает labIds через
 // room.find(FIND_MY_STRUCTURES) в стабильном порядке неподвижных структур,
@@ -588,7 +588,7 @@ function runDelivery(roomState, creep, room, lab, row) {
       return false;
     }
     if (!creep.pos.isNearTo(source)) {
-      creep.moveTo(source, { reusePath: MOVE.STABLE });
+      creep.travelTo(source);
       return true;
     }
     // ОБЪЁМ СПИСАНИЯ ОГРАНИЧЕН СВОБОДНЫМ РЮКЗАКОМ **И** ЗАПАСОМ ИСТОЧНИКА.
@@ -620,7 +620,7 @@ function runDelivery(roomState, creep, room, lab, row) {
   }
 
   if (!creep.pos.isNearTo(lab)) {
-    creep.moveTo(lab, { reusePath: MOVE.STABLE });
+    creep.travelTo(lab);
     return true;
   }
 
@@ -771,7 +771,7 @@ function runBoost(roomState, creep, room, lab, row, cap) {
   }
 
   if (!creep.pos.isNearTo(lab)) {
-    creep.moveTo(lab, { reusePath: MOVE.STABLE });
+    creep.travelTo(lab);
     return true;
   }
 
@@ -809,7 +809,7 @@ function runBoost(roomState, creep, room, lab, row, cap) {
       // Кулдаун буст-лабы (10 тиков) — просто ждём у лабы.
       return true;
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(lab, { reusePath: MOVE.STABLE });
+      creep.travelTo(lab);
       return true;
     case ERR_INVALID_ARGS:
       // Либо на крипе нет частей под этот буст (например, смена тела), либо в

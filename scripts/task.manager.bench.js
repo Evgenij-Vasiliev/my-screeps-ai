@@ -139,7 +139,8 @@ async function run(field, body) {
     console.log(`\nхудшая очередь для индекса: ${R}/${T} = ${best} задач`);
     console.log(`крип: ${info.cn} (${RR}), задача ${info.tid} типа ${info.tt}\n`);
 
-    // Функция расстояния — та же логика, что rangeToNextStop (worker.runner.js:53-62).
+    // Функция расстояния — та же логика, что у ранжера воркера: makeRanger
+    // (task/runner.pick.js:104-155) считает дальность тем же способом.
     const RANGE =
       `const f=q=>{const id=c.store.getFreeCapacity()===0?(q.targetId||q.sourceId)` +
       `:(q.sourceId||q.targetId);const g=Game.getObjectById(id);` +

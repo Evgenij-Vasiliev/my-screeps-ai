@@ -243,7 +243,7 @@ async function main() {
     }
 
     /* ── 9. Сколько СЕЙЧАС стоит сборка damagedStructures по комнатам ─── */
-    // buildRoomState (room.manager.js:337-385) делает ровно это: резолвит id
+    // buildRoomState (room/repair.js:135,213) делает ровно это: резолвит id
     // групп и повреждённых дорог через Game.getObjectById и проверяет
     // hits < hitsMax. Из консоли вызвать buildRoomState нельзя (другой
     // JS-контекст), поэтому мерим эквивалентные операции на реальных id.
@@ -281,13 +281,15 @@ async function main() {
     /* ── 10. Цена перебора списка в генераторе repair-задач ───────────── */
     // Вопрос перед правкой сборки damagedStructures: сколько стоит её
     // ЕДИНСТВЕННЫЙ потребитель, который читает список не раз в 15 тиков, а
-    // каждый тик. Это generateRepairStructures (task.generators.js:362-383):
+    // каждый тик. Это generateRepairStructures (task/gen.repair.js:30-91):
     // перебор всех повреждённых (сейчас — 730 дорог), отсев по
-    // REPAIR_THRESHOLD_RATIO = 0.5 (:353, :368) и проверка дубля по targetId
-    // (:356, :377-379). Замер идёт на живых дорогах комнаты, дубли — из
+    // REPAIR_THRESHOLD_RATIO = 0.5 (:21 — константа, :96 — сравнение;
+    // вызовы на :46, :58, :73) и проверка дубля по targetId
+    // (:123). Замер идёт на живых дорогах комнаты, дубли — из
     // настоящей очереди Memory.rooms[room].tasks.repairStructures, ключ
     // считается как taskManager.taskKey по одному полю: String(targetId)+"\u0000"
-    // (task.manager.js:54-60, :356) — то есть значения те же, что у боевого кода.
+    // (task/queue.js:69-75 — taskKey, task/lifecycle.js:96 — free++) — то есть
+    // значения те же, что у боевого кода.
     const repairPass = JSON.parse(
       await evalInGame(
         "tw10",
@@ -369,11 +371,11 @@ async function main() {
     const sumDup = repairPass.reduce((a, x) => a + x[3], 0);
     const sumNumbers = +numbersPass.reduce((a, x) => a + x[4], 0).toFixed(5);
     console.log(
-      `— Сборка damagedStructures (эквивалент room.manager.js:371-385) по империи: ` +
+      `— Сборка damagedStructures (эквивалент room/repair.js:172) по империи: ` +
         `дороги ${sumRoads} + группы ${sumGroups} = ${(sumRoads + sumGroups).toFixed(5)} CPU/тик`,
     );
     console.log(
-      `— Перебор списка в генераторе repair-задач (task.generators.js:367-380) по империи: ` +
+      `— Перебор списка в генераторе repair-задач (task/gen.repair.js:46-60) по империи: ` +
         `${sumRepair} CPU/тик; ниже порога 50% — ${sumBelowHalf}, из них дублей ${sumDup}`,
     );
     console.log(

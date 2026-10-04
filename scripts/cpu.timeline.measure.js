@@ -4,12 +4,12 @@
  * SCRIPTS/CPU.TIMELINE.MEASURE.JS — «кардиограмма» CPU по тикам
  * ===================================================
  * Отвечает на вопрос «почему CPU скачет»: снимает с шарда ВРЕМЕННОЙ РЯД
- * боевых полей `Memory.cpuStats` (их пишет cpuMonitor.js:241 раз в
+ * боевых полей `Memory.cpuStats` (их пишет cpuMonitor.js:260 раз в
  * CPU.REPORT_INTERVAL = 10 тиков) вместе с `Game.time` и bucket.
  *
  * Почему это работает как по-тиковый замер:
  *   - `Memory.cpuStats.total` — сумма CPU по тикам ТЕКУЩЕГО окна
- *     (cpuMonitor.js:189, сброс на CPU.AVERAGE_WINDOW = 100, cpuMonitor.js:205);
+ *     (cpuMonitor.js:208 — накопитель total, cpuMonitor.js:224 — сброс на CPU.AVERAGE_WINDOW = 100);
  *   - `Memory.cpuStats.count` — сколько тиков в этом окне;
  *   - значит, между двумя соседними отчётами разность
  *     (total2 - total1) / (count2 - count1) — это средний CPU ЗА ТЕ 10 ТИКОВ,
@@ -17,8 +17,8 @@
  *   - отчёты приходятся ровно на тики `Game.time % 10 === 0`
  *     (cpuMonitor.js:210), поэтому серию можно разложить по фазе
  *     `t % 30`, `t % 20` и увидеть вклад периодических работ
- *     (ремонт башен — `TOWER.REPAIR_INTERVAL` = 15, constants.js:30;
- *      рынок — `MARKET.INTERVAL` = 10, constants.js:177).
+ *     (ремонт башен — `TOWER.REPAIR_INTERVAL` = 15, constants/defense.js:14;
+ *      рынок — `MARKET.INTERVAL` = 30, constants/market.js:25).
  *
  * Read-only: единственные записи — временные `Memory.keepTemp` и
  * `Memory.__bench_tl`, оба снимаются в finally. Игровых интентов нет:
@@ -131,7 +131,7 @@ async function probe() {
     if (QUIET) {
       // Опорный тик: три консольные команды на весь прогон (keepTemp, проба,
       // снятие keepTemp). Дальше — только чтение Memory через API.
-      // keepTemp нужен потому, что иначе уборка empire.js:30-37 удалит поле
+      // keepTemp нужен потому, что иначе уборка empire.js:32-39 удалит поле
       // пробы раньше, чем скрипт успеет его прочитать.
       await api.console("Memory.keepTemp = true", SHARD);
       await sleep(1200);

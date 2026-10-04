@@ -17,9 +17,16 @@
  * Screeps, в отличие от Node, циклический require не разрешает: он бросает
  * ошибку на этапе загрузки, то есть бот не работает вовсе.
  *
- * Что делает скрипт: строит граф модулей корня (те же файлы, что уезжают
- * на шард: SRC из scripts/deploy.modules.js) и ищет в нём циклы. Только
- * чтение файлов, никаких изменений и вызовов API.
+ * Что делает скрипт: строит граф модулей, которые уезжают на шард (список
+ * берётся у самого деплоя, listSourceFiles из scripts/deploy.modules.js:
+ * корневые *.js, constants/*.js, room/*.js и task/*.js), и ищет в нём циклы.
+ * Только чтение файлов, никаких изменений и вызовов API.
+ *
+ * Почему список берётся у деплоя, а не повторяется здесь: файл из подпапки
+ * уезжает под именем с путём ("constants/spawn"), и цикл ВНУТРИ constants/*
+ * виден в графе только тогда, когда эти файлы в графе есть. Пока здесь был
+ * readdirSync корня, такой цикл уезжал на шард незамеченным — а движок
+ * циклический require не разрешает и роняет загрузку всех модулей.
  *
  * Запуск:
  *   node scripts/check.require.cycles.js        # 0 — циклов нет, 1 — есть
@@ -28,6 +35,8 @@
 
 const fs = require("fs");
 const path = require("path");
+
+const { listSourceFiles } = require("./deploy.modules");
 
 const ROOT = path.join(__dirname, "..");
 
@@ -79,13 +88,13 @@ function resolveRequest(request, fromFile) {
   return fs.existsSync(withJs) ? withJs : null;
 }
 
-/** Все модули корня *.js (без Gruntfile, скриптов и токена — как SRC деплоя). */
+/**
+ * Файлы ровно в том составе, в каком они уедут на шард: SRC деплоя
+ * (корень, constants/*, room/*) минус EXCLUDE. Список берётся у самого
+ * деплоя, чтобы проверка циклов и выгрузка не разошлись.
+ */
 function listModules() {
-  const excluded = new Set(["Gruntfile.js", "screeps.token.js"]);
-  return fs
-    .readdirSync(ROOT)
-    .filter(f => f.endsWith(".js") && !excluded.has(f))
-    .map(f => path.join(ROOT, f));
+  return listSourceFiles(ROOT).map(rel => path.join(ROOT, rel));
 }
 
 /** Строит граф: file -> [files]. */
@@ -145,8 +154,9 @@ const files = listModules();
 const graph = buildGraph(files);
 const cycles = findCycles(graph);
 
+const inFolders = files.filter(f => moduleName(f).includes("/")).length;
 console.log(
-  `Модулей корня: ${files.length}, рёбер require: ${[...graph.values()].reduce(
+  `Модулей уезжает: ${files.length} (в подпапках: ${inFolders}), рёбер require: ${[...graph.values()].reduce(
     (a, d) => a + d.length,
     0,
   )}`,

@@ -12,7 +12,7 @@
  *   5) подробный режим по крипам выключен по умолчанию;
  *   6) сброс окна происходит на CPU.AVERAGE_WINDOW тиках;
  *   7) ВКЛЮЧЁННЫЙ verbose-режим действительно даёт разбивку ПО РОЛЯМ:
- *      trackRole(creep.memory.role, ...) (room.manager.js:68-71) суммирует
+ *      trackRole(creep.memory.role, ...) (room/creeps.js:79-81) суммирует
  *      время крипов одной роли и доводит его до Memory.cpuStats.subsystems.
  *   8) Шаг 7 «профилирование по требованию» (замер shard3 29.09.2026,
  *      scripts/profiling.measure.js): в дорогом тике замер не делается,
@@ -193,10 +193,22 @@ console.log("\n9. Гейт verbose в runCreepLogic: замер только п�
 // проверяем сам гейт по исходнику: обычная ветка не должна звать trackRole.
 const fs = require("fs");
 const path = require("path");
-const roomManagerSrc = fs.readFileSync(
-  path.join(__dirname, "..", "room.manager.js"),
-  "utf8",
-);
+// Читается ВЕСЬ слой комнаты (фасад + room/*.js, разбиение 04.10.2026):
+// runCreepLogic живёт в room/creeps.js, и по одному фасаду маркеров не найти —
+// проверка упала бы не по делу.
+const roomDir = path.join(__dirname, "..", "room");
+const roomManagerSrc = [path.join(__dirname, "..", "room.manager.js")]
+  .concat(
+    fs.existsSync(roomDir)
+      ? fs
+          .readdirSync(roomDir)
+          .filter(f => f.endsWith(".js"))
+          .sort()
+          .map(f => path.join(roomDir, f))
+      : [],
+  )
+  .map(p => fs.readFileSync(p, "utf8"))
+  .join("\n");
 const gateAt = roomManagerSrc.indexOf("verboseEnabled()");
 check("runCreepLogic читает флаг verbose один раз", gateAt > 0);
 const trackAt = roomManagerSrc.indexOf("trackRole(creep.memory.role");
@@ -214,7 +226,7 @@ console.log("\n10. Профилирование по требованию: це�
 // CPU.DETAIL_GATE_PCT (0.8 лимита) замер не делается ВООБЩЕ.
 //
 // Сигнал гейта — средний расход ПРОШЛОГО тика (g.average), а НЕ счётчик
-// начала тика: startTick вызван первой строкой loop (empire.js:12), где
+// начала тика: startTick вызван первой строкой loop (empire.js:14), где
 // getUsed() почти нулевой (docs/PROFILING-ON-DEMAND.md, раздел 4a).
 delete global.Memory.cpuStats;
 delete global.Memory.cpuMonitorVerbose;

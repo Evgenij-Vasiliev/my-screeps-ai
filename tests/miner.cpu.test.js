@@ -159,6 +159,13 @@ function makeWorld(o) {
       getPositionAt(x, y) {
         const at = bySpot[x + "," + y];
         return {
+          // x/y добавлены вместе с портом Traveler (04.10.2026): роль передаёт
+          // в creep.travelTo именно этот объект (в бою — RoomPosition), а мок
+          // travelTo ниже читает target.x/target.y. Без них цель движения
+          // становилась undefined, и симуляция перехода зацикливалась.
+          x,
+          y,
+          roomName: ROOM,
           findInRange(type) {
             if (!at) return [];
             if (type === FIND_SOURCES) return at.source ? [at.source] : [];
@@ -172,6 +179,14 @@ function makeWorld(o) {
     moveTo(x, y) {
       world.calls.moveTo++;
       world.target = { x, y };
+    },
+    // Порт Traveler (04.10.2026): майнер двигается через creep.travelTo
+    // (traveler.js, main.js). В тесте библиотеки нет, поэтому мок повторяет
+    // moveTo, а счётчик остаётся тем же (`calls.moveTo`) — проверки числа
+    // движений ниже считают интенты движения и не меняются.
+    travelTo(target) {
+      world.calls.moveTo++;
+      world.target = { x: target.x, y: target.y };
     },
     harvest(src) {
       world.calls.harvest++;

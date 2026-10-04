@@ -61,7 +61,7 @@ module.exports = function (grunt) {
         .then(() => {
           grunt.log.writeln(
             `Выгружено модулей: ${Object.keys(modules).length} ` +
-              `→ ветка "${BRANCH}" (пути сохранены: constants/*).`,
+              `→ ветка "${BRANCH}" (пути сохранены: constants/*, room/*).`,
           );
           done();
         })

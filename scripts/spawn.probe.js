@@ -14,9 +14,13 @@
  *     c1 — countRoles на списке крипов комнаты (spawn.manager.js:30);
  *     c2 — скелет раннего пути: find свободного спавна + обход SPAWN_QUOTA
  *          (spawn.manager.js:61-75), чистый JS, без обращений к Game;
- *     c3 — проход takenSpots по Game.creeps (creep.factory.js:71-87);
- *     c4 — JS фабрики без интента: имя + prepareBody(miner) + memory
- *          (creep.factory.js:220,152,234).
+ *     c3 — ИСТОРИЧЕСКИЙ ПАТТЕРН: проход по Game.creeps с чтением memory.spot.
+ *          Резервация спотов удалена 01.10.2026 (обоснование —
+ *          creep.factory.js:20-34), в текущем коде такого прохода НЕТ: цифра
+ *          годится только для сравнения со старым замером;
+ *     c4 — JS фабрики без интента: имя (creep.factory.js:115), сборка тела и
+ *          памяти (:116-130); prepareBody — creep.factory.js:9-18. Сам spawnCreep
+ *          (:132) не вызывается: интент стоил бы 0.2 CPU.
  *  3. Memory.cpuStats — что уже известно о spawnManager из самого бота
  *     (subsystems.spawnManager, average, creeps, count).
  *
@@ -128,7 +132,12 @@ const C2_EXPR = costExpr(
     `for(const role in C.SPAWN_QUOTA){const q=C.SPAWN_QUOTA[role];if(!q)continue;if((cnt[role]||0)>=q)continue;}`,
 );
 
-/** c3: проход takenSpots (creep.factory.js:74-86) по настоящему Game.creeps. */
+/**
+ * c3: ИСТОРИЧЕСКИЙ ПАТТЕРН — проход по Game.creeps с чтением memory.spot.
+ * Резервация спотов удалена 01.10.2026 (creep.factory.js:20-34): сейчас майнер
+ * берёт место сам, поля memory.spot в коде нет. Проба оставлена, чтобы цифру
+ * можно было сравнить со старым замером, а не как описание текущего кода.
+ */
 const C3_EXPR =
   `(()=>{const u=()=>Game.cpu.getUsed(),t=u();let hit=0;for(let i=0;i<50;i++){` +
   `for(const n in Game.creeps){const c=Game.creeps[n],m=c&&c.memory,sp=m&&m.spot;` +
@@ -182,11 +191,12 @@ const MIN_EXPR =
 /**
  * c5: ПОЛНЫЙ spawnManager.run на настоящих roomState, но с закрытыми квотами —
  * в creeps добавляются фиктивные крипы по всем ролям с квотой > 0
- * (linkWorker 1, miner 2, worker 2, mineralMiner 1 — constants.js:66-76).
+ * (linkWorker 1, miner 1, worker 1, mineralMiner 1 — constants/spawn.js:14-45).
  * Тогда цикл по квотам не доходит до creep.factory и интентов НЕ возникает:
  * замеряется «путь без спавна» — find + countRoles + обход квот с проверками.
- * Роли с квотой 0 (harvester, towerSupplier, repairer, builder, upgrader)
- * отсекаются первой же проверкой `if (!quota) continue`.
+ * Роли с квотой 0 отсекаются первой же проверкой `if (!quota) continue`.
+ * С 03.10.2026 таких ролей в SPAWN_QUOTA нет: builder, harvester, repairer,
+ * towerSupplier и upgrader удалены из кода вместе с модулями.
  */
 const C5_EXPR =
   `(()=>{const rm=require("room.manager"),sm=require("spawn.manager"),sts=[];` +

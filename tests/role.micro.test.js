@@ -7,9 +7,16 @@
  *   1) в ролях не осталось visualizePathStyle (визуализация дороже moveTo);
  *   2) все moveTo в ролях идут с reusePath — путь не пересчитывается каждый тик;
  *   3) role.mineralMiner не использует lodash и Object.keys(creep.store);
- *   4) memory.working пишется только при смене режима (нет лишних записей);
- *   5) empire.js не тянет неиспользуемую заглушку terminalNetwork;
- *   6) поведение ролей не изменилось: сбор энергии, ремонт, стройка, апгрейд.
+ *   4) empire.js подключает terminalNetwork (с 01.10.2026 — не заглушка);
+ *   5) шаг 3 плана: ленивый резолв целей в task.executors (контракт CONTINUE/
+ *      DONE/SKIP и кэш резолвов на тик);
+ *   6) шаг 4 плана: единая политика путей MOVE.
+ *
+ * Секции 5-7 прежней версии («role.upgrader: режимы», «role.builder: цель из
+ * roomState», «role.repairer: политика VOLATILE») удалены 03.10.2026 вместе с
+ * самими ролями (role.builder/harvester/repairer/towerSupplier/upgrader).
+ * Дисциплина записи в creep.memory проверяется механически —
+ * tests/rules.test.js, раздел 8.
  *
  * Запуск: node tests/role.micro.test.js
  */
@@ -105,86 +112,7 @@ function makeStore(free, used, energy) {
   };
 }
 
-function makeCreep(memory, store, extra) {
-  const moves = [];
-  const creep = Object.assign(
-    {
-      name: "c1",
-      memory,
-      store,
-      room: { name: "W1N1", storage: null, controller: { id: "ctrl1" } },
-      pos: {
-        getRangeTo: () => 1,
-        findClosestByRange: list => list[0],
-      },
-      moveTo: (t, opts) => {
-        moves.push({ t, opts });
-        return global.OK;
-      },
-      upgradeController: () => global.OK,
-      build: () => global.OK,
-      repair: () => global.OK,
-      harvest: () => global.OK,
-      transfer: () => global.OK,
-      withdraw: () => global.ERR_NOT_IN_RANGE,
-    },
-    extra || {},
-  );
-  creep._moves = moves;
-  return creep;
-}
-
-console.log("\n5. role.upgrader: режимы и отсутствие лишних записей");
-const roleUpgrader = require("../role.upgrader");
-const up = makeCreep({ working: false }, makeStore(0, 50, 50));
-// Полный склад -> должен перейти в режим улучшения
-roleUpgrader.run(up);
-check("working = true при полном складе", up.memory.working === true);
-const before = up.memory.working;
-// Повторный вызов не должен менять значение
-roleUpgrader.run(up);
-check("значение режима не дёргается", up.memory.working === before);
-
-const upEmpty = makeCreep({ working: true }, makeStore(50, 0, 0));
-roleUpgrader.run(upEmpty);
-check("working = false при пустом складе", upEmpty.memory.working === false);
-
-console.log("\n6. role.builder: цель из roomState, moveTo по политике MOVE");
-const { MOVE } = require("../constants");
-const roleBuilder = require("../role.builder");
-const site = { id: "site1", pos: { roomName: "W1N1" } };
-const builder = makeCreep({ working: true }, makeStore(0, 50, 50));
-builder.build = () => global.ERR_NOT_IN_RANGE;
-roleBuilder.run(builder, { roomName: "W1N1", constructionSites: [site] });
-check("строитель пошёл к площадке", builder._moves.length === 1);
-check(
-  "reusePath из политики (NORMAL)",
-  builder._moves[0] &&
-    builder._moves[0].opts &&
-    builder._moves[0].opts.reusePath === MOVE.NORMAL,
-  JSON.stringify(builder._moves[0] && builder._moves[0].opts),
-);
-
-console.log("\n7. role.repairer: цель меняется часто — политика VOLATILE");
-const roleRepairer = require("../role.repairer");
-const broken = { id: "road1", hits: 1, hitsMax: 100 };
-const repairer = makeCreep({ working: true }, makeStore(0, 50, 50));
-repairer.repair = () => global.ERR_NOT_IN_RANGE;
-roleRepairer.run(repairer, {
-  roomName: "W1N1",
-  damagedStructures: [broken],
-  constructionSites: [],
-});
-check("repairer пошёл к цели", repairer._moves.length === 1);
-check(
-  "reusePath из политики (VOLATILE)",
-  repairer._moves[0] &&
-    repairer._moves[0].opts &&
-    repairer._moves[0].opts.reusePath === MOVE.VOLATILE,
-  JSON.stringify(repairer._moves[0] && repairer._moves[0].opts),
-);
-
-console.log("\n8. Шаг 3: ленивый резолв целей в task.executors");
+console.log("\n5. Шаг 3: ленивый резолв целей в task.executors");
 // Задание «Шаг 3»: source резолвится только в ветке забора, мёртвые резолвы
 // (fillSpawnsExtensions/fillFactoryEnergy/fillTowers) убраны, повторные id
 // берутся из кэша на тик. Контракт CONTINUE/DONE/SKIP не меняется.
@@ -202,10 +130,18 @@ const executors = require("../task.executors");
  * вызовом той же копии.
  */
 function freshExecutors() {
-  const file = require.resolve("../task.executors");
-  delete require.cache[file];
+  // Кэш резолвов живёт в замыкании модуля. После разбиения 04.10.2026 это
+  // task/exec.common.js, а сам task.executors.js стал фасадом, поэтому одного
+  // сброса его кэша мало: «тик с нуля» получил бы прогретый кэш предыдущего
+  // случая. Сбрасываем require-кэш всего блока task/exec.*.
+  const files = [require.resolve("../task.executors")];
+  const dir = path.join(ROOT, "task");
+  for (const f of fs.readdirSync(dir)) {
+    if (f.startsWith("exec.") && f.endsWith(".js")) files.push(path.join(dir, f));
+  }
+  for (const f of files) delete require.cache[f];
   const mod = require("../task.executors");
-  delete require.cache[file];
+  for (const f of files) delete require.cache[f];
   return mod;
 }
 
@@ -255,19 +191,19 @@ function creepWithStore(energy, extra) {
 
 const fillTask = { type: "transfer", sourceId: "store1", targetId: "t1", resourceType: "energy" };
 
-// 8.1 — полный крип: резолв target один раз, source не резолвится вовсе.
+// 5.1 — полный крип: резолв target один раз, source не резолвится вовсе.
 resolveCalls.length = 0;
 const full = creepWithStore(50);
 const r81 = freshExecutors().executeFillSpawnsExtensions(full, fillTask);
-check("8.1 полный крип: результат CONTINUE", r81 === "CONTINUE", String(r81));
+check("5.1 полный крип: результат CONTINUE", r81 === "CONTINUE", String(r81));
 check(
-  "8.1 полный крип: ровно один resolveTarget (кэш на тик)",
+  "5.1 полный крип: ровно один resolveTarget (кэш на тик)",
   resolveCalls.length === 1,
   JSON.stringify(resolveCalls),
 );
-check("8.1 полный крип: резолвится только target", resolveCalls[0] === "t1", String(resolveCalls[0]));
+check("5.1 полный крип: резолвится только target", resolveCalls[0] === "t1", String(resolveCalls[0]));
 
-// 8.2 — пустой крип: source задачи не резолвится вообще, энергию берём из
+// 5.2 — пустой крип: source задачи не резолвится вообще, энергию берём из
 // creep.room.storage (energySource.withdrawFromStorage). Уточнение к «шагу 3»:
 // `source` в этих исполнителях — не цель забора, а приёмник обратного сброса и
 // цель withdraw в фазе выгрузки.
@@ -275,19 +211,19 @@ resolveCalls.length = 0;
 const exec82 = freshExecutors();
 exec82.executeFillSpawnsExtensions(creepWithStore(0), fillTask);
 check(
-  "8.2 пустой крип: резолвится только target",
+  "5.2 пустой крип: резолвится только target",
   resolveCalls.length === 1 && resolveCalls[0] === "t1",
   JSON.stringify(resolveCalls),
 );
 const firstPass = resolveCalls.length;
 exec82.executeFillSpawnsExtensions(creepWithStore(0), fillTask);
 check(
-  "8.2 повторный вызов в том же тике: из кэша, без новых резолвов",
+  "5.2 повторный вызов в том же тике: из кэша, без новых резолвов",
   resolveCalls.length === firstPass,
   `${firstPass} → ${resolveCalls.length}`,
 );
 
-// 8.2б — фаза выгрузки: source нужен, и повторный резолв берётся из кэша тика.
+// 5.2б — фаза выгрузки: source нужен, и повторный резолв берётся из кэша тика.
 resolveCalls.length = 0;
 const exec82b = freshExecutors();
 const workingTask = Object.assign({}, fillTask);
@@ -296,24 +232,24 @@ exec82b.executeFillTowers(workingCreep, workingTask);
 const afterFirst = resolveCalls.slice();
 exec82b.executeFillTowers(creepWithStore(50, { memory: { working: true } }), workingTask);
 check(
-  "8.2б фаза выгрузки: повторный вызов не резолвит target заново",
+  "5.2б фаза выгрузки: повторный вызов не резолвит target заново",
   afterFirst.length === 1 && resolveCalls.length === afterFirst.length,
   JSON.stringify(resolveCalls),
 );
 
-// 8.3 — мёртвые резолвы источников убраны из трёх исполнителей.
+// 5.3 — мёртвые резолвы источников убраны из трёх исполнителей.
 for (const name of ["executeFillFactoryEnergy", "executeFillTowers"]) {
   resolveCalls.length = 0;
   const mod = freshExecutors();
   mod[name](creepWithStore(50), fillTask);
   check(
-    `8.3 ${name}: source не резолвится у полного крипа`,
+    `5.3 ${name}: source не резолвится у полного крипа`,
     resolveCalls.indexOf("store1") === -1,
     JSON.stringify(resolveCalls),
   );
 }
 
-// 8.4 — контракт: исчезнувший target (null из Game.getObjectById) даёт SKIP.
+// 5.4 — контракт: исчезнувший target (null из Game.getObjectById) даёт SKIP.
 resolveCalls.length = 0;
 const r84 = freshExecutors().executeFillTowers(creepWithStore(0), {
   type: "transfer",
@@ -321,9 +257,9 @@ const r84 = freshExecutors().executeFillTowers(creepWithStore(0), {
   targetId: "gone",
   resourceType: "energy",
 });
-check("8.4 нет цели: SKIP", r84 === "SKIP", String(r84));
+check("5.4 нет цели: SKIP", r84 === "SKIP", String(r84));
 
-// 8.5 — кэш живёт один тик и не тащит объекты в следующий.
+// 5.5 — кэш живёт один тик и не тащит объекты в следующий.
 global.Game.time = 500;
 resolveCalls.length = 0;
 const exec85 = freshExecutors();
@@ -332,16 +268,26 @@ const tick500 = resolveCalls.length;
 global.Game.time = 501;
 exec85.executeFillSpawnsExtensions(creepWithStore(50), fillTask);
 check(
-  "8.5 новый тик: цель резолвится заново (кэш сброшен по Game.time)",
+  "5.5 новый тик: цель резолвится заново (кэш сброшен по Game.time)",
   tick500 === 1 && resolveCalls.length === 2,
   `тик 500: ${tick500}, всего: ${resolveCalls.length}`,
 );
-check("8.5 объекты из кэша не пишутся в Memory крипа", full.memory.working === undefined);
+check("5.5 объекты из кэша не пишутся в Memory крипа", full.memory.working === undefined);
 
-console.log("\n9. Шаг 4: единая политика путей MOVE");
-// Задание «Шаг 4»: значения reusePath берутся из словаря MOVE в constants.js,
-// «магических чисел» 5/10/15/20/50 в вызовах moveTo быть не должно.
-// MOVE уже подключён в разделе 6.
+console.log("\n6. Шаг 4: единая политика путей MOVE → порт Traveler");
+// История: задание «Шаг 4» вводило словарь MOVE и требовало, чтобы каждый
+// вызов moveTo задавал reusePath из него, а «магических чисел» 5/10/15/20/50
+// в вызовах не было.
+//
+// 04.10.2026 всё движение переведено на библиотеку Traveler (traveler.js,
+// подключается в main.js): вызовов `creep.moveTo` в рантайме не осталось вовсе,
+// а путь Traveler держит сам в `creep.memory._travel` по пункту назначения.
+// Поэтому проверка «у каждого moveTo есть reusePath из MOVE» стала пустой и
+// заменена на инвариант самого порта: движения — только через travelTo.
+// Словарь MOVE при этом НЕ удалён: он остаётся частью публичного API
+// `constants.js` (объявлен в `constants/system.js:65-70`, значения
+// ниже проверяются), но в рантайме больше не используется.
+const { MOVE } = require("../constants");
 const POLICY_VALUES = [MOVE.STABLE, MOVE.NORMAL, MOVE.VOLATILE, MOVE.OFF];
 
 check("STABLE = 50", MOVE.STABLE === 50, String(MOVE.STABLE));
@@ -352,6 +298,11 @@ check(
   "политика — строго убывающая по стабильности цели",
   MOVE.STABLE > MOVE.NORMAL && MOVE.NORMAL > MOVE.VOLATILE && MOVE.VOLATILE > MOVE.OFF,
 );
+check(
+  "словарь MOVE объявлен и уникален",
+  new Set(POLICY_VALUES).size === POLICY_VALUES.length,
+  POLICY_VALUES.join(","),
+);
 
 const RUNTIME = fs
   .readdirSync(ROOT)
@@ -360,16 +311,23 @@ const RUNTIME = fs
 
 const literalReuse = [];
 const offPolicy = [];
-const callSites = [];
+const moveSites = [];
+const travelSites = [];
 for (const f of RUNTIME) {
   const src = fs.readFileSync(path.join(ROOT, f), "utf8").replace(/^\s*\/\/.*$/gm, "");
+
+  // Остаточные moveTo с reusePath: политика MOVE всё ещё должна соблюдаться там,
+  // где такой вызов когда-нибудь появится (проверка «не меньше 0» ловит
+  // числовые литералы и чужие значения, а не количество).
   const re = /moveTo\([\s\S]{0,200}?reusePath:\s*([^,}\s]+)/g;
   let m;
   while ((m = re.exec(src))) {
-    callSites.push(f);
     if (/^[0-9]/.test(m[1])) literalReuse.push(`${f}: ${m[1]}`);
     if (!/^MOVE\./.test(m[1])) offPolicy.push(`${f}: ${m[1]}`);
   }
+
+  if (/creep\.moveTo\(/.test(src)) moveSites.push(`${f} (без reusePath!)`);
+  if (/creep\.travelTo\(/.test(src)) travelSites.push(f);
 }
 check(
   "в moveTo нет числовых reusePath",
@@ -382,16 +340,36 @@ check(
   offPolicy.join(", "),
 );
 check(
-  "политика покрывает все вызовы moveTo с reusePath (не меньше 30)",
-  callSites.length >= 30,
-  String(callSites.length),
+  "вызовов creep.moveTo в рантайме не осталось (движение ведёт Traveler)",
+  moveSites.length === 0,
+  moveSites.join(", "),
+);
+check(
+  "creep.travelTo используется (защита от ложной зелени: иначе порт откатили)",
+  travelSites.length >= 6,
+  `${travelSites.length}: ${travelSites.join(",")}`,
 );
 
 const constantsSrc = fs.readFileSync(path.join(ROOT, "constants.js"), "utf8");
-check("MOVE экспортируется из constants.js", /^\s*MOVE,$/m.test(constantsSrc));
+check(
+  "MOVE экспортируется из constants.js",
+  // Баррель отдаёт MOVE из constants/system.js (разбиение 04.10.2026):
+  // проверяется публичный API, а не место объявления.
+  /^\s*MOVE: [A-Za-z0-9_$]+\.MOVE,$/m.test(constantsSrc),
+);
 check(
   "файлы, использующие MOVE, импортируют его из constants",
-  RUNTIME.filter(f => /MOVE\./.test(fs.readFileSync(path.join(ROOT, f), "utf8"))).every(f =>
+  // Перед поиском вырезаются И блочные, И строчные комментарии: после порта
+  // Traveler упоминания MOVE остались только в пояснениях (boost.manager,
+  // lab.worker, task.executors), и проверка без этого ловила бы текст, а не код.
+  RUNTIME.filter(f =>
+    /MOVE\./.test(
+      fs
+        .readFileSync(path.join(ROOT, f), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, ""),
+    ),
+  ).every(f =>
     /const \{[^}]*MOVE[^}]*\} = require\("(\.\/)?constants"\)/.test(
       fs.readFileSync(path.join(ROOT, f), "utf8"),
     ),

@@ -356,7 +356,7 @@ const GROUP_ORDER = ["ENERGY", "BATTERY", "MINERALS", "COMPOUNDS"];
  * излишком и уходит на рынок. Для лаб это неверно: терминал — ЕДИНСТВЕННЫЙ
  * буфер, из которого lab.worker добирает реагенты (лабы их не производят).
  * Живой пример из замера: в терминале E35S39 лежало KO 15630 при
- * TERMINAL_SUPPLY.COMPOUND_MAX = 10000 (constants.js:20) — то есть 5630 единиц
+ * TERMINAL_SUPPLY.COMPOUND_MAX = 10000 (constants/logistics.js:21) — то есть 5630 единиц
  * формально «излишек», хотя терминал обслуживает тройки всей комнаты.
  *
  * Что защищено:
@@ -509,7 +509,7 @@ function run() {
   // ── Внутритиковый гейт (Шаг 8 плана): бюджет тика исчерпан → не начинаем ─
   // Рынок — самая дорогая необязательная подсистема (`getAllOrders` 0.16–0.89
   // CPU за вызов, docs/CPU-BASELINE.md:76-79) и исполняется ПОСЛЕДНЕЙ в тике
-  // (empire.js:50), поэтому эта проверка видит наибольший `getUsed()` за тик.
+  // (empire.js:80), поэтому эта проверка видит наибольший `getUsed()` за тик.
   // Порог — доля лимита из loadShed (default 0.8, настраивается Memory.
   // loadShedBudgetRatio); без Game.cpu overBudget() возвращает false, то есть
   // офлайн-тест и симулятор работают как раньше.
@@ -609,7 +609,7 @@ function run() {
  * `Game.market.calcTransactionCost(amount, fromRoomName, toRoomName)`.
  *
  * Зачем обёртка, а не прямой вызов на месте: правило проекта
- * (tests/rules.test.js:225-227) требует, чтобы `Game.market` встречался
+ * (tests/rules.test.js:258-260) требует, чтобы `Game.market` встречался
  * ТОЛЬКО в этом файле. terminalNetwork (terminalNetwork.fitSendAmount)
  * считает этой функцией комиссию каждой отправки, поэтому вызов идёт сюда.
  *

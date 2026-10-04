@@ -327,7 +327,7 @@ check("порог 100 из консоли → рынок работает как
 delete global.Memory.loadShedBudgetRatio;
 
 console.log("\n17. Гейт подключён в точках использования (механически)");
-// Приём тот же, что в tests/rules.test.js:55-61: комментарии и строковые
+// Приём тот же, что в tests/rules.test.js:103-108: комментарии и строковые
 // литералы убираются, чтобы проверка не срабатывала на текст.
 function stripComments(text) {
   return text
@@ -335,11 +335,32 @@ function stripComments(text) {
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
 }
-const roomSrc = stripComments(
-  fs.readFileSync(path.join(__dirname, "..", "room.manager.js"), "utf8"),
-);
+/**
+ * Слой комнаты целиком: фасад room.manager.js и каталог room/*.js (разбиение
+ * 04.10.2026). Проверка идёт по слою, а не по одному файлу: гейт фабрики и
+ * powerSpawn переехал в room/run.js, и проверка одного фасада стала бы
+ * ложно-зелёной (в фасаде нет этого кода — значит и нарушения нет).
+ */
+const roomLayer = (() => {
+  const root = path.join(__dirname, "..");
+  const dir = path.join(root, "room");
+  const files = ["room.manager.js"].concat(
+    fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter(f => f.endsWith(".js")).sort().map(f => path.join("room", f))
+      : [],
+  );
+  return files.map(rel => stripComments(fs.readFileSync(path.join(root, rel), "utf8"))).join("\n");
+})();
+const roomSrc = roomLayer;
 const marketSrc = stripComments(
   fs.readFileSync(path.join(__dirname, "..", "market.manager.js"), "utf8"),
+);
+// Страховка от ложной зелени: если слой прочитан не полностью (каталог room/
+// не найден, файлы переименованы), проверка «нет своего порога CPU» ниже
+// пройдёт на пустой строке и ничего не проверит.
+check(
+  "слой комнаты прочитан целиком",
+  /runRoom/.test(roomSrc) && /shedHard/.test(roomSrc) && /pickRepairTarget/.test(roomSrc),
 );
 check(
   "room.manager: фабрика и powerSpawn за гейтом",
