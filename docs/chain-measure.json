@@ -1,25 +1,14 @@
 {
-  "measuredAt": "2026-10-03T13:20:58.871Z",
+  "measuredAt": "2026-10-05T11:04:09.620Z",
   "shard": "shard3",
   "workers": 5,
-  "workersWithTask": 3,
-  "workersWithoutTask": 2,
+  "workersWithTask": 4,
+  "workersWithoutTask": 1,
   "scanLimit": 8,
   "resolvesLower": 0,
   "resolvesUpper": 0,
   "queues": {
-    "E35S37": {
-      "fillSpawnsExtensions": {
-        "total": 8,
-        "reserved": 1,
-        "free": 7
-      },
-      "fillTerminalEnergy": {
-        "total": 1,
-        "reserved": 0,
-        "free": 1
-      }
-    },
+    "E35S37": {},
     "E35S39": {
       "fillTerminalEnergy": {
         "total": 1,
@@ -32,6 +21,18 @@
         "free": 4
       },
       "repairStructures": {
+        "total": 4,
+        "reserved": 1,
+        "free": 3
+      },
+      "fillTowers": {
+        "total": 2,
+        "reserved": 0,
+        "free": 2
+      }
+    },
+    "E37S37": {
+      "fillSpawnsExtensions": {
         "total": 3,
         "reserved": 1,
         "free": 2
@@ -42,7 +43,6 @@
         "free": 1
       }
     },
-    "E37S37": {},
     "E37S38": {
       "fillTerminalEnergy": {
         "total": 1,
@@ -50,50 +50,81 @@
         "free": 1
       },
       "repairStructures": {
-        "total": 3,
+        "total": 2,
         "reserved": 1,
-        "free": 2
+        "free": 1
+      },
+      "fillSpawnsExtensions": {
+        "total": 4,
+        "reserved": 0,
+        "free": 4
+      },
+      "fillTowers": {
+        "total": 1,
+        "reserved": 0,
+        "free": 1
       }
     },
-    "E36S38": {},
+    "E36S38": {
+      "fillTerminalEnergy": {
+        "total": 1,
+        "reserved": 0,
+        "free": 1
+      },
+      "repairStructures": {
+        "total": 1,
+        "reserved": 1,
+        "free": 0
+      },
+      "fillSpawnsExtensions": {
+        "total": 4,
+        "reserved": 0,
+        "free": 4
+      },
+      "fillTowers": {
+        "total": 1,
+        "reserved": 0,
+        "free": 1
+      }
+    },
     "E35S38": {},
     "E36S37": {}
   },
   "workerList": [
     {
-      "name": "worker_E35S37_83399912",
+      "name": "worker_E35S37_83442935",
       "homeRoom": "E35S37",
-      "taskIndex": 0,
-      "taskId": "task_218417",
-      "working": false
-    },
-    {
-      "name": "worker_E35S39_83400011",
-      "homeRoom": "E35S39",
-      "taskIndex": 7,
-      "taskId": "task_218330",
-      "working": true
-    },
-    {
-      "name": "worker_E36S38_83400019",
-      "homeRoom": "E36S38",
-      "taskIndex": 7,
-      "taskId": null,
-      "working": false
-    },
-    {
-      "name": "worker_E37S38_83400027",
-      "homeRoom": "E37S38",
-      "taskIndex": 7,
-      "taskId": "task_218463",
-      "working": true
-    },
-    {
-      "name": "worker_E37S37_83400028",
-      "homeRoom": "E37S37",
       "taskIndex": 9,
       "taskId": null,
       "working": false
+    },
+    {
+      "name": "worker_E36S38_83443028",
+      "homeRoom": "E36S38",
+      "taskIndex": 7,
+      "taskId": "task_226668",
+      "working": true
+    },
+    {
+      "name": "worker_E37S37_83443038",
+      "homeRoom": "E37S37",
+      "taskIndex": 0,
+      "taskId": "task_226665",
+      "working": false
+    },
+    {
+      "name": "worker_E35S39_83443039",
+      "homeRoom": "E35S39",
+      "taskIndex": 7,
+      "taskId": "task_226531",
+      "working": true
+    },
+    {
+      "name": "worker_E37S38_83443046",
+      "homeRoom": "E37S38",
+      "taskIndex": 7,
+      "taskId": "task_226673",
+      "working": true
     }
   ]
 }

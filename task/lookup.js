@@ -57,12 +57,23 @@ function freeTasks(roomName, taskType) {
  * (пустой — к sourceId, гружёный — к targetId) живёт в worker.runner.js,
  * менеджер о ней не знает.
  *
+ * `preferAdjacent` (пункт 8 плана — цепочка дорог): свободная задача ВПЛОТНУЮ к
+ * воркеру (`rangeFn(task) <= NEAREST_STOP_RANGE`, то есть соседняя клетка)
+ * берётся сразу, а окно поиска расширяется на всю очередь. Зачем расширять:
+ * NEAREST_SCAN_LIMIT = 8 кандидатов, и соседняя дорога, стоящая в очереди
+ * девятым номером, при обычном поиске не находится вовсе — воркер едет через
+ * комнату, хотя ремонт вплотную. Цена расширения — один резолв на кандидата
+ * (0.000094–0.000141 CPU, docs/resolve-measure.json), причём ранжер воркера
+ * мемоизирует его на тик, а обход прекращается на первой же задаче вплотную.
+ * Если задачи вплотную нет, поведение прежнее: ближайшая из окна лимита.
+ *
  * @param {string} roomName
  * @param {string} taskType
  * @param {Function} [rangeFn]
+ * @param {boolean} [preferAdjacent]
  * @returns {Object|null}
  */
-function getNextTask(roomName, taskType, rangeFn) {
+function getNextTask(roomName, taskType, rangeFn, preferAdjacent) {
   const entry = getQueueEntry(roomName, taskType);
   const queue = entry.queue;
 
@@ -77,7 +88,10 @@ function getNextTask(roomName, taskType, rangeFn) {
   // лежат рядом, поэтому в типичном случае цикл заканчивается сразу.
   const len = queue.length;
   const nearest = typeof rangeFn === "function";
-  const limit = nearest ? TASK_CONFIG.NEAREST_SCAN_LIMIT : Infinity;
+  const chain = nearest && preferAdjacent === true;
+  // Цепочка требует пройти очередь целиком: соседняя дорога может стоять в
+  // любом месте. Обрыв — только на найденной задаче вплотную (ниже).
+  const limit = nearest && !chain ? TASK_CONFIG.NEAREST_SCAN_LIMIT : Infinity;
 
   let best = null;
   let bestIndex = -1;
@@ -101,6 +115,12 @@ function getNextTask(roomName, taskType, rangeFn) {
 
     const range = rangeFn(task);
 
+    // Цепочка (пункт 8): задача вплотную — берём её, не дочитывая очередь.
+    if (chain && range <= TASK_CONFIG.NEAREST_STOP_RANGE) {
+      entry.hint = i;
+      return task;
+    }
+
     if (bestIndex === -1 || range < bestRange) {
       best = task;
       bestIndex = i;
@@ -110,6 +130,8 @@ function getNextTask(roomName, taskType, rangeFn) {
     checked++;
 
     // Ближе некуда (или лимит просмотра исчерпан) — дальше искать незачем.
+    // При цепочке лимит бесконечен, а «ближе некуда» обработано выше, поэтому
+    // цикл идёт до конца очереди и запоминает ближайшую как запасной вариант.
     if (bestRange <= TASK_CONFIG.NEAREST_STOP_RANGE || checked >= limit) break;
   }
 

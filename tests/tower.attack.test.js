@@ -78,7 +78,13 @@ const RAMPART_COUNT = 80;
 /* ── Тик ремонта башен — СВОЙ у каждой комнаты (room.manager.isTowerRepairTick) ──
  * Условие `(Game.time + фаза) % TOWER.REPAIR_INTERVAL === 0`, фаза — хэш имени
  * комнаты. Тест считает тики от фазы, иначе он проверял бы прежнее, общее для
- * всей империи условие `Game.time % 15 === 0`. */
+ * всей империи условие `Game.time % 15 === 0`.
+ *
+ * Правка пункта 1 плана (docs/REPAIR-PLAN.md:158): REPAIR_INTERVAL = 1, то есть
+ * ремонт идёт КАЖДЫЙ тик. Тогда фаза вырождается (`x % 1 === 0`) и тика БЕЗ
+ * ремонта не существует вовсе. Тест поддерживает оба режима: EVERY_TICK_REPAIR
+ * меняет только те ожидания, которые зависят от наличия неремонтного тика. */
+const EVERY_TICK_REPAIR = TOWER.REPAIR_INTERVAL === 1;
 const PHASE = scanner.rebuildStagger("W1N1") % TOWER.REPAIR_INTERVAL;
 function isRepairTick(t) {
   return (t + PHASE) % TOWER.REPAIR_INTERVAL === 0;
@@ -89,16 +95,18 @@ function repairTick(from) {
   while (!isRepairTick(t)) t++;
   return t;
 }
-/** Тик, который НЕ тик ремонта и НЕ тик проверки атаки (не кратен 100). */
+/** Тик БЕЗ ремонта (существует только при интервале > 1) и без проверки атаки. */
 function plainTick(from) {
   let t = from;
-  while (isRepairTick(t) || t % TOWER.HOSTILE_CHECK_INTERVAL === 0) t++;
+  // При REPAIR_INTERVAL = 1 неремонтных тиков нет: без этой оговорки цикл
+  // не завершился бы никогда (isRepairTick истинно на каждом тике).
+  while ((!EVERY_TICK_REPAIR && isRepairTick(t)) || t % TOWER.HOSTILE_CHECK_INTERVAL === 0) t++;
   return t;
 }
-/** Тик проверки атаки (кратный 100), который при этом НЕ тик ремонта. */
+/** Тик проверки атаки (кратный 100); при интервале > 1 — ещё и без ремонта. */
 function hostileCheckTick(from) {
   let t = from;
-  while (t % TOWER.HOSTILE_CHECK_INTERVAL !== 0 || isRepairTick(t)) t++;
+  while (t % TOWER.HOSTILE_CHECK_INTERVAL !== 0 || (!EVERY_TICK_REPAIR && isRepairTick(t))) t++;
   return t;
 }
 const CHECK_TICK = hostileCheckTick(TOWER.HOSTILE_CHECK_INTERVAL * 3);
@@ -108,6 +116,9 @@ let wallLookups = 0;
 let rampartLookups = 0;
 let hostileFinds = 0;
 let hitsReads = 0;
+/** Чтения hits раздельно: стены и валы — разные статьи расхода. */
+let wallHitsReads = 0;
+let rampartHitsReads = 0;
 let hostiles = [];
 
 const wallObjects = {};
@@ -126,6 +137,8 @@ for (let i = 0; i < WALL_COUNT + RAMPART_COUNT; i++) {
   Object.defineProperty(obj, "hits", {
     get() {
       hitsReads++;
+      if (isWall) wallHitsReads++;
+      else rampartHitsReads++;
       return obj._hits;
     },
   });
@@ -256,16 +269,38 @@ function buildState() {
   return roomManager.buildRoomState(room, [], []);
 }
 
-console.log("1. Обычный тик: стены не резолвятся, hits не читаются");
+console.log("1. Обычный тик: стены не резолвятся");
 idLookups = 0;
 wallLookups = 0;
 rampartLookups = 0;
 hitsReads = 0;
+wallHitsReads = 0;
+rampartHitsReads = 0;
 hostileFinds = 0;
-global.Game.time = plainTick(1001); // не тик ремонта и не тик проверки атаки
+global.Game.time = plainTick(1001); // не тик проверки атаки; тик ремонта — если интервал 1
 roomManager.runTowerLogic(buildState());
-check("Game.getObjectById по стенам не вызывался", idLookups === 0, String(idLookups));
-check("hits стен не читались", hitsReads === 0, String(hitsReads));
+check(
+  "Game.getObjectById по стенам не вызывался",
+  wallLookups === 0,
+  `стены ${wallLookups}, валы ${rampartLookups}`,
+);
+if (EVERY_TICK_REPAIR) {
+  // При интервале 1 этот тик — тик ремонта, поэтому валы резолвятся и их hits
+  // читаются (pickRepairTarget). Это ожидаемая цена правки
+  // (docs/REPAIR-PLAN.md:158), а не регресс; важно, что СТЕН в проходе нет.
+  check(
+    "резолвятся только валы (цель ремонта), и ровно один раз",
+    idLookups === rampartLookups && rampartLookups === RAMPART_COUNT,
+    `id ${idLookups}, валы ${rampartLookups}`,
+  );
+  check(
+    "hits читаются только у валов, у стен — нет",
+    wallHitsReads === 0 && rampartHitsReads >= RAMPART_COUNT,
+    `стены ${wallHitsReads}, валы ${rampartHitsReads}`,
+  );
+} else {
+  check("hits стен не читались", hitsReads === 0, String(hitsReads));
+}
 check(
   "враждебные ищутся дешёвым room.find",
   hostileFinds === 1,
@@ -308,10 +343,22 @@ idLookups = 0;
 roomManager.runTowerLogic(buildState());
 check("обход hits выполнен на тике проверки", hitsReads > 0, String(hitsReads));
 
-global.Game.time = plainTick(CHECK_TICK + 1); // не тик проверки
+global.Game.time = plainTick(CHECK_TICK + 1); // не тик проверки атаки
 hitsReads = 0;
+wallHitsReads = 0;
+rampartHitsReads = 0;
 roomManager.runTowerLogic(buildState());
-check("на обычном тике обхода hits нет", hitsReads === 0, String(hitsReads));
+// Обхода СТЕН нет ни в одном режиме. При интервале 1 этот тик — ещё и тик
+// ремонта, поэтому читаются hits валов (цель ремонта в этом стенде).
+check(
+  EVERY_TICK_REPAIR
+    ? "тик ремонта: hits валов читаются, стен — нет"
+    : "на обычном тике обхода hits нет",
+  EVERY_TICK_REPAIR
+    ? rampartHitsReads >= RAMPART_COUNT && wallHitsReads === 0
+    : hitsReads === 0,
+  `стены ${wallHitsReads}, валы ${rampartHitsReads}`,
+);
 
 console.log("\n4. Атака обнаруживается сразу по крипам");
 hostiles = [{ id: "h1", hits: 100, hitsMax: 100 }];
@@ -343,13 +390,16 @@ check(
   String(Memory.rooms.W1N1.underAttack),
 );
 
-console.log("\n7. Фаза ремонта башен: у каждой комнаты свой тик");
+console.log("\n7. Тик ремонта башен");
 // Правка 29.09.2026: условие ремонта стало ПОКОМНАТНЫМ
 // ((Game.time + фаза имени комнаты) % TOWER.REPAIR_INTERVAL === 0).
 // Раньше все 16 башен империи били в один тик — 4.5031 CPU в этом тике.
+// Правка пункта 1 плана (docs/REPAIR-PLAN.md:158): интервал 1 — ремонт идёт
+// каждый тик, фазовый разнос вырождается (см. EVERY_TICK_REPAIR выше).
 const REAL_ROOMS = ["E35S37", "E35S39", "E37S37", "E37S38", "E36S38"];
 
 // (а) В любом окне TOWER.REPAIR_INTERVAL тиков у комнаты ровно один тик ремонта.
+//     При интервале 1 окно — это один тик, и он же тик ремонта.
 let exactlyOne = true;
 for (const name of REAL_ROOMS) {
   for (let from = 1000; from < 1000 + TOWER.REPAIR_INTERVAL; from++) {
@@ -361,19 +411,28 @@ for (const name of REAL_ROOMS) {
     if (n !== 1) exactlyOne = false;
   }
 }
-check("в любом окне 15 тиков у комнаты ровно один тик ремонта", exactlyOne);
+check(
+  `в любом окне ${TOWER.REPAIR_INTERVAL} тиков у комнаты ровно один тик ремонта`,
+  exactlyOne,
+);
 
-// (б) Комнаты ремонтируют в РАЗНЫЕ тики: в одном тике — не все пять.
+// (б) При интервале > 1 комнаты ремонтируют в РАЗНЫЕ тики (разнос фазой);
+//     при интервале 1 разноса нет по построению — ремонтируют все комнаты.
 global.Game.time = 1015;
 const repairing = REAL_ROOMS.filter(n => roomManager.isTowerRepairTick(n));
 check(
-  "в одном тике ремонтируют не все комнаты империи",
-  repairing.length < REAL_ROOMS.length,
+  EVERY_TICK_REPAIR
+    ? "при интервале 1 ремонтируют все комнаты (разнос фазой вырожден)"
+    : "в одном тике ремонтируют не все комнаты империи",
+  EVERY_TICK_REPAIR
+    ? repairing.length === REAL_ROOMS.length
+    : repairing.length < REAL_ROOMS.length,
   `ремонтируют ${repairing.length} из ${REAL_ROOMS.length}`,
 );
 
-// (в) Поведение башни не изменилось: за 15 тиков ровно один ремонт,
-//     и бьёт только ОДНА башня — ближайшая к цели.
+// (в) Поведение башни не изменилось: за окно TOWER.REPAIR_INTERVAL тиков ровно
+//     один ремонт (окно начинается с тика ремонта, поэтому при интервале 1 это
+//     ровно один тик), и бьёт только ОДНА башня — ближайшая к цели.
 const cache7 = global.__structureCache.W1N1;
 cache7.towerIds = ["t1", "t2"];
 towerRepairs = 0;
@@ -383,7 +442,7 @@ for (let k = 0; k < TOWER.REPAIR_INTERVAL; k++) {
   roomManager.runTowerLogic(buildState());
 }
 check(
-  "за 15 тиков башня ремонтировала ровно один раз",
+  `за ${TOWER.REPAIR_INTERVAL} тиков башня ремонтировала ровно один раз`,
   towerRepairs === 1,
   String(towerRepairs),
 );
@@ -394,18 +453,21 @@ check(
 );
 
 console.log("\n8. Цель ремонта: доля потерянных хитов, а не абсолют");
-// Вал почти цел (0.1 % потерь), дорога повреждена на 40 % — цель дорога.
-// Абсолютный дефицит у вала при этом в 500 раз больше (1000 против 2000 хитов
-// у дороги): именно поэтому правило считает ДОЛЮ, а не абсолют.
+// Вал почти цел (0.1 % потерь), дорога повреждена на 60 % — цель дорога.
+// Абсолютный дефицит у вала при этом БОЛЬШЕ (1 000 против 3 000 хитов у дороги
+// по доле, но 1 000 у вала против 3 000 у дороги — оба ≥ действия башни):
+// именно поэтому правило считает ДОЛЮ, а не абсолют.
 const cache8 = global.__structureCache.W1N1;
 // Все валы комнаты — почти целые (0.1 % потерь): иначе именно они выиграли бы
 // у дороги по доле, ведь в стенде у них hits 1000 из 1000000.
 for (const id in wallObjects) {
   if (wallObjects[id].structureType === "rampart") wallObjects[id]._hits = 999000;
 }
-roadObjects["road1"] = { id: "road1", hits: 3000, hitsMax: 5000 }; // 40 % потерь
+// 2 000 из 5 000 — НИЖЕ линии синхронизации с воркером (REPAIR.ROAD_DONE_HITS
+// = 3 000, constants/defense.js), поэтому дорога вообще может стать целью.
+roadObjects["road1"] = { id: "road1", hits: 2000, hitsMax: 5000 }; // 60 % потерь
 cache8.damagedRoadIds = ["road1"];
-cache8.damagedRoadHits[0] = 3000;
+cache8.damagedRoadHits[0] = 2000;
 cache8.damagedRoadHitsMax[0] = 5000;
 
 towerRepairs = 0;
@@ -420,8 +482,25 @@ global.Game.time = repairTick(1100);
 roomManager.runTowerLogic(buildState());
 check("цель — повреждённая дорога, а не почти целый вал", repairedTargetId === "road1", String(repairedTargetId));
 
-// Цель с дефицитом меньше одного действия (4500/5000 = 500 < 800) не чинится:
-// движок обрезал бы хиты по hitsMax, и 10 энергии ушли бы в 1 хит.
+// СИНХРОНИЗАЦИЯ С ВОРКЕРОМ: дорога на линии «отремонтировано» (3 000) и выше
+// целью башни не становится — это ровно тот порог, на котором воркер закрывает
+// задачу (task/exec.repair.js, isDoneRepair). Без него башня гнала болотную
+// дорогу (25 000) до максимума, пока воркер считал её сделанной.
+roadObjects["road1"].hits = 3000;
+cache8.damagedRoadHits[0] = 3000;
+towerRepairs = 0;
+repairedTargetId = null;
+global.Game.time = repairTick(1110);
+roomManager.runTowerLogic(buildState());
+check(
+  "дорога на линии 3 000 целью башни не становится",
+  repairedTargetId !== "road1",
+  String(repairedTargetId),
+);
+
+// Дефицит меньше одного действия не чинится: движок обрезал бы хиты по
+// hitsMax, и 10 энергии ушли бы в 1 хит. На дороге это правило теперь не
+// проверить (её отсекает линия синхронизации), поэтому проверяем на ВАЛАХ.
 roadObjects["road1"].hits = 4500;
 cache8.damagedRoadHits[0] = 4500;
 for (const id in wallObjects) {

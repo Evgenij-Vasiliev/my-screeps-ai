@@ -300,8 +300,10 @@ console.log("\n6. Вариант B: числа из кэша вместо рез
 const statsCache = Object.assign({}, cache, {
   damagedRoadIds: ["road1", "road2"],
   damagedRoadHits: Int32Array.from([100, 1000]),
-  // road1 повреждена (100 < 1000) и ниже порога 50 %; road2 целая.
-  damagedRoadHitsMax: Int32Array.from([1000, 1000]),
+  // road1 повреждена (100 < 5000) и ниже порога постановки задачи, а у дорог
+  // он АБСОЛЮТНЫЙ — 2 000 хитов (REPAIR.ROAD_TASK_HITS, constants/defense.js:64), а не
+  // доля от максимума; road2 целая.
+  damagedRoadHitsMax: Int32Array.from([5000, 1000]),
   damagedRoadCount: 2,
 });
 global.__structureCache.W1N1 = statsCache;
@@ -314,7 +316,7 @@ check(
 );
 check(
   "числа кэша совпадают с объектами",
-  statsCache.damagedRoadHits[0] === 100 && statsCache.damagedRoadHitsMax[0] === 1000,
+  statsCache.damagedRoadHits[0] === 100 && statsCache.damagedRoadHitsMax[0] === 5000,
   `${statsCache.damagedRoadHits[0]}/${statsCache.damagedRoadHitsMax[0]}`,
 );
 
@@ -339,7 +341,9 @@ statsCache.damagedStats = new Int32Array(1400);
 statsCache.damagedCount = 0;
 
 resetTaskKeyCache();
-statsCache.damagedRoadHits[0] = 900;
+// 2 500 хитов — ВЫШЕ абсолютного порога дорог (2 000, пункт 4 плана), поэтому
+// кандидат отсеивается по числу из кэша, без единого резолва.
+statsCache.damagedRoadHits[0] = 2500;
 const taskGenerators = require("../task.generators");
 const { TASK_CONFIG } = require("../constants");
 
@@ -351,9 +355,12 @@ const savedRepairFlag = TASK_CONFIG.repairStructures;
 TASK_CONFIG.repairStructures = true;
 getObjectByIdCalls = 0;
 taskGenerators.generateRepairStructures(statsState);
+// Один резолв — это НЕ дорога-кандидат (её отсеяли числами), а цель башни:
+// генератор спрашивает pickRepairTarget, чтобы не ставить задачу туда, куда
+// уже едет башня (task/gen.repair.js:178-205, пункт 5 плана).
 check(
-  "выше порога: ноль резолвов",
-  getObjectByIdCalls === 0,
+  "выше порога: резолвов нет, кроме цели башни",
+  getObjectByIdCalls === 1,
   String(getObjectByIdCalls),
 );
 
@@ -386,12 +393,13 @@ check(
   repairQueue.some(t => t.targetId === "ext2"),
   JSON.stringify(repairQueue),
 );
-// Резолвятся только дорога-кандидат и группа-кандидат: ext2 (10/1000).
-// tow2 (500/1000) ровно на пороге и в задачи не идёт — резолва для него нет.
-// 366 объектов групп, среди которых целые, больше не резолвятся вовсе.
+// Резолвятся только дорога-кандидат и группа-кандидат: ext2 (10/1000), плюс
+// цель башни для пункта 5 плана. tow2 (500/1000) ровно на пороге и в задачи не
+// идёт — резолва для него нет. 366 объектов групп, среди которых целые, больше
+// не резолвятся вовсе.
 check(
-  "ниже порога: резолвы только по кандидатам",
-  getObjectByIdCalls === 2,
+  "ниже порога: резолвы только по кандидатам (+ цель башни)",
+  getObjectByIdCalls === 3,
   String(getObjectByIdCalls),
 );
 check(

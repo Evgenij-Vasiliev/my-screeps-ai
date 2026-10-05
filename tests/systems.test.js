@@ -143,7 +143,7 @@ function lineOf(src, offset) {
   return n;
 }
 
-check("гейтов найдено (защита от ложной зелени)", gateCount === 25, String(gateCount));
+check("гейтов найдено (защита от ложной зелени)", gateCount === 26, String(gateCount));
 check(
   "каждый гейт сравнивает с false (не truthiness)",
   looseGates.length === 0,
@@ -287,7 +287,10 @@ ModuleLoad._load = function (request, parent, isMain) {
   if (request === "systems") return stubSystems;
   if (request === "./constants") {
     return {
-      TOWER: { HOSTILE_CHECK_INTERVAL: 100, REPAIR_INTERVAL: 15, REPAIR_POWER: 800 },
+      // REPAIR_INTERVAL: 1 — как в боевом constants/defense.js (пункт 1 плана
+      // docs/REPAIR-PLAN.md:158). Проверок на это значение в файле нет, но
+      // стенд не должен расходиться с боевыми константами.
+      TOWER: { HOSTILE_CHECK_INTERVAL: 100, REPAIR_INTERVAL: 1, REPAIR_POWER: 800 },
       TASK_CONFIG: GEN_FLAGS,
       SPAWN_QUOTA: { worker: 1, miner: 1 },
       SPAWN: { SCAN_INTERVAL: 10 },

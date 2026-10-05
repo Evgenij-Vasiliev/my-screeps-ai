@@ -4,7 +4,7 @@
 // Значения разложены по доменам в constants/*.js:
 //   logistics  — STORAGE, TERMINAL_SUPPLY, TERMINAL_NETWORK
 //   factory    — FACTORY
-//   defense    — TOWER
+//   defense    — TOWER, REPAIR
 //   tasks      — TASK_CONFIG
 //   powerSpawn — POWER_SPAWN
 //   spawn      — PRESPAWN_THRESHOLD, SPAWN_QUOTA, MINERAL_MIN_AMOUNT_TO_SPAWN, SPAWN
@@ -42,6 +42,7 @@ module.exports = {
   CREEP_BODIES: creeps.CREEP_BODIES,
   MINER: creeps.MINER,
   TOWER: defense.TOWER,
+  REPAIR: defense.REPAIR,
   TASK_CONFIG: tasks.TASK_CONFIG,
   POWER_SPAWN: powerSpawn.POWER_SPAWN,
   SPAWN_QUOTA: spawn.SPAWN_QUOTA,

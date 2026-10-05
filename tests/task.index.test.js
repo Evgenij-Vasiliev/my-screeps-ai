@@ -39,6 +39,7 @@ global.RESOURCE_UTRIUM = "U";
 // строит по ним таблицу DAMAGED_TYPE_CODES на этапе загрузки модуля.
 global.STRUCTURE_SPAWN = "spawn";
 global.STRUCTURE_TOWER = "tower";
+global.STRUCTURE_ROAD = "road";
 global.STRUCTURE_EXTENSION = "extension";
 global.STRUCTURE_LINK = "link";
 global.STRUCTURE_LAB = "lab";

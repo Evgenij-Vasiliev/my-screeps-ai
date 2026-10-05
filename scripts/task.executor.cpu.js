@@ -12,7 +12,7 @@
  * КАК. Экспорт модулей оборачивается счётчиками CPU прямо В КОНСОЛИ шарда:
  * worker.runner.js берёт функцию из объекта модуля в момент вызова
  * (`taskExecutors.executors[currentTaskType](...)` — task/runner.js:91,
- * `taskManager.getNextTask(...)` — task/runner.pick.js:177 и :247), поэтому
+ * `taskManager.getNextTask(...)` — task/runner.pick.js:187 и :262), поэтому
  * обёртка видна боту.
  * Приём тот же, что у scripts/task.manager.calls.js, но считает не вызовы, а
  * сумму `Game.cpu.getUsed()` до и после. Поведение не меняется: обёртка

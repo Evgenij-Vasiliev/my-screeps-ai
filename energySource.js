@@ -2,7 +2,7 @@
  * ОБЩИЙ ИСТОЧНИК ЭНЕРГИИ (Energy Source Helper)
  * Не роль — вспомогательный модуль, вызывается изнутри исполнителей задач
  * (task/exec.spawns.js:34, exec.factory.js:52, exec.towers.js:47,
- * exec.terminal.js:43, exec.repair.js:50, exec.build.js:47, exec.upgrade.js:51 —
+ * exec.terminal.js:43, exec.repair.js:85, exec.build.js:47, exec.upgrade.js:51 —
  * по одному вызову withdrawFromStorage на семейство задач).
  *
  * Введён по ТЗ №2, чтобы не дублировать одинаковую логику

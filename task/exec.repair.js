@@ -8,12 +8,47 @@
 // role.micro.test.js:125).
 //
 // isValidRepairTask — проверка задачи этого семейства.
+// isDoneRepair — когда цель считается отремонтированной (пункт 3 плана:
+// дороге достаточно 3 000 хитов — абсолютный порог, а не доля от максимума;
+// остальным структурам — максимума).
 //
 // require("../constants") — баррель констант из корня: при выгрузке deploy
 // переводит путь в "constants" (scripts/deploy.modules.js, translateModuleSource).
 // ===================================================
 const energySource = require("energySource");
 const { resolveTarget } = require("./exec.common");
+const { REPAIR } = require("../constants");
+
+/**
+ * Порог завершения для ДОРОГИ — ОБЩИЙ с башней: `REPAIR.ROAD_DONE_HITS`
+ * (constants/defense.js) = 3 000 хитов.
+ *
+ * Значение одно на оба инструмента ремонта: воркер закрывает задачу на нём, а
+ * башня на нём же перестаёт брать дорогу целью (room/repair.js,
+ * pickRepairTarget). Пока пороги были врозь, башня гнала болотную дорогу
+ * (25 000 хитов) до максимума — 29 действий по 10 энергии, — тогда как воркер
+ * считал её отремонтированной. Почему хиты, а не доля от максимума, и почему
+ * полоса [2 000; 3 000] — в комментарии к REPAIR.
+ *
+ * Откат (docs/REPAIR-PLAN.md:160): `git checkout -- task/exec.repair.js`.
+ */
+
+/**
+ * Цель задачи ремонта доведена до нужного состояния.
+ *
+ * Дороге достаточно `REPAIR.ROAD_DONE_HITS` хитов, любой другой структуре —
+ * максимума хитов (прежнее поведение).
+ *
+ * @param {Structure} target
+ * @returns {boolean}
+ */
+function isDoneRepair(target) {
+  if (target.structureType === STRUCTURE_ROAD) {
+    return target.hits >= REPAIR.ROAD_DONE_HITS;
+  }
+
+  return target.hits >= target.hitsMax;
+}
 
 function isValidRepairTask(task) {
   return !!task && task.type === "repair" && !!task.targetId;
@@ -42,7 +77,7 @@ function executeRepairStructures(creep, task) {
   }
 
   if (!creep.memory.working) {
-    if (target.hits >= target.hitsMax) {
+    if (isDoneRepair(target)) {
       delete creep.memory.working;
       return "DONE";
     }
@@ -56,7 +91,7 @@ function executeRepairStructures(creep, task) {
     return "CONTINUE";
   }
 
-  if (target.hits >= target.hitsMax) {
+  if (isDoneRepair(target)) {
     delete creep.memory.working;
     return "DONE";
   }
@@ -65,7 +100,7 @@ function executeRepairStructures(creep, task) {
 
   switch (result) {
     case OK:
-      return target.hits >= target.hitsMax ? "DONE" : "CONTINUE";
+      return isDoneRepair(target) ? "DONE" : "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
       creep.travelTo(target);

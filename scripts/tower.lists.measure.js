@@ -281,7 +281,7 @@ async function main() {
     /* ── 10. Цена перебора списка в генераторе repair-задач ───────────── */
     // Вопрос перед правкой сборки damagedStructures: сколько стоит её
     // ЕДИНСТВЕННЫЙ потребитель, который читает список не раз в 15 тиков, а
-    // каждый тик. Это generateRepairStructures (task/gen.repair.js:30-91):
+    // каждый тик. Это generateRepairStructures (task/gen.repair.js:61-119):
     // перебор всех повреждённых (сейчас — 730 дорог), отсев по
     // REPAIR_THRESHOLD_RATIO = 0.5 (:21 — константа, :96 — сравнение;
     // вызовы на :46, :58, :73) и проверка дубля по targetId
@@ -375,7 +375,7 @@ async function main() {
         `дороги ${sumRoads} + группы ${sumGroups} = ${(sumRoads + sumGroups).toFixed(5)} CPU/тик`,
     );
     console.log(
-      `— Перебор списка в генераторе repair-задач (task/gen.repair.js:46-60) по империи: ` +
+      `— Перебор списка в генераторе repair-задач (task/gen.repair.js:77-86) по империи: ` +
         `${sumRepair} CPU/тик; ниже порога 50% — ${sumBelowHalf}, из них дублей ${sumDup}`,
     );
     console.log(

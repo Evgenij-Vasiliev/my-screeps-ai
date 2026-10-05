@@ -11,7 +11,7 @@
 // ===================================================
 const scanner = require("scanner");
 const { collectDamagedStructures } = scanner;
-const { TOWER, TASK_CONFIG } = require("../constants");
+const { TOWER, TASK_CONFIG, REPAIR } = require("../constants");
 
 /** Добавляет в out повреждённые структуры из списка (hits < hitsMax). */
 function collectDamaged(structures, out) {
@@ -261,6 +261,16 @@ function pickRepairTarget(roomState) {
         const hits = cache.damagedRoadHits[i];
         const max = cache.damagedRoadHitsMax[i];
         if (max - hits < TOWER.REPAIR_POWER) continue;
+
+        // ОДНА ЦЕЛЬ с воркером (constants/defense.js, REPAIR): дорога на
+        // REPAIR.ROAD_DONE_HITS и выше считается отремонтированной —
+        // ровно на этом числе воркер закрывает задачу
+        // (task/exec.repair.js, isDoneRepair). Без этого гейта башня,
+        // выбирающая цель по ДОЛЕ потерянных хитов, гнала болотную дорогу
+        // (25 000 хитов) до максимума — 29 действий по 10 энергии на одну
+        // дорогу, пока воркер уже считал её сделанной.
+        if (hits >= REPAIR.ROAD_DONE_HITS) continue;
+
         const loss = (max - hits) / max;
         if (loss > bestLoss) {
           bestLoss = loss;

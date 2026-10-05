@@ -18,6 +18,10 @@
  *      очередь всё равно выбирается, а задача снимается исполнителем через SKIP;
  *   6) ВНУТРИ очереди берётся ближайшая задача, а не голова очереди, и при этом
  *      старый контракт getNextTask(room, type) без rangeFn не изменился.
+ *   8) [правка 05.10.2026, пункт 2 плана] очереди ВЫШЕ своей по TASK_CHAIN
+ *      проверяются ПЕРВЫМИ (для ремонта, idx 7, это доставка 0..6), своя — после
+ *      них; прежний выбор ближайшей очереди остался только для очередей НИЖЕ
+ *      своей. См. раздел 8 в конце файла.
  *
  * Откат правки: git checkout -- worker.runner.js
  * Запуск: node tests/worker.proximity.test.js
@@ -49,6 +53,10 @@ global.RESOURCE_UTRIUM = "U";
 global.WORK = "work";
 global.CARRY = "carry";
 global.MOVE = "move";
+// Исполнитель ремонта различает дороги по structureType (правка 05.10.2026,
+// пункт 3 плана): без этого глобала он падал бы в фикстурах ниже, а runSafe
+// глотал бы исключение молча.
+global.STRUCTURE_ROAD = "road";
 
 global.Memory = { creeps: {}, rooms: {} };
 
@@ -423,6 +431,313 @@ console.log("\n7. Свип очередей: стор один раз, обра�
     "свип: выбранный тип — repairStructures",
     creep.memory.taskIndex === IDX("repairStructures"),
     String(creep.memory.taskIndex),
+  );
+}
+
+/*
+ * ПРАВКА 05.10.2026 (пункт 2 плана, docs/REPAIR-PLAN.md:159): очередь — это
+ * приоритет. Воркер сначала проверяет очереди ВЫШЕ своей по TASK_CHAIN (для
+ * ремонта idx 7 это доставка 0..6), потом свою, и только затем работает
+ * прежний кольцевой выбор ближайшей очереди (он остался для очередей НИЖЕ
+ * своей — build (8), fillTowers (9), upgrade (10)).
+ *
+ * Почему появилось: замер shard3 05.10.2026 (read-only, Memory.rooms +
+ * Memory.creeps, 29 снимков подряд, опрос раз в 10 с) — воркер держал
+ * repair-задачу, а в его комнате свободно лежали 4-5 задач доставки с живыми
+ * целями; очередь ремонта в E35S39 — 346 100 недостающих хитов = 3 461 тик
+ * работы одного WORK. Своя очередь была первой, и до доставки воркер не
+ * доходил вовсе.
+ *
+ * Откат правки: убрать вызов pickHigher из findTask (task/runner.pick.js) —
+ * своя очередь снова первая.
+ */
+console.log("\n8. Очереди ВЫШЕ своей (доставка) — первыми, своя — после них");
+{
+  const { roomIndex, makeRanger, findTask } = require("../task/runner.pick");
+  const ROOM = makeRoom("W8N1");
+
+  // Своя очередь — ремонт (idx 7). Выше лежит доставка (idx 0), нарочно
+  // ДАЛЬНЯЯ (30), а своя задача ремонта — ближняя (2): проверяем приоритет
+  // очереди, а не близость цели.
+  addTask(ROOM, "fillSpawnsExtensions", "t_fill", makeObject("w8_far", 30), {
+    sourceId: "w8_storage",
+    resourceType: global.RESOURCE_ENERGY,
+  });
+  addTask(
+    ROOM,
+    "repairStructures",
+    "t_repair",
+    makeObject("w8_near", 2, { hits: 100, hitsMax: 1000 }),
+  );
+
+  const creep = makeCreep(ROOM, "w8", IDX("repairStructures"));
+  const found = findTask(
+    creep,
+    ROOM,
+    roomIndex(ROOM),
+    IDX("repairStructures"),
+    makeRanger(creep, false),
+  );
+
+  check(
+    "выбрана доставка (idx 0), хотя своя задача ремонта ближе",
+    !!found && found.typeIndex === IDX("fillSpawnsExtensions"),
+    found ? String(found.typeIndex) : "null",
+  );
+  check(
+    "взята именно задача очереди idx 0",
+    !!found && found.task.taskId === "t_fill",
+    found ? String(found.task.taskId) : "null",
+  );
+  check(
+    "своя очередь ремонта не зарезервирована",
+    !queue(ROOM, "repairStructures")[0].reservedBy,
+    String(queue(ROOM, "repairStructures")[0].reservedBy),
+  );
+
+  // Сквозная проверка тем же воркером: решение задачи и резерв через штатный
+  // вход роли (workerRunner.run), а не только через findTask.
+  runSafe(creep);
+
+  check(
+    "run(): taskIndex переключился на idx 0",
+    creep.memory.taskIndex === IDX("fillSpawnsExtensions"),
+    String(creep.memory.taskIndex),
+  );
+  check(
+    "run(): доставка зарезервирована за воркером",
+    queue(ROOM, "fillSpawnsExtensions")[0].reservedBy === "w8",
+    String(queue(ROOM, "fillSpawnsExtensions")[0].reservedBy),
+  );
+}
+
+{
+  const { roomIndex, makeRanger, findTask } = require("../task/runner.pick");
+  const ROOM = makeRoom("W8N2");
+
+  // Обе очереди ВЫШЕ своей: idx 0 — дальняя (30), idx 3 — ближняя (2).
+  // Побеждает младший индекс цепочки, а не близость.
+  addTask(ROOM, "fillSpawnsExtensions", "t_fill2", makeObject("w82_far", 30));
+  addTask(ROOM, "fillTerminalEnergy", "t_term2", makeObject("w82_near", 2));
+  addTask(
+    ROOM,
+    "repairStructures",
+    "t_repair2",
+    makeObject("w82_rep", 1, { hits: 100, hitsMax: 1000 }),
+  );
+
+  const creep = makeCreep(ROOM, "w82", IDX("repairStructures"));
+  const found = findTask(
+    creep,
+    ROOM,
+    roomIndex(ROOM),
+    IDX("repairStructures"),
+    makeRanger(creep, false),
+  );
+
+  check(
+    "порядок по цепочке: idx 0 раньше idx 3, даже когда idx 3 ближе",
+    !!found && found.typeIndex === IDX("fillSpawnsExtensions"),
+    found ? String(found.typeIndex) : "null",
+  );
+}
+
+{
+  const { roomIndex, makeRanger, findTask } = require("../task/runner.pick");
+  const ROOM = makeRoom("W8N3");
+
+  // Выше ничего нет: работа только в своей очереди — ремонт обязан браться.
+  addTask(
+    ROOM,
+    "repairStructures",
+    "t_repair3",
+    makeObject("w83_rep", 2, { hits: 100, hitsMax: 1000 }),
+  );
+
+  const creep = makeCreep(ROOM, "w83", IDX("repairStructures"));
+  const found = findTask(
+    creep,
+    ROOM,
+    roomIndex(ROOM),
+    IDX("repairStructures"),
+    makeRanger(creep, false),
+  );
+
+  check(
+    "выше пусто — берётся своя очередь ремонта",
+    !!found && found.typeIndex === IDX("repairStructures"),
+    found ? String(found.typeIndex) : "null",
+  );
+}
+
+{
+  const { roomIndex, makeRanger, findTask } = require("../task/runner.pick");
+  const ROOM = makeRoom("W8N4");
+
+  // Выше и своя пусты: очереди НИЖЕ своей — стройка (idx 8, дальняя 30) и
+  // башни (idx 9, ближняя 3). Здесь должен остаться ПРЕЖНИЙ выбор ближайшей
+  // очереди (шаг 1), а не порядок цепочки.
+  addTask(
+    ROOM,
+    "buildStructures",
+    "t_bld4",
+    makeObject("w84_site", 30, { progress: 0, progressTotal: 100 }),
+  );
+  addTask(ROOM, "fillTowers", "t_twr4", makeObject("w84_tower", 3));
+
+  const creep = makeCreep(ROOM, "w84", IDX("repairStructures"));
+  const found = findTask(
+    creep,
+    ROOM,
+    roomIndex(ROOM),
+    IDX("repairStructures"),
+    makeRanger(creep, false),
+  );
+
+  check(
+    "ниже своей — прежний выбор ближайшей очереди (idx 9, а не idx 8)",
+    !!found && found.typeIndex === IDX("fillTowers"),
+    found ? String(found.typeIndex) : "null",
+  );
+}
+
+/*
+ * ПРАВКА 05.10.2026 (пункт 8 плана, docs/REPAIR-PLAN.md:165): ЦЕПОЧКА дорог.
+ * После вычиненной дороги воркер берёт следующую ВПЛОТНУЮ (радиус 1), а не
+ * ближайшую вообще: дороги распадаются полосами, и ехать через комнату за
+ * соседней плиткой незачем.
+ *
+ * Почему это вообще правка, а не текущее поведение: обычный поиск смотрит
+ * TASK_CONFIG.NEAREST_SCAN_LIMIT = 8 кандидатов (constants/tasks.js:52), и
+ * соседняя дорога, стоящая в очереди девятым номером, не находится вовсе.
+ * Цепочка расширяет окно на всю очередь и обрывается на первой задаче вплотную
+ * (task/lookup.js:51-96).
+ *
+ * Откат правки: убрать 4-й аргумент getNextTask в pickFrom
+ * (task/runner.pick.js) — вернётся выбор ближайшей.
+ */
+console.log("\n9. Цепочка дорог: задача вплотную ищется по всей очереди (пункт 8)");
+{
+  const { roomIndex, makeRanger, findTask } = require("../task/runner.pick");
+  const CHAIN_ROOM = makeRoom("W9N1");
+
+  // 12 задач ремонта: первые восемь — далеко (20..27), девятая (индекс 8) —
+  // ВПЛОТНУЮ (1), остальные ещё дальше. Кладём пачками по потолку постановки
+  // (MAX_NEW_TASKS_PER_TYPE_PER_TICK = 6, constants/tasks.js:20): за один тик
+  // больше шести задач типа не добавится, и «соседней» в очереди не окажется.
+  const ids = [];
+  for (let i = 0; i < 12; i++) {
+    if (i > 0 && i % 6 === 0) global.Game.time++;
+    const id = "w9_road" + i;
+    const range = i < 8 ? 20 + i : i === 8 ? 1 : 40 + i;
+    addTask(CHAIN_ROOM, "repairStructures", "t_w9_" + i, makeObject(id, range, { hits: 100, hitsMax: 5000 }));
+    ids.push("t_w9_" + i);
+  }
+
+  const creep = makeCreep(CHAIN_ROOM, "w9", IDX("repairStructures"));
+
+  // 1) Обычный поиск (без цепочки) окно в 8 кандидатов не перешагивает.
+  const plain = taskManager.getNextTask(CHAIN_ROOM, "repairStructures", makeRanger(creep, false));
+  check(
+    "без цепочки соседняя дорога за окном 8 кандидатов не найдена",
+    !!plain && plain.taskId !== ids[8],
+    plain ? plain.taskId : "null",
+  );
+
+  // 2) Цепочка проходит очередь целиком и берёт задачу вплотную.
+  const chained = taskManager.getNextTask(
+    CHAIN_ROOM,
+    "repairStructures",
+    makeRanger(creep, false),
+    true,
+  );
+  check(
+    "с цепочкой выбрана задача вплотную (t_w9_8)",
+    !!chained && chained.taskId === ids[8],
+    chained ? chained.taskId : "null",
+  );
+
+  // 3) Через штатный вход выбора: своя очередь — ремонт, значит цепочка включена.
+  const found = findTask(
+    creep,
+    CHAIN_ROOM,
+    roomIndex(CHAIN_ROOM),
+    IDX("repairStructures"),
+    makeRanger(creep, false),
+  );
+  check(
+    "findTask для своей очереди ремонта тоже берёт задачу вплотную",
+    !!found && found.task.taskId === ids[8],
+    found ? found.task.taskId : "null",
+  );
+}
+
+console.log("\n10. Цепочка: запасной путь, чужая очередь и занятая задача");
+{
+  const { roomIndex, makeRanger, findTask } = require("../task/runner.pick");
+
+  // 1) Задач вплотную нет — цепочка возвращает ту же ближайшую, что и обычный поиск.
+  const ROOM = makeRoom("W10N1");
+  for (let i = 0; i < 12; i++) {
+    if (i > 0 && i % 6 === 0) global.Game.time++;
+    addTask(ROOM, "repairStructures", "t_w10_" + i, makeObject("w10_road" + i, 20 + i, { hits: 100, hitsMax: 5000 }));
+  }
+  const creep = makeCreep(ROOM, "w10", IDX("repairStructures"));
+  const plain = taskManager.getNextTask(ROOM, "repairStructures", makeRanger(creep, false));
+  const chained = taskManager.getNextTask(ROOM, "repairStructures", makeRanger(creep, false), true);
+  check(
+    "нет задач вплотную — цепочка отдаёт ту же ближайшую",
+    !!plain && !!chained && plain.taskId === chained.taskId,
+    `${plain && plain.taskId} / ${chained && chained.taskId}`,
+  );
+
+  // 2) Цепочка не трогает ЧУЖУЮ очередь: у доставки та же картина с соседней
+  //    задачей за окном, но порядок выбора там прежний (ближайшая из окна).
+  const ROOM2 = makeRoom("W10N2");
+  for (let i = 0; i < 12; i++) {
+    if (i > 0 && i % 6 === 0) global.Game.time++;
+    const range = i < 8 ? 20 + i : i === 8 ? 1 : 40 + i;
+    addTask(ROOM2, "fillSpawnsExtensions", "t_w10b_" + i, makeObject("w10b_sp" + i, range));
+  }
+  const creep2 = makeCreep(ROOM2, "w10b", IDX("fillSpawnsExtensions"));
+  const found2 = findTask(
+    creep2,
+    ROOM2,
+    roomIndex(ROOM2),
+    IDX("fillSpawnsExtensions"),
+    makeRanger(creep2, false),
+  );
+  check(
+    "чужая очередь (доставка) цепочку не применяет",
+    !!found2 && found2.task.taskId !== "t_w10b_8",
+    found2 ? found2.task.taskId : "null",
+  );
+
+  // 3) Соседняя задача занята живым воркером — цепочка её пропускает.
+  const ROOM3 = makeRoom("W10N3");
+  for (let i = 0; i < 12; i++) {
+    if (i > 0 && i % 6 === 0) global.Game.time++;
+    const range = i < 8 ? 20 + i : i === 8 ? 1 : 40 + i;
+    addTask(
+      ROOM3,
+      "repairStructures",
+      "t_w10c_" + i,
+      makeObject("w10c_road" + i, range, { hits: 100, hitsMax: 5000 }),
+      i === 8 ? { reservedBy: "w10c_other" } : undefined,
+    );
+  }
+  global.Game.creeps.w10c_other = { name: "w10c_other", memory: { role: "worker" } };
+  const creep3 = makeCreep(ROOM3, "w10c", IDX("repairStructures"));
+  const chained3 = taskManager.getNextTask(
+    ROOM3,
+    "repairStructures",
+    makeRanger(creep3, false),
+    true,
+  );
+  check(
+    "занятая соседняя задача не отдаётся",
+    !!chained3 && chained3.taskId !== "t_w10c_8",
+    chained3 ? chained3.taskId : "null",
   );
 }
 

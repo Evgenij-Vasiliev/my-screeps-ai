@@ -223,7 +223,7 @@ node scripts/cpu.peaks.measure.js shard3 60 3000 /tmp/tm-before.json g  # окн
 Тесты после правок: **17 файлов, 500 проверок, 0 FAIL**
 (`for f in tests/*.test.js; do node "$f"; done`), `node scripts/check.require.cycles.js` —
 циклов нет. Новые проверки: стор крипа читается 1 раз и дальность не считается дважды
-(`tests/worker.proximity.test.js:320-422`), ленивый `indexById`
+(`tests/worker.proximity.test.js:324-426`), ленивый `indexById`
 (`tests/task.index2.test.js:266-328`), гейт очереди и его отключение нулём
 (`tests/fill.spawns.test.js:259-330`), алиасы вместо вызова `getFreeCapacity`
 (там же, разделы 2, 6, 7). Каждая новая проверка проверена мутацией: снятие правки

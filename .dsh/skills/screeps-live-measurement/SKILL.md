@@ -34,7 +34,7 @@ whenToUse: Когда нужна цифра с живого шарда (CPU, Mem
 | Поведение бота | проверять замером на живом шарде, а не выводить из чтения кода | `AGENTS.md:16` |
 | Шаг | один шаг — одно действие, у каждого шага есть точка отката | `AGENTS.md:19` |
 | Порядок | read-only замер → предложение → согласование → правка → тесты → выгрузка | `AGENTS.md:20-21` |
-| Тесты | перед правкой прогнать `node tests/<файл>.test.js` (всего 27 файлов) или всё разом: `node scripts/check.all.js` | `AGENTS.md:22-23`, `scripts/check.all.js:1-40` |
+| Тесты | перед правкой прогнать `node tests/<файл>.test.js` (всего 28 файлов) или всё разом: `node scripts/check.all.js` | `AGENTS.md:22-23`, `scripts/check.all.js:1-40` |
 | Деплой | `./node_modules/.bin/grunt screeps` (ветка `test`) — всегда отдельная команда человека | `AGENTS.md:21,27` |
 | CPU-правила | обязательные правила §11.1, механически проверяются `tests/rules.test.js` | `docs/task-system-v3.0/DEVELOPMENT_RULES.md:128-132` |
 | Правила CPU по сути | рынок только через кэш на тик; `Object.values(Game.*)` не в per-creep коде; Memory — только переживающее рестарт и только при смене значения; `room.find` не в горячем пути; замер до и после | `DEVELOPMENT_RULES.md:134-166` |
@@ -120,13 +120,13 @@ const command =
 | Факт | Значение | Источник |
 |---|---|---|
 | Запуск | `node tests/<файл>.test.js` | `AGENTS.md:22-23` |
-| Всего файлов | 27 | `scripts/check.all.js` (агрегат `tests/.last-run.json`) |
-| Последний прогон | 27/27 PASS, 756 проверок, 0 FAIL | `tests/.last-run.json` (03.10.2026) |
+| Всего файлов | 28 | `scripts/check.all.js` (агрегат `tests/.last-run.json`) |
+| Последний прогон | 28/28 PASS, 805 проверок, 0 FAIL | `tests/.last-run.json` (05.10.2026) |
 | Прогон всех | `node scripts/check.all.js` (тесты + циклы require + загрузка + скиллы) | `scripts/check.all.js:1-40` |
 | Код возврата | `process.exit(failed === 0 ? 0 : 1)` — ненулевой код = FAIL | `tests/rules.test.js:535` |
 | `tests/rules.test.js` | механически держит правила CPU: рынок, `getAllOrders`, `Object.values(Game.*)`, `room.find`, Memory/heap, `subsystems` | `tests/rules.test.js:258-325` |
 | Что проверяется | 9 групп: рынок изолирован (`:258`), кэш ордеров (`:262`), per-creep код (`:273`), горячий путь ролей (`:292`), Memory и heap-кэши (`:300`), наблюдаемость (`:321`), ленивый резолв в executors (`:327`), запись `creep.memory` (`:390`), политика `reusePath` (`:466`) | `tests/rules.test.js:258-532` |
-| `tests/` в `.gitignore` | тесты не коммитятся и на шард не уезжают | `.gitignore:3`; `scripts/deploy.modules.js:49` |
+| Тесты в git | `tests/` НЕ игнорируется (игнорируется только агрегат `tests/.last-run.json`): тесты — часть проекта, но на шард не уезжают | `.gitignore:5-10`; `scripts/deploy.modules.js:49` |
 
 ### 8. Деплой
 
@@ -235,7 +235,7 @@ async function evalInGame(field, expression) {
 ### Р5. Прогнать тесты перед правкой
 
 ```bash
-node scripts/check.all.js   # всё разом: 27 тестов (756 проверок) + циклы require + загрузка + скиллы
+node scripts/check.all.js   # всё разом: 28 тестов (805 проверок) + циклы require + загрузка + скиллы
 node tests/rules.test.js    # только правила CPU: 30 проверок
 ```
 
@@ -281,9 +281,10 @@ CPU/крип: 0.242 при 28 крипах (docs/cpu-baseline.json:16)
 5. **Один замер — не серия**: два прогона на разных тиках дали 8.53 и 6.77 CPU/тик
    (`docs/cpu-baseline-8.53.json:12` против `docs/cpu-baseline.json:15`). Сравнивать
    средние с одинаковым окном (`count`) и указывать окно в отчёте.
-6. **`tests/` в `.gitignore`** (`:.gitignore:3`): тесты не попадут в git и не уедут
-   на шард — выгрузка берёт только `*.js` корня, `constants/*.js`, `room/*.js`
-   и `task/*.js` (`scripts/deploy.modules.js:49`).
+6. **На шард тесты не уезжают** — выгрузка берёт только `*.js` корня,
+   `constants/*.js`, `room/*.js` и `task/*.js` (`scripts/deploy.modules.js:49`).
+   В git `tests/` при этом НЕ игнорируется: под `.gitignore` лежит лишь агрегат
+   `tests/.last-run.json` (`.gitignore:10`).
 7. **Токен из `~/.screeps.json`** — резервный источник и потенциальная утечка;
    скрипт печатает предупреждение, о нём нужно сообщить человеку
    (`screeps.token.js:65-74`).
@@ -305,7 +306,7 @@ CPU/крип: 0.242 при 28 крипах (docs/cpu-baseline.json:16)
 - `scripts/deploy.modules.js:10-33,43,51` — что уезжает, исключения, семантика `require` на шарде.
 - `Gruntfile.js:14-27,36,43-60` — ветка `test`, сборка модулей, проверка `require`, `api.code.set`.
 - `tests/rules.test.js:1-30,40-257,258-532,535` — 9 групп правил CPU и код возврата (шапка со списком правил, сбор рантайм-файлов и хелперы, блок проверок 258-532, выход по `failed`). Рантайм-файлы берутся из SRC деплоя, то есть проверяются корень, `constants/`, `task/` и `room/`.
-- `scripts/check.all.js:1-40` — единая команда проверок: 27 тестов + `check.require.cycles` + `check.boot` + `validate.skills`, пишет агрегат `tests/.last-run.json` (27 файлов, 756 проверок, 0 FAIL, 03.10.2026).
+- `scripts/check.all.js:1-40` — единая команда проверок: 28 тестов + `check.require.cycles` + `check.boot` + `validate.skills`, пишет агрегат `tests/.last-run.json` (28 файлов, 805 проверок, 0 FAIL, 05.10.2026).
 - `tests/citations.test.js:1-40` — механический страж ссылок `file:line`: строка не за концом файла, нет ссылок на удалённые модули (реестр `REMOVED_MODULES`), исторические `docs/*.md` — предупреждения.
 - `docs/CPU-BASELINE.md:23-32,40-50,76-79,126-136` — цифры замеров, стоимость API, ограничения консоли, `cpuShard: {shard3: 20}`.
 - `docs/cpu-baseline.json:5-16,19-34` — сырые результаты последнего прогона (шард, тик, CPU/тик, bucket, стоимость API).
@@ -316,7 +317,7 @@ CPU/крип: 0.242 при 28 крипах (docs/cpu-baseline.json:16)
 - `constants/market.js:25`, `constants/system.js:73-75` — `MARKET.INTERVAL = 30`, `CPU.REPORT_INTERVAL = 10`, `CPU.AVERAGE_WINDOW = 100`, `CPU.BUCKET_CRITICAL = 500`.
 - `loadShed.js:136-144,182-194` — пороги экономии по bucket (9000/7000/5000).
 - `main.js:5-9` — точка входа `module.exports.loop` → `empire.run()`.
-- `.gitignore:1-4` — `node_modules/`, `.screeps.json`, `tests/`, `test.js`.
+- `.gitignore:1-10` — `node_modules/`, `.screeps.json`, `test.js`, `tests/.last-run.json` (каталог `tests/` НЕ игнорируется).
 
 Внешние (для ограничений игровых механик, использованных в отчёте):
 
