@@ -13,7 +13,7 @@
 // потому что движок Screeps относительных путей не умеет.
 // ===================================================
 const taskManager = require("task.manager");
-const { TOWER, TASK_CONFIG } = require("../constants");
+const { TOWER } = require("../constants");
 
 const FIELDS_FILLTOWERS = ["type", "targetId", "sourceId", "resourceType"];
 
@@ -22,7 +22,6 @@ function isDuplicateFillTowersTask(roomName, candidate) {
 }
 
 function generateFillTowers(roomState) {
-  if (!TASK_CONFIG.fillTowers) return;
   const { storage, towers, roomName } = roomState;
 
   if (!storage) {

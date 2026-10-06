@@ -26,7 +26,7 @@ const taskManager = require("task.manager");
 const scanner = require("scanner");
 const systems = require("../systems");
 const { pickRepairTarget } = require("../room/repair");
-const { TOWER, TASK_CONFIG, REPAIR } = require("../constants");
+const { TOWER, REPAIR } = require("../constants");
 
 // Порог постановки задачи для НЕ-дорог — доля от hitsMax (как было).
 const REPAIR_THRESHOLD_RATIO = 0.5;
@@ -51,8 +51,6 @@ function isDuplicateRepairTask(roomName, candidate) {
 }
 
 function generateRepairStructures(roomState) {
-  if (!TASK_CONFIG.repairStructures) return;
-
   const { roomName } = roomState;
   const cache = roomState._structureCache;
   const hasNumbers =

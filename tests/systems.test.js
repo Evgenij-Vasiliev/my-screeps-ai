@@ -143,7 +143,13 @@ function lineOf(src, offset) {
   return n;
 }
 
-check("гейтов найдено (защита от ложной зелени)", gateCount === 26, String(gateCount));
+// Гейтов стало 27 (было 26) после правки 05.10.2026: у генераторов убраны
+// дублирующие флаги TASK_CONFIG (единый источник — systems.js), а режим
+// fillTerminalResources переехал сюда и читается один раз в
+// task/gen.terminal.js строгой формой `systems.fillTerminalResources !== false`.
+// Число остаётся защитой от ложной зелени: пропавший гейт или распутье «по
+// истинности» проверка ниже покажет.
+check("гейтов найдено (защита от ложной зелени)", gateCount === 27, String(gateCount));
 check(
   "каждый гейт сравнивает с false (не truthiness)",
   looseGates.length === 0,

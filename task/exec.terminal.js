@@ -13,7 +13,7 @@
 // переводит путь в "constants" (scripts/deploy.modules.js, translateModuleSource).
 // ===================================================
 const energySource = require("energySource");
-const { STORAGE, TERMINAL_SUPPLY } = require("../constants");
+const econ = require("econ");
 const { resolveTarget, isValidTask, isTargetFull } = require("./exec.common");
 
 function executeFillTerminalEnergy(creep, task) {
@@ -34,9 +34,18 @@ function executeFillTerminalEnergy(creep, task) {
       return "SKIP";
     }
 
-    const reserveThreshold =
-      STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
-    if (source.store[RESOURCE_ENERGY] <= reserveThreshold) {
+    // Терминал уже на своей доле (или в нём нет места) — задача ИСЧЕРПАНА.
+    // Именно DONE, а не SKIP: при SKIP задача осталась бы в очереди навсегда
+    // (генератор новую не поставит, а исполнитель каждый раз отказывался бы),
+    // и очередь засорялась бы зомби. Проверка та же, что у генератора
+    // (econ.canFillTerminal), но разложенная на два исхода.
+    if (econ.terminalReachedShare(source, target)) {
+      return "DONE";
+    }
+
+    // Свободных средств склада пока не хватает на полный рейс — это ПАУЗА:
+    // склад наполнится, и задача снова станет исполнимой.
+    if (!econ.hasFreeForTransfer(source, creep.room.name)) {
       return "SKIP";
     }
 

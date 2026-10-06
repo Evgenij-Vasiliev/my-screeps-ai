@@ -13,7 +13,6 @@
 // потому что движок Screeps относительных путей не умеет.
 // ===================================================
 const taskManager = require("task.manager");
-const { TASK_CONFIG } = require("../constants");
 
 /**
  * Множество targetId, уже стоящих в очереди задач указанного типа.
@@ -41,8 +40,6 @@ function collectTargetIds(roomName, taskType) {
 }
 
 function generateBuildStructures(roomState) {
-  if (!TASK_CONFIG.buildStructures) return;
-
   const { roomName } = roomState;
 
   // Стройплощадки комнаты из общего индекса — без перебора всей Империи

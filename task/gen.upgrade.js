@@ -13,7 +13,7 @@
 // потому что движок Screeps относительных путей не умеет.
 // ===================================================
 const taskManager = require("task.manager");
-const { TASK_CONFIG, CONTROLLER } = require("../constants");
+const { CONTROLLER } = require("../constants");
 
 const FIELDS_UPGRADE = ["targetId"];
 
@@ -22,8 +22,6 @@ function isDuplicateUpgradeTask(roomName, candidate) {
 }
 
 function generateUpgradeController(roomState) {
-  if (!TASK_CONFIG.upgradeController) return;
-
   const { controller, storage, roomName } = roomState;
 
   if (!controller || !storage) {

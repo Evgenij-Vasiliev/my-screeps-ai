@@ -55,17 +55,23 @@ const TASK_CONFIG = {
   // на месте цели (вплотную). Используется в task.manager.js (обрыв перебора)
   // и в worker.runner.js (обрыв перебора типов очередей).
   NEAREST_STOP_RANGE: 1,
-  fillSpawnsExtensions: true,
-  fillPowerSpawnPower: false,
-  fillPowerSpawnEnergy: false,
-  fillTerminalEnergy: true,
-  fillTerminalResources: false,
-  fillFactoryEnergy: false,
-  collectFactoryBattery: false,
-  repairStructures: true,
-  buildStructures: true,
-  fillTowers: true,
-  upgradeController: true,
+
+  // ── БУЛЕВЫХ ФЛАГОВ ЗДЕСЬ БОЛЬШЕ НЕТ (правка 05.10.2026) ────────────────
+  // Было 11 флагов (fillSpawnsExtensions, fillPowerSpawnPower,
+  // fillPowerSpawnEnergy, fillTerminalEnergy, fillTerminalResources,
+  // fillFactoryEnergy, collectFactoryBattery, repairStructures,
+  // buildStructures, fillTowers, upgradeController), и они ДУБЛИРОВАЛИ
+  // тумблеры systems.js. Решал более строгий: гейт в room/run.js требовал
+  // И `TASK_CONFIG.x`, И `systems.x !== false`. Значения разошлись
+  // (в systems.js пять систем стояли true, здесь — false), поэтому фабрика и
+  // powerSpawn не работали, хотя выключатель показывал «включено».
+  // Живой замер tick 83451761: фабрики с 32-452 энергии при требуемых 600,
+  // powerSpawn с power 11-88 и энергией 6-38 при требуемых 50.
+  //
+  // ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ — systems.js (он для этого и назван «выключатель
+  // систем», и tests/systems.test.js:93-105 требует в нём все 11 имён).
+  // Здесь остаются только ЧИСЛОВЫЕ настройки очереди, у которых нет
+  // дублирующего тумблера.
 };
 
 

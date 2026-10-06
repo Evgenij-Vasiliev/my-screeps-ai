@@ -59,7 +59,6 @@ function needsEnergy(target) {
 }
 
 function generateFillSpawnsExtensions(roomState) {
-  if (!TASK_CONFIG.fillSpawnsExtensions) return;
   const { storage, spawns, extensions, room } = roomState;
 
   if (!storage) {

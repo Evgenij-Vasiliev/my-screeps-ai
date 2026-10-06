@@ -12,6 +12,7 @@
 //   system     — CONTROLLER, CACHE, MOVE, CPU
 //   market     — MARKET, LAB_PRIORITY, MARKET_BUY
 //   labs       — LAB_WORKER, LAB_PLAN, LAB_BINDING, LAB_BOOST
+//   econ       — ECON (политика постоянного роста склада и терминала)
 //
 // Этот файл НЕ хранит значения, а только собирает их в один объект: все
 // потребители по-прежнему пишут require("./constants") и получают ТЕ ЖЕ
@@ -32,6 +33,7 @@ const creeps = require("./constants/creeps");
 const system = require("./constants/system");
 const market = require("./constants/market");
 const labs = require("./constants/labs");
+const econ = require("./constants/econ");
 
 module.exports = {
   STORAGE: logistics.STORAGE,
@@ -61,4 +63,5 @@ module.exports = {
   LAB_PRIORITY: market.LAB_PRIORITY,
   MARKET_BUY: market.MARKET_BUY,
   TERMINAL_NETWORK: logistics.TERMINAL_NETWORK,
+  ECON: econ.ECON,
 };

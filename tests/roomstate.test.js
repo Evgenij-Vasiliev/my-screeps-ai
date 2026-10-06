@@ -345,14 +345,12 @@ resetTaskKeyCache();
 // кандидат отсеивается по числу из кэша, без единого резолва.
 statsCache.damagedRoadHits[0] = 2500;
 const taskGenerators = require("../task.generators");
-const { TASK_CONFIG } = require("../constants");
 
-// Тест проверяет САМ генератор ремонта, а ключ TASK_CONFIG.repairStructures в
-// бою может быть выключен (решение человека 01.10.2026: ремонт отдан башням).
-// Поэтому включаем ключ на время сценария и возвращаем как было — иначе тест
-// падал бы при каждом выключенном ремонте.
-const savedRepairFlag = TASK_CONFIG.repairStructures;
-TASK_CONFIG.repairStructures = true;
+// Тест проверяет САМ генератор ремонта. Выключение ремонта живёт в systems.js
+// (единый тумблер, правка 05.10.2026) и на гейте в room/run.js: генератор
+// вызывается только оттуда, поэтому здесь его зовут напрямую и флаг не нужен.
+// Раньше тест включал TASK_CONFIG.repairStructures — флага в TASK_CONFIG
+// больше нет (дублирование тумблеров устранено).
 getObjectByIdCalls = 0;
 taskGenerators.generateRepairStructures(statsState);
 // Один резолв — это НЕ дорога-кандидат (её отсеяли числами), а цель башни:
@@ -410,9 +408,6 @@ check(
 );
 
 global.__structureCache.W1N1 = cache;
-
-// Возвращаем боевое значение ключа (см. комментарий у require выше).
-TASK_CONFIG.repairStructures = savedRepairFlag;
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);
 process.exit(failed === 0 ? 0 : 1);

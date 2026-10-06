@@ -13,7 +13,8 @@
 // потому что движок Screeps относительных путей не умеет.
 // ===================================================
 const taskManager = require("task.manager");
-const { STORAGE, TERMINAL_SUPPLY, TASK_CONFIG } = require("../constants");
+const econ = require("econ");
+const systems = require("systems");
 
 const FIELDS_FILLTERMINALENERGY = ["type", "sourceId", "targetId", "resourceType"];
 
@@ -22,20 +23,23 @@ function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
 }
 
 function generateFillTerminalEnergy(roomState) {
-  if (!TASK_CONFIG.fillTerminalEnergy) return;
   const { storage, terminal, roomName } = roomState;
 
-  if (!storage || !terminal) {
-    return;
-  }
-
-  if (terminal.store[RESOURCE_ENERGY] >= TERMINAL_SUPPLY.ENERGY_TARGET) {
-    return;
-  }
-
-  const reserveThreshold =
-    STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
-  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) {
+  // Условие одно на генератор и исполнителя — econ.canFillTerminal
+  // (econ.js). Раньше здесь стоял гейт «склад выше
+  // STORAGE.ENERGY_MIN x STORAGE_RESERVE_MULTIPLIER = 195 000», а терминал
+  // считался полным на ENERGY_TARGET = 150 000. Живой замер показал, что это
+  // сочетание НЕ ДОСТИЖИМО и терминалы стоят на 98-113k:
+  //   node /tmp/probe.econ.js shard3, tick 83449927 —
+  //   склады 189 637/196 153/193 286/194 243/192 526,
+  //   терминалы 99 893/98 648/112 993/98 279/98 141.
+  // Склад живёт ровно у 195 000 (тот же множитель 1.3 задаёт и его резерв),
+  // поэтому условие `> 195 000` выполнялось лишь мгновениями, и за 156 тиков
+  // тренда (tick 83450172 -> 83450328) в очереди не было НИ ОДНОЙ задачи
+  // fillTerminalEnergy. Теперь перенос разрешён из свободных средств склада
+  // (выше растущего пола), а цель терминала — его доля в общем запасе
+  // (ECON.TERMINAL_SHARE), то есть терминал растёт вместе со складом.
+  if (!econ.canFillTerminal(storage, terminal, roomName)) {
     return;
   }
 
@@ -74,11 +78,21 @@ function generateFillTerminalResources(roomState) {
   // «ресурс → объём» на комнату-донора, а этот генератор превращает заявку в
   // задачу «привези resourceType из storage в terminal».
   //
-  // Пока флаг TASK_CONFIG.fillTerminalResources выключен (по умолчанию false),
-  // грузятся ТОЛЬКО заявки сети. Раньше в этом режиме генератор не работал
-  // вовсе (`if (!TASK_CONFIG.fillTerminalResources) return`), то есть механизм
-  // terminalExports был оборван на середине. Включённый флаг сохраняет прежнее
-  // поведение: лить в терминал всё, чего меньше RESOURCE_TERMINAL_MAX.
+  // ЕДИНЫЙ ТУМБЛЕР (правка 05.10.2026). До неё режим читался из
+  // TASK_CONFIG.fillTerminalResources, а выключение системы — ещё и из
+  // systems.js: два места правды на одну систему, причём решало более
+  // строгое (TASK_CONFIG = false), из-за чего пять генераторов (фабрика,
+  // powerSpawn x2, вывоз батарей) считались включёнными в systems.js, но не
+  // вызывались. Теперь источник один — systems.js, значение читается ОДИН раз
+  // на комнату (одна переменная, а не три чтения в горячем пути).
+  //
+  // false (значение по умолчанию) — грузятся ТОЛЬКО заявки сети.
+  // true — прежнее поведение: лить в терминал всё, чего меньше
+  // RESOURCE_TERMINAL_MAX. Живой замер tick ~83451500: терминалы заняты на
+  // ~250 000 из 300 000 (энергия ~100k + ресурсы ~145k), поэтому включение
+  // этого режима залило бы остаток места под завязку — оставлено false.
+  const flood = systems.fillTerminalResources !== false;
+
   const exports =
     (Memory.rooms &&
       Memory.rooms[roomName] &&
@@ -86,19 +100,17 @@ function generateFillTerminalResources(roomState) {
     {};
   const exportTypes = Object.keys(exports);
 
-  if (!TASK_CONFIG.fillTerminalResources && exportTypes.length === 0) {
+  if (!flood && exportTypes.length === 0) {
     return;
   }
 
   const RESOURCE_TERMINAL_MAX = 10000;
 
-  // Цель терминала — максимум из базового лимита (при включённом флаге) и
+  // Цель терминала — максимум из базового лимита (при включённом режиме) и
   // заявки сети. Заявка НЕ должна опускать цель ниже базовой: иначе излишек,
   // который ждёт рынок, не доехал бы ни до сети, ни до продажи.
-  const baseCap = TASK_CONFIG.fillTerminalResources ? RESOURCE_TERMINAL_MAX : 0;
-  const resourceTypes = TASK_CONFIG.fillTerminalResources
-    ? Object.keys(storage.store)
-    : exportTypes;
+  const baseCap = flood ? RESOURCE_TERMINAL_MAX : 0;
+  const resourceTypes = flood ? Object.keys(storage.store) : exportTypes;
 
   for (let i = 0; i < resourceTypes.length; i++) {
     const resourceType = resourceTypes[i];
