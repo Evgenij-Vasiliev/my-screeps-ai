@@ -13,7 +13,8 @@
 // потому что движок Screeps относительных путей не умеет.
 // ===================================================
 const taskManager = require("task.manager");
-const { POWER_SPAWN, TASK_CONFIG } = require("../constants");
+const econ = require("econ");
+const { POWER_SPAWN } = require("../constants");
 
 const FIELDS_POWERSPAWNPOWER = ["type", "targetId", "resourceType"];
 
@@ -29,7 +30,6 @@ function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
 }
 
 function generateFillPowerSpawnPower(roomState) {
-  if (!TASK_CONFIG.fillPowerSpawnPower) return;
   const { powerSpawn, storage, terminal, roomName } = roomState;
 
   if (!powerSpawn) {
@@ -66,7 +66,6 @@ function generateFillPowerSpawnPower(roomState) {
 }
 
 function generateFillPowerSpawnEnergy(roomState) {
-  if (!TASK_CONFIG.fillPowerSpawnEnergy) return;
   const { powerSpawn, storage, roomName } = roomState;
 
   if (!storage) {
@@ -83,6 +82,23 @@ function generateFillPowerSpawnEnergy(roomState) {
 
   const needed = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
   if (needed <= 0) {
+    return;
+  }
+
+  // ── ЗАДАЧА СТАВИТСЯ ТОЛЬКО ПРИ ПОЛОЖИТЕЛЬНОМ САЛЬДО ───────────────────
+  // Принцип владельца (05.10.2026): «такой же принцип и наполнения
+  // powerSpawn» — задача на доставку энергии появляется, только когда энергия
+  // комнаты (склад + терминал) за последнее окно ВЫРОСЛА (econ.roomGrowth).
+  //
+  // До этого генератор был выключен флагом TASK_CONFIG.fillPowerSpawnEnergy
+  // (false) при том, что тумблер systems.js показывал true, и powerSpawn стоял
+  // с power 11-88 и энергией 6-38, тогда как processPower требует всего 50
+  // энергии (engine power-spawns/process-power.js: energy < amount *
+  // POWER_SPAWN_ENERGY_RATIO(50) -> выход). Живой замер tick 83451761.
+  //
+  // Сама структура о складе не знает (powerSpawn.manager.js) — расход
+  // регулирует только очередь задач, как и у фабрики.
+  if (econ.roomGrowth(roomName) <= 0) {
     return;
   }
 

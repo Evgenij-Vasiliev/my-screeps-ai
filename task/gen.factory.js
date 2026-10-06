@@ -13,7 +13,7 @@
 // потому что движок Screeps относительных путей не умеет.
 // ===================================================
 const taskManager = require("task.manager");
-const { STORAGE, FACTORY, TASK_CONFIG } = require("../constants");
+const econ = require("econ");
 
 const FIELDS_FILLFACTORYENERGY = ["type", "sourceId", "targetId", "resourceType"];
 
@@ -22,7 +22,6 @@ function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
 }
 
 function generateFillFactoryEnergy(roomState) {
-  if (!TASK_CONFIG.fillFactoryEnergy) return;
   const { factory, storage, roomName } = roomState;
 
   if (!storage) {
@@ -37,9 +36,25 @@ function generateFillFactoryEnergy(roomState) {
     return;
   }
 
-  const reserveThreshold =
-    STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
-  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) {
+  // ── ЗАДАЧА СТАВИТСЯ ТОЛЬКО ПРИ ПОЛОЖИТЕЛЬНОМ САЛЬДО ───────────────────
+  // Принцип владельца (05.10.2026): «есть положительное сальдо по энергии
+  // (хранилище-терминал) — создаётся задача завезти энергию на фабрику, то
+  // есть задача создаётся только при УВЕЛИЧЕНИИ энергии в комнате; такой же
+  // принцип и наполнения powerSpawn».
+  //
+  // saldo = энергия комнаты (склад + терминал) за последнее окно: выросла —
+  // задача есть, упала или стоит — задачи нет.
+  //
+  // ЧТО ЭТИМ ЗАКРЫТО. Раньше генератор возил энергию, пока в фабрике есть
+  // ЛЮБОЕ свободное место (условие выше), то есть до 50 000 — и склады упали
+  // 190-208k -> 152-173k (живой замер tick 83463640: в фабрике E35S37 лежало
+  // 49 215 энергии при нуле батарей, rate империи -870/тик). Теперь как только
+  // энергия комнаты перестала расти — в том числе потому, что её вывезли в
+  // фабрику, — новые задачи не ставятся, и закачка останавливается сама.
+  //
+  // Никаких порогов свободных средств склада здесь нет: сама фабрика о складе
+  // не знает (factory.manager.js), расход регулирует только очередь задач.
+  if (econ.roomGrowth(roomName) <= 0) {
     return;
   }
 
@@ -65,7 +80,6 @@ function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
 }
 
 function generateCollectFactoryBattery(roomState) {
-  if (!TASK_CONFIG.collectFactoryBattery) return;
   const { factory, storage, roomName } = roomState;
 
   if (!storage) {
