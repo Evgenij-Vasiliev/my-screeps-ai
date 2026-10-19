@@ -59,6 +59,15 @@ function nextStopId(full, task) {
   return full ? task.targetId || task.sourceId : task.sourceId || task.targetId;
 }
 
+/**
+ * Разрешена ли крипу очередь этого типа. Крип без списка (memory.tasks не
+ * массив: не задан или "all") берёт любые задачи — поведение по умолчанию.
+ */
+function allowsTask(creep, type) {
+  const tasks = creep.memory.tasks;
+  return !Array.isArray(tasks) || tasks.indexOf(type) !== -1;
+}
+
 /** Расстояние до следующей точки маршрута; Infinity — цель недоступна. */
 function rangeToNextStop(creep, full, task) {
   const id = nextStopId(full, task);
@@ -101,6 +110,9 @@ function nearestTypeIndex(creep, roomName, fromIndex, full) {
   for (let step = 1; step <= TASK_CHAIN.length; step++) {
     const index = (fromIndex + step) % TASK_CHAIN.length;
     const type = TASK_CHAIN[index];
+
+    // Крип с ограниченным списком задач (memory.tasks) чужие очереди не берёт.
+    if (!allowsTask(creep, type)) continue;
 
     // Очередь без исполнителя брать нельзя: воркер завис бы с задачей в руках.
     if (!taskExecutors.executors[type]) continue;
@@ -211,9 +223,13 @@ function run(creep) {
     // См. комментарий к roomHasNoFreeTasks.
     if (roomHasNoFreeTasks(roomName)) return;
 
-    let candidate = taskManager.getNextTask(roomName, currentTaskType, task =>
-      rangeToNextStop(creep, full, task),
-    );
+    // Текущая очередь крипу не разрешена — сразу ищем среди разрешённых.
+    let candidate = null;
+    if (allowsTask(creep, currentTaskType)) {
+      candidate = taskManager.getNextTask(roomName, currentTaskType, task =>
+        rangeToNextStop(creep, full, task),
+      );
+    }
 
     if (!candidate) {
       // Очередь текущего типа пуста (или все Task зарезервированы) — берём
@@ -225,7 +241,10 @@ function run(creep) {
         // пишем в Memory (раньше здесь крутился taskIndex каждый тик).
         // Запоминаем это на комнату до конца тика — остальные простаивающие
         // воркеры комнаты не будут обходить очереди заново.
-        markRoomDry(roomName);
+        // «Сухой» отметкой комнату помечает только крип без ограничений:
+        // у крипа со списком задач пусто лишь в его очередях, а у остальных
+        // воркеров свободные задачи могут быть.
+        if (!Array.isArray(creep.memory.tasks)) markRoomDry(roomName);
         return;
       }
 

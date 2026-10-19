@@ -6,38 +6,15 @@
 const { TERMINAL_SUPPLY, MARKET } = require("./constants");
 const loadShed = require("loadShed");
 
-// Единый источник порогов терминала — TERMINAL_SUPPLY из constants.js.
-// Продаём всё, что превышает эти же значения, которые Task System
-// использует как цель для довоза. Дублирования порогов больше нет.
-const CONFIG = {
-  ENABLE_ENERGY: true,
-  ENABLE_BATTERY: true,
-  ENABLE_MINERALS: true,
-  ENABLE_COMPOUNDS: true,
-
-  MAX_DEALS_PER_TICK: 3,
-  MIN_PRICE_RATIO: 0.8,
-
-  ENABLE_POWER_BUY: false,
-  POWER_TARGET: 100000,
-  POWER_MAX_PRICE_RATIO: 1.2,
-};
-
-const BASE_MINERALS = [
-  RESOURCE_HYDROGEN,
-  RESOURCE_OXYGEN,
-  RESOURCE_UTRIUM,
-  RESOURCE_LEMERGIUM,
-  RESOURCE_KEANIUM,
-  RESOURCE_ZYNTHIUM,
-  RESOURCE_CATALYST,
-];
+// Настройки маркета (включение групп, лимиты сделок, пороги цен, порядок обхода
+// групп, базовые минералы, интервалы) лежат в MARKET из constants.js.
+// Резерв терминала по группам берётся из TERMINAL_SUPPLY там же.
 
 const COMPOUNDS = RESOURCES_ALL.filter(
   r =>
     r !== RESOURCE_ENERGY &&
     r !== RESOURCE_BATTERY &&
-    !BASE_MINERALS.includes(r),
+    !MARKET.BASE_MINERALS.includes(r),
 );
 
 /**
@@ -97,18 +74,18 @@ function findAffordableBuyOrders(resourceType, maxPriceRatio = 1.2) {
 function getResourceGroup(resourceType) {
   if (resourceType === RESOURCE_ENERGY) return "ENERGY";
   if (resourceType === RESOURCE_BATTERY) return "BATTERY";
-  if (BASE_MINERALS.includes(resourceType)) return "MINERALS";
+  if (MARKET.BASE_MINERALS.includes(resourceType)) return "MINERALS";
   return "COMPOUNDS";
 }
 
 function isGroupEnabled(group) {
-  return CONFIG[`ENABLE_${group}`];
+  return MARKET[`ENABLE_${group}`];
 }
 
 function getReserve(group) {
   const map = {
     ENERGY: TERMINAL_SUPPLY.ENERGY_MIN,
-    BATTERY: TERMINAL_SUPPLY.BATTERY_MAX,
+    BATTERY: MARKET.BATTERY_SELL_RESERVE,
     MINERALS: TERMINAL_SUPPLY.MINERAL_MAX,
     COMPOUNDS: TERMINAL_SUPPLY.COMPOUND_MAX,
   };
@@ -139,7 +116,8 @@ function getEmpireTerminals() {
   const terminals = [];
   for (let i = 0; i < names.length; i++) {
     const room = Game.rooms[names[i]];
-    if (room && room.terminal && room.terminal.my) terminals.push(room.terminal);
+    if (room && room.terminal && room.terminal.my)
+      terminals.push(room.terminal);
   }
   return terminals;
 }
@@ -159,7 +137,7 @@ function findBestOrder(resourceType) {
   for (let i = 0; i < orders.length; i++) {
     if (orders[i].price > maxPrice) maxPrice = orders[i].price;
   }
-  const minAcceptable = maxPrice * CONFIG.MIN_PRICE_RATIO;
+  const minAcceptable = maxPrice * MARKET.MIN_PRICE_RATIO;
 
   const goodOrders = orders.filter(o => o.price >= minAcceptable);
   if (goodOrders.length === 0) return null;
@@ -167,16 +145,6 @@ function findBestOrder(resourceType) {
   goodOrders.sort((a, b) => b.price - a.price);
   return goodOrders[0];
 }
-
-/**
- * Основной цикл Market Manager. Вызывается один раз за тик для всей
- * Империи (не для каждой комнаты по отдельности — раздел 6 ТЗ №6).
- */
-// Порядок обхода групп (ENERGY первой). Без явного порядка перебор
-// ресурсов в terminal.store идёт в произвольном/стабильном порядке
-// ключей объекта, и лимит MAX_DEALS_PER_TICK может каждый тик
-// расходоваться на одну и ту же группу, не давая другим шанса.
-const GROUP_ORDER = ["ENERGY", "BATTERY", "MINERALS", "COMPOUNDS"];
 
 function trySellResource(terminal, resourceType, surplus) {
   const order = findBestOrder(resourceType);
@@ -199,15 +167,15 @@ function trySellResource(terminal, resourceType, surplus) {
 function tryBuyPower(terminal) {
   const currentPower = terminal.store[RESOURCE_POWER] || 0;
 
-  if (currentPower >= CONFIG.POWER_TARGET) {
+  if (currentPower >= MARKET.POWER_TARGET) {
     return false;
   }
 
-  const needed = CONFIG.POWER_TARGET - currentPower;
+  const needed = MARKET.POWER_TARGET - currentPower;
 
   const orders = findAffordableBuyOrders(
     RESOURCE_POWER,
-    CONFIG.POWER_MAX_PRICE_RATIO,
+    MARKET.POWER_MAX_PRICE_RATIO,
   );
   if (orders.length === 0) {
     return false;
@@ -234,6 +202,10 @@ function tryBuyPower(terminal) {
   return result === OK;
 }
 
+/**
+ * Основной цикл Market Manager. Вызывается один раз за тик для всей
+ * Империи (не для каждой комнаты по отдельности — раздел 6 ТЗ №6).
+ */
 function run() {
   if (!Game.market) return;
 
@@ -272,18 +244,18 @@ function run() {
 
   let dealsCount = 0;
 
-  for (const group of GROUP_ORDER) {
-    if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+  for (const group of MARKET.GROUP_ORDER) {
+    if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
     if (!isGroupEnabled(group)) continue;
 
     // Порог группы одинаков для всех ресурсов и терминалов — считаем один раз.
     const reserve = getReserve(group);
 
     for (const terminal of terminals) {
-      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+      if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
       for (const resourceType in terminal.store) {
-        if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+        if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
         if (getResourceGroup(resourceType) !== group) continue;
 
         const surplus = terminal.store[resourceType] - reserve;
@@ -296,9 +268,9 @@ function run() {
     }
   }
 
-  if (CONFIG.ENABLE_POWER_BUY) {
+  if (MARKET.ENABLE_POWER_BUY) {
     for (const terminal of terminals) {
-      if (dealsCount >= CONFIG.MAX_DEALS_PER_TICK) break;
+      if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
       if (tryBuyPower(terminal)) {
         dealsCount++;
@@ -307,5 +279,11 @@ function run() {
   }
 }
 
-module.exports.CONFIG = CONFIG;
+// Прежнее имя экспорта сохранено: market.CONFIG — тот же объект MARKET.
+module.exports.CONFIG = MARKET;
 module.exports.run = run;
+
+// Комиссия терминала: Game.market разрешён только в этом файле.
+module.exports.getTransactionCost = function (amount, room1, room2) {
+  return Game.market.calcTransactionCost(amount, room1, room2);
+};

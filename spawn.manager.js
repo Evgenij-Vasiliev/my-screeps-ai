@@ -35,6 +35,7 @@
  */
 const creepFactory = require("creep.factory");
 const cpuMonitor = require("cpuMonitor");
+const systems = require("systems");
 const {
   SPAWN_QUOTA,
   SPAWN,
@@ -65,6 +66,9 @@ function countRoles(creeps) {
     const creep = creeps[i];
     if (!creep) continue;
 
+    // Дополнительные крипы (systems.extraCreeps) в квоту роли не входят.
+    if (creep.memory.extra !== undefined) continue;
+
     const role = creep.memory.role;
 
     // !quota отсекает и 0, и роли вне таблицы квот.
@@ -82,6 +86,23 @@ function countRoles(creeps) {
     counts[role] = (counts[role] || 0) + 1;
   }
 
+  return counts;
+}
+
+/**
+ * Счётчики дополнительных крипов комнаты по группам (memory.extra).
+ * @param {Array} creeps
+ * @returns {Object} ключ группы -> количество
+ */
+function countExtras(creeps) {
+  const counts = {};
+  for (let i = 0; i < creeps.length; i++) {
+    const creep = creeps[i];
+    if (!creep) continue;
+    const key = creep.memory.extra;
+    if (key === undefined) continue;
+    counts[key] = (counts[key] || 0) + 1;
+  }
   return counts;
 }
 
@@ -138,9 +159,7 @@ function scanStagger(roomName) {
 
 /** Следующий тик проверки для комнаты, которой сейчас ничего не нужно. */
 function idleDue(roomName, now, firstScan) {
-  return (
-    now + SPAWN.SCAN_INTERVAL - (firstScan ? scanStagger(roomName) : 0)
-  );
+  return now + SPAWN.SCAN_INTERVAL - (firstScan ? scanStagger(roomName) : 0);
 }
 
 /**
@@ -234,6 +253,24 @@ function run(roomState) {
     // break, а не return: выход ровно тот же (после цикла в функции ничего
     // нет, кроме шлюза и профиля), но шлюз успевает записать следующий срок.
     if (result === OK) break;
+  }
+
+  // Дополнительные крипы комнаты (systems.extraCreeps), сверх квоты.
+  const extraGroups = systems.extraCreeps && systems.extraCreeps[roomName];
+  if (extraGroups) {
+    const extraCounts = countExtras(roomState.creeps);
+    for (let g = 0; g < extraGroups.length; g++) {
+      const group = extraGroups[g];
+      const key = roomName + "#" + g;
+      if (!group.count || (extraCounts[key] || 0) >= group.count) continue;
+
+      roomWants = true;
+      if (!spawn) {
+        spawn = findFreeSpawn(roomState.spawns);
+        if (!spawn) break;
+      }
+      if (creepFactory.runExtra(spawn, group, key, roomName) === OK) break;
+    }
   }
 
   // Следующая проверка. Недобор есть — каждый тик, как и раньше: крип не

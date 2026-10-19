@@ -6,7 +6,9 @@
 const taskManager = require("task.manager");
 const roomManager = require("room.manager");
 const marketManager = require("market.manager");
+const terminalNetwork = require("terminalNetwork");
 const cpuMonitor = require("cpuMonitor");
+const systems = require("systems");
 
 module.exports.run = function () {
   cpuMonitor.startTick();
@@ -40,14 +42,16 @@ module.exports.run = function () {
   if (Memory.towerState) delete Memory.towerState;
 
   // 2. Уровень комнат — вся комнатная логика внутри roomManager
-  roomManager.run();
+  if (systems.roomManager) roomManager.run();
 
-  // 3. TerminalNetwork — заглушка, не подключена. Импорт убран: модуль
-  // загружался на каждом рестарте и висел в выгрузке мёртвым грузом.
-  // Когда межкомнатная логистика появится, require вернётся сюда же.
-
+  // 3. TerminalNetwork — межкомнатная логистика (тумблер systems.terminalNetwork)
+  if (systems.terminalNetwork) {
+    cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
+  }
   // 4. Рынок империального уровня
-  cpuMonitor.trackRole("marketManager", () => marketManager.run());
+  if (systems.marketManager) {
+    cpuMonitor.trackRole("marketManager", () => marketManager.run());
+  }
 
   // 5. Сжатие очередей задач. Завершение задачи оставляет в массиве
   // null-надгробие (чтобы не сдвигать массив и держать O(1)); дыры надо

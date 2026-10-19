@@ -1,5 +1,5 @@
 const energySource = require("energySource");
-const { STORAGE, TERMINAL_SUPPLY, CONTROLLER, MOVE } = require("./constants");
+const { STORAGE, TERMINAL_SUPPLY, CONTROLLER } = require("./constants");
 
 /**
  * ШАГ 3 ПЛАНА (ленивый резолв целей): повторяющиеся в одном тике id берём из
@@ -46,7 +46,7 @@ function withdrawPower(creep) {
   if (storage && storage.store[RESOURCE_POWER] > 0) {
     const result = creep.withdraw(storage, RESOURCE_POWER);
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, { reusePath: MOVE.STABLE });
+      creep.travelTo(storage);
     }
     return result === OK || result === ERR_NOT_IN_RANGE;
   }
@@ -54,7 +54,7 @@ function withdrawPower(creep) {
   if (terminal && terminal.store[RESOURCE_POWER] > 0) {
     const result = creep.withdraw(terminal, RESOURCE_POWER);
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(terminal, { reusePath: MOVE.STABLE });
+      creep.travelTo(terminal);
     }
     return result === OK || result === ERR_NOT_IN_RANGE;
   }
@@ -127,7 +127,7 @@ function executeFillSpawnsExtensions(creep, task) {
       return isTargetFull(target) ? "DONE" : "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
 
     case ERR_FULL:
@@ -199,7 +199,7 @@ function executeFillFactoryEnergy(creep, task) {
       return "CONTINUE"; // завершение определится в начале следующего тика по working+store===0
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
 
     case ERR_FULL:
@@ -270,7 +270,7 @@ function executeCollectFactoryBattery(creep, task) {
     const result = creep.withdraw(source, RESOURCE_BATTERY);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { reusePath: MOVE.STABLE });
+      creep.travelTo(source);
       return "CONTINUE";
     }
 
@@ -290,7 +290,7 @@ function executeCollectFactoryBattery(creep, task) {
       return "CONTINUE"; // завершение определится на входе следующего тика
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
 
     case ERR_FULL:
@@ -357,7 +357,7 @@ function executeFillTowers(creep, task) {
       return "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
 
     case ERR_FULL:
@@ -422,7 +422,7 @@ function executeFillTerminalEnergy(creep, task) {
       return isTargetFull(target) ? "DONE" : "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
 
     case ERR_FULL:
@@ -485,7 +485,7 @@ function executeFillTerminalResources(creep, task) {
     const result = creep.withdraw(source, resourceType);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { reusePath: MOVE.STABLE });
+      creep.travelTo(source);
       return "CONTINUE";
     }
 
@@ -505,7 +505,7 @@ function executeFillTerminalResources(creep, task) {
   const result = creep.transfer(target, resourceType);
 
   if (result === ERR_NOT_IN_RANGE) {
-    creep.moveTo(target, { reusePath: MOVE.NORMAL });
+    creep.travelTo(target);
     return "CONTINUE";
   }
 
@@ -560,7 +560,7 @@ function executeFillPowerSpawnPower(creep, task) {
     const result = creep.transfer(target, RESOURCE_POWER);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
     }
 
@@ -581,7 +581,7 @@ function executeFillPowerSpawnPower(creep, task) {
   const dropResult = creep.transfer(storage, RESOURCE_POWER);
 
   if (dropResult === ERR_NOT_IN_RANGE) {
-    creep.moveTo(storage, { reusePath: MOVE.STABLE });
+    creep.travelTo(storage);
     return "CONTINUE";
   }
 
@@ -636,7 +636,7 @@ function executeFillPowerSpawnEnergy(creep, task) {
     const result = creep.withdraw(source, RESOURCE_ENERGY);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { reusePath: MOVE.STABLE });
+      creep.travelTo(source);
       return "CONTINUE";
     }
 
@@ -652,7 +652,7 @@ function executeFillPowerSpawnEnergy(creep, task) {
     const result = creep.transfer(target, RESOURCE_ENERGY);
 
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target);
       return "CONTINUE";
     }
 
@@ -677,7 +677,7 @@ function executeFillPowerSpawnEnergy(creep, task) {
   const dropResult = creep.transfer(dropTarget, RESOURCE_ENERGY);
 
   if (dropResult === ERR_NOT_IN_RANGE) {
-    creep.moveTo(dropTarget, { reusePath: MOVE.STABLE });
+    creep.travelTo(dropTarget);
     return "CONTINUE";
   }
 
@@ -742,7 +742,7 @@ function executeRepairStructures(creep, task) {
       return target.hits >= target.hitsMax ? "DONE" : "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target, { range: 3 });
       return "CONTINUE";
 
     case ERR_INVALID_TARGET:
@@ -804,7 +804,7 @@ function executeBuildStructures(creep, task) {
       return "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.NORMAL });
+      creep.travelTo(target, { range: 3 });
       return "CONTINUE";
 
     case ERR_INVALID_TARGET:
@@ -874,7 +874,7 @@ function executeUpgradeController(creep, task) {
       return "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
-      creep.moveTo(target, { reusePath: MOVE.VOLATILE });
+      creep.travelTo(target, { range: 3 });
       return "CONTINUE";
 
     case ERR_INVALID_TARGET:

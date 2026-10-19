@@ -138,6 +138,39 @@ const factory = {
 
     return spawn.spawnCreep(blueprint.body, name, { memory });
   },
+
+  /**
+   * Дополнительный крип комнаты (systems.extraCreeps), сверх квоты.
+   * Тело из группы, а если не задано — из CREEP_BODIES роли.
+   * @param {StructureSpawn} spawn
+   * @param {Object} group запись из systems.extraCreeps[комната]
+   * @param {string} key ключ группы, например "E37S38#0"
+   * @param {string} roomName
+   * @returns {ScreepsReturnCode}
+   */
+  runExtra: function (spawn, group, key, roomName) {
+    const blueprintFn = this.blueprints[group.role];
+    if (!blueprintFn) return ERR_INVALID_ARGS;
+
+    const name = `${group.role}_${roomName}_${Game.time}_x`;
+    const blueprint = blueprintFn(spawn, undefined, name);
+    if (!blueprint) return ERR_INVALID_ARGS;
+
+    const body = group.body ? prepareBody(group.body) : blueprint.body;
+    if (!body || body.length === 0) return ERR_INVALID_ARGS;
+
+    const memory = Object.assign(
+      { role: group.role, homeRoom: roomName },
+      blueprint.memory,
+      {
+        extra: key,
+        tasks: Array.isArray(group.tasks) ? group.tasks.slice() : "all",
+        ignoreReserves: group.ignoreReserves === true,
+      },
+    );
+
+    return spawn.spawnCreep(body, name, { memory });
+  },
 };
 
 module.exports = factory;

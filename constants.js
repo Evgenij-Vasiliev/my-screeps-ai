@@ -90,12 +90,12 @@ const TASK_CONFIG = {
   // и в worker.runner.js (обрыв перебора типов очередей).
   NEAREST_STOP_RANGE: 1,
   fillSpawnsExtensions: true,
-  fillPowerSpawnPower: false,
-  fillPowerSpawnEnergy: false,
+  fillPowerSpawnPower: true,
+  fillPowerSpawnEnergy: true,
   fillTerminalEnergy: true,
-  fillTerminalResources: false,
-  fillFactoryEnergy: false,
-  collectFactoryBattery: false,
+  fillTerminalResources: true,
+  fillFactoryEnergy: true,
+  collectFactoryBattery: true,
   repairStructures: true,
   buildStructures: true,
   fillTowers: true,
@@ -330,6 +330,48 @@ const MOVE = {
 };
 
 const MARKET = {
+  // ── Какие группы ресурсов продаёт market manager ─────────────────────
+  // Группа выключена — её ресурсы с терминалов не продаются вовсе.
+  // Резерв, выше которого идёт продажа, задаёт TERMINAL_SUPPLY (выше в файле):
+  // ENERGY_MIN, BATTERY_MAX, MINERAL_MAX, COMPOUND_MAX.
+  //
+  // Энергия НЕ продаётся с 17.10.2026 (решение человека): вместо неё уходят
+  // батарейки. Откат — ENABLE_ENERGY: true.
+  ENABLE_ENERGY: false,
+  ENABLE_BATTERY: true,
+  // Сколько батареек оставлять в терминале после продажи. Отдельно от
+  // TERMINAL_SUPPLY.BATTERY_MAX: тот порог — цель довоза (терминал заполняется
+  // до него), и если продавать только выше него, излишка не бывает никогда.
+  // 0 — продаётся всё (решение человека 18.10.2026). Задачи довоза снова
+  // наполняют терминал до BATTERY_MAX, поэтому продажа идёт непрерывно.
+  BATTERY_SELL_RESERVE: 0,
+  ENABLE_MINERALS: true,
+  ENABLE_COMPOUNDS: true,
+
+  // Максимум сделок Game.market.deal за один проход рынка.
+  MAX_DEALS_PER_TICK: 3,
+  // Не продавать дешевле этой доли от максимальной цены среди всех BUY-ордеров
+  // (решение Координатора: 80 %).
+  MIN_PRICE_RATIO: 0.8,
+
+  // Закупка power: сколько держать в терминале и во сколько раз цена SELL-ордера
+  // может превышать минимальную среди всех SELL-ордеров.
+  ENABLE_POWER_BUY: false,
+  POWER_TARGET: 100000,
+  POWER_MAX_PRICE_RATIO: 1.2,
+
+  // Порядок обхода групп (ENERGY первой). Без явного порядка перебор
+  // ресурсов в terminal.store идёт в произвольном/стабильном порядке
+  // ключей объекта, и лимит MAX_DEALS_PER_TICK может каждый тик
+  // расходоваться на одну и ту же группу, не давая другим шанса.
+  GROUP_ORDER: ["ENERGY", "BATTERY", "MINERALS", "COMPOUNDS"],
+
+  // Базовые минералы (группа MINERALS). Записаны строками, чтобы constants.js
+  // не зависел от игровых глобалей: "H" = RESOURCE_HYDROGEN, "O" = RESOURCE_OXYGEN,
+  // "U" = RESOURCE_UTRIUM, "L" = RESOURCE_LEMERGIUM, "K" = RESOURCE_KEANIUM,
+  // "Z" = RESOURCE_ZYNTHIUM, "X" = RESOURCE_CATALYST.
+  BASE_MINERALS: ["H", "O", "U", "L", "K", "Z", "X"],
+
   // Тиков между проходами рынка. Один проход стоит 0.16-0.89 CPU на каждый
   // РАЗЛИЧНЫЙ запрос getAllOrders (замерено на живом шарде, см.
   // docs/CPU-BASELINE.md), поэтому рынок не может работать каждый тик.
@@ -343,6 +385,15 @@ const MARKET = {
   INTERVAL: 30,
   // Сколько тиков держится кэш списка комнат с терминалами.
   TERMINALS_CACHE_TTL: 100,
+};
+
+const TERMINAL_NETWORK = {
+  MIN_SEND_AMOUNT: 1000, // меньше не шлём — комиссия не окупается
+  RESOURCE_SURPLUS_ABOVE: 10000, // суммарный запас выше этого — донор
+  RESOURCE_DEFICIT_BELOW: 2000, // суммарный запас ниже этого — получатель
+  RESOURCE_TARGET: 5000, // до какого уровня докидываем получателю
+  ENERGY_FLOOR: 10000, // сколько энергии донор оставляет после отправки
+  STATUS_INTERVAL: 50, // раз в сколько тиков писать статус
 };
 
 const CPU = {
@@ -390,6 +441,7 @@ const CPU = {
 module.exports = {
   STORAGE,
   MARKET,
+  TERMINAL_NETWORK,
   TASK_TYPES,
   TERMINAL_SUPPLY,
   FACTORY,

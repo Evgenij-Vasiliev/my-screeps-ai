@@ -8,7 +8,6 @@
  * Стоит между линком и storage, перекладывает энергию.
  * ===================================================
  */
-const { MOVE } = require("./constants");
 
 module.exports = {
   run: function (creep) {
@@ -24,7 +23,7 @@ module.exports = {
 
       const result = creep.withdraw(storageLink, RESOURCE_ENERGY);
       if (result === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storageLink, { reusePath: MOVE.STABLE });
+        creep.travelTo(storageLink);
       } else if (result !== OK) {
         console.log(
           `[LinkWorker] ${creep.room.name} : withdraw() вернул ошибку ${result}`,
@@ -35,7 +34,7 @@ module.exports = {
 
     const result = creep.transfer(storage, RESOURCE_ENERGY);
     if (result === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, { reusePath: MOVE.STABLE });
+      creep.travelTo(storage);
     } else if (result !== OK) {
       console.log(
         `[LinkWorker] ${creep.room.name} : transfer() вернул ошибку ${result}`,

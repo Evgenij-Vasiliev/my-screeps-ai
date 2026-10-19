@@ -1,4 +1,3 @@
-const { MOVE } = require("./constants");
 
 const roleMineralMiner = {
   run: function (creep, roomState) {
@@ -33,7 +32,7 @@ const roleMineralMiner = {
 
       const transferResult = creep.transfer(storage, resourceType);
       if (transferResult === ERR_NOT_IN_RANGE) {
-        creep.moveTo(storage, { reusePath: MOVE.NORMAL, visualize: false });
+        creep.travelTo(storage);
       } else if (transferResult !== OK) {
         console.log(
           `[Mineral] ${creep.name} : transfer() вернул ошибку ${transferResult}`,
@@ -50,7 +49,7 @@ const roleMineralMiner = {
 
     const harvestResult = creep.harvest(mineral);
     if (harvestResult === ERR_NOT_IN_RANGE) {
-      creep.moveTo(mineral, { reusePath: MOVE.NORMAL, visualize: false });
+      creep.travelTo(mineral);
     } else if (harvestResult !== OK) {
       // console.log(...)
     }

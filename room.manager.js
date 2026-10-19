@@ -31,6 +31,7 @@ const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER, TASK_CONFIG } = require("./constants");
 const loadShed = require("loadShed");
+const systems = require("systems");
 
 const ROLES = {
   harvester: roleHarvester,
@@ -47,6 +48,7 @@ const ROLES = {
 function runCreep(creep, roomState) {
   const roleModule = ROLES[creep.memory.role];
   if (!roleModule) return;
+  if (systems[creep.memory.role] === false) return;
 
   try {
     roleModule.run(creep, roomState);
@@ -752,7 +754,9 @@ module.exports = {
     const shedLite = shed >= 1;
     const shedHard = shed >= 2;
 
-    cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
+    if (systems.spawnManager) {
+      cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
+    }
     cpuMonitor.trackRole("taskManager", () => {
       // ── Замер цены КАЖДОГО генератора задач ──────────────────────────
       // Включается флагом Memory.cpuGenProfile = true (снять —
@@ -788,13 +792,19 @@ module.exports = {
       // всегда. При max срочное тоже продолжает ставиться — бот должен
       // выжить, а не остановиться.
       if (TASK_CONFIG.fillSpawnsExtensions) {
-        gen("fillSpawnsExtensions", taskGenerators.generateFillSpawnsExtensions);
+        gen(
+          "fillSpawnsExtensions",
+          taskGenerators.generateFillSpawnsExtensions,
+        );
       }
       if (TASK_CONFIG.fillPowerSpawnPower && !shedHard) {
         gen("fillPowerSpawnPower", taskGenerators.generateFillPowerSpawnPower);
       }
       if (TASK_CONFIG.fillPowerSpawnEnergy && !shedHard) {
-        gen("fillPowerSpawnEnergy", taskGenerators.generateFillPowerSpawnEnergy);
+        gen(
+          "fillPowerSpawnEnergy",
+          taskGenerators.generateFillPowerSpawnEnergy,
+        );
       }
       if (TASK_CONFIG.fillFactoryEnergy && !shedHard) {
         gen("fillFactoryEnergy", taskGenerators.generateFillFactoryEnergy);
@@ -828,19 +838,25 @@ module.exports = {
         gen("upgradeController", taskGenerators.generateUpgradeController);
       }
     });
-    runCreepLogic(roomState);
-    runTowerLogic(roomState);
-    runLinkLogic(roomState);
+    if (systems.creeps) runCreepLogic(roomState);
+    if (systems.towers) runTowerLogic(roomState);
+    if (systems.linkManager) runLinkLogic(roomState);
     // Шаг 8: проверка читается В ТОЧКЕ ВЫЗОВА, а не из `shed` выше (он прочитан
     // в начале комнаты, room.manager.js:610). Фабрика и powerSpawn идут ПОСЛЕ
     // ролевой логики и башен, поэтому пик внутри этой же комнаты иначе в гейт не
     // попадёт. Цена — один Game.cpu.getUsed() на комнату за тик
     // (0.000256–0.000310 CPU за вызов, docs/PROFILING-ON-DEMAND.md:82).
     if (!shedHard && !loadShed.overBudget()) {
-      cpuMonitor.trackRole("factoryManager", () => factoryManager.run(roomState));
-      cpuMonitor.trackRole("powerSpawnManager", () =>
-        powerSpawnManager.run(roomState),
-      );
+      if (systems.factoryManager) {
+        cpuMonitor.trackRole("factoryManager", () =>
+          factoryManager.run(roomState),
+        );
+      }
+      if (systems.powerSpawnManager) {
+        cpuMonitor.trackRole("powerSpawnManager", () =>
+          powerSpawnManager.run(roomState),
+        );
+      }
     }
   },
 
@@ -853,6 +869,7 @@ module.exports = {
     const roomStates = this.buildAllRoomStates();
 
     for (const roomState of roomStates) {
+      if (systems[roomState.roomName] === false) continue;
       this.runRoom(roomState);
     }
 

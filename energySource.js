@@ -6,7 +6,7 @@
  * "взять энергию из storage" в нескольких ролях (builder, upgrader,
  * repairer, towerSupplier) — единая точка правды, единое поведение.
  */
-const { STORAGE, MOVE } = require("./constants");
+const { STORAGE } = require("./constants");
 
 module.exports = {
   /**
@@ -27,15 +27,18 @@ module.exports = {
     const storage = creep.room.storage;
     if (!storage || storage.store[RESOURCE_ENERGY] === 0) return false;
 
+    // memory.ignoreReserves ставит фабрика крипов группам systems.extraCreeps
+    // с флагом ignoreReserves: такой крип берёт энергию в обход резерва склада.
     if (
       !ignoreReserve &&
+      creep.memory.ignoreReserves !== true &&
       storage.store[RESOURCE_ENERGY] <= STORAGE.ENERGY_MIN
     ) {
       return false;
     }
 
     if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(storage, { reusePath: MOVE.STABLE });
+      creep.travelTo(storage);
     }
     return true;
   },
