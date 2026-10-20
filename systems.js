@@ -82,7 +82,7 @@ module.exports = {
     E35S39: [
       {
         role: "worker",
-        count: 1,
+        count: 0,
         tasks: ["fillSpawnsExtensions"],
         body: { work: 0, carry: 15, move: 10 },
         ignoreReserves: false,

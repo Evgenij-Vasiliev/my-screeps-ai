@@ -26,12 +26,14 @@ const roleRepairer = require("role.repairer");
 const roleMiner = require("role.miner");
 const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
+const roleLabWorker = require("lab.worker");
 const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER, TASK_CONFIG } = require("./constants");
 const loadShed = require("loadShed");
 const systems = require("systems");
+const labManager = require("lab.manager");
 
 const ROLES = {
   harvester: roleHarvester,
@@ -41,6 +43,7 @@ const ROLES = {
   miner: roleMiner,
   towerSupplier: roleTowerSupplier,
   linkWorker: roleLinkWorker,
+  labWorker: roleLabWorker,
   mineralMiner: roleMineralMiner,
   worker: workerRunner,
 };
@@ -841,6 +844,11 @@ module.exports = {
     if (systems.creeps) runCreepLogic(roomState);
     if (systems.towers) runTowerLogic(roomState);
     if (systems.linkManager) runLinkLogic(roomState);
+    if (systems.labManager) {
+      cpuMonitor.trackRole("labManager", () =>
+        labManager.run(Game.rooms[roomState.roomName]),
+      );
+    }
     // Шаг 8: проверка читается В ТОЧКЕ ВЫЗОВА, а не из `shed` выше (он прочитан
     // в начале комнаты, room.manager.js:610). Фабрика и powerSpawn идут ПОСЛЕ
     // ролевой логики и башен, поэтому пик внутри этой же комнаты иначе в гейт не

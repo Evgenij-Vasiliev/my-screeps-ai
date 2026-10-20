@@ -112,6 +112,7 @@ const PRESPAWN_THRESHOLD = { miner: 100, linkWorker: 30 };
 const SPAWN_QUOTA = {
   harvester: 0,
   linkWorker: 1,
+  labWorker: 1,
   // Один майнер на комнату с 01.10.2026: он обслуживает ОБА источника,
   // переходя между спотами (role.miner.js). Источники refill раз в 300 тиков
   // (ENERGY_REGEN_TIME), вычерпываются за ~65 тиков, переход между спотами
@@ -233,6 +234,7 @@ const CREEP_BODIES = {
   // отправителей (linkManager выходит, если у линка хранилища нет места).
   // MOVE только чтобы дойти до места: у линка и хранилища он не ходит.
   linkWorker: { carry: 16, move: 4 },
+  labWorker: { carry: 16, move: 8 },
   harvester: { work: 1, carry: 1, move: 1 },
   upgrader: { work: 3, carry: 2, move: 3 },
   builder: { work: 5, carry: 5, move: 5 },
@@ -459,3 +461,4 @@ module.exports = {
   MOVE,
   CPU,
 };
+Object.assign(module.exports, require("./constants.labs"));

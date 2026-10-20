@@ -66,6 +66,11 @@ const factory = {
       memory: {},
     }),
 
+    labWorker: () => ({
+      body: prepareBody(CREEP_BODIES.labWorker),
+      memory: {},
+    }),
+
     harvester: () => ({
       body: prepareBody(CREEP_BODIES.harvester),
       memory: {
