@@ -389,10 +389,12 @@ function executeFillTerminalEnergy(creep, task) {
     return "SKIP";
   }
 
-  // Обратное направление: излишек энергии из терминала в хранилище.
-  const srcObj = resolveTarget(task.sourceId);
-  if (srcObj && srcObj.structureType === STRUCTURE_TERMINAL) {
+  // Обратное направление: излишек энергии из терминала в хранилище
+  // (цель — хранилище, источник — терминал).
+  if (target.structureType === STRUCTURE_STORAGE) {
     if (creep.store[RESOURCE_ENERGY] === 0) {
+      const srcObj = resolveTarget(task.sourceId);
+      if (!srcObj) return "SKIP";
       const excess =
         (srcObj.store[RESOURCE_ENERGY] || 0) - TERMINAL_SUPPLY.ENERGY_TARGET;
       if (excess <= 0) return "DONE";

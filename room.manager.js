@@ -34,6 +34,7 @@ const { TOWER, TASK_CONFIG } = require("./constants");
 const loadShed = require("loadShed");
 const systems = require("systems");
 const labManager = require("lab.manager");
+const boostManager = require("boost.manager");
 
 const ROLES = {
   harvester: roleHarvester,
@@ -52,6 +53,15 @@ function runCreep(creep, roomState) {
   const roleModule = ROLES[creep.memory.role];
   if (!roleModule) return;
   if (systems[creep.memory.role] === false) return;
+
+  // Буст подавляет роль, пока крип ведёт процедуру бустирования.
+  // Выключен по умолчанию: включается только systems.boostManager = true.
+  if (
+    systems.boostManager === true &&
+    boostManager.run(roomState, creep) === true
+  ) {
+    return;
+  }
 
   try {
     roleModule.run(creep, roomState);
