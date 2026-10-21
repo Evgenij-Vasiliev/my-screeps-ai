@@ -79,6 +79,15 @@ module.exports = {
   // body: части тела; не задано — берётся CREEP_BODIES роли.
   // ignoreReserves: true — брать энергию в обход резервов склада/терминала.
   extraCreeps: {
+    E37S37: [
+      {
+        role: "worker",
+        count: 0,
+        tasks: ["fillTerminalEnergy"],
+        body: { work: 0, carry: 30, move: 15 },
+        ignoreReserves: false,
+      },
+    ],
     E35S39: [
       {
         role: "worker",

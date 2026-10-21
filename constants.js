@@ -462,3 +462,12 @@ module.exports = {
   CPU,
 };
 Object.assign(module.exports, require("./constants.labs"));
+
+// Лабораторная часть терминальной сети (значения из бэкапа constants/logistics.js)
+Object.assign(module.exports.TERMINAL_NETWORK, {
+  LAB_REQUEST_BELOW: 3000, // ниже этого запаса реагента комната запрашивает сеть
+  LAB_KEEP: 1000,
+  LAB_SHIP_AMOUNT: 3000, // объём одной поставки реагента
+  LAB_SENDS_PER_TICK: 3,
+  PRIORITY_ENERGY_FLOOR: 10000,
+});

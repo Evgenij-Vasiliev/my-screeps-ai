@@ -164,6 +164,55 @@ function trySellResource(terminal, resourceType, surplus) {
   return result === OK;
 }
 
+// Закупка реагентов, которые империя не добывает (константы пока здесь).
+const REAGENT_BUY = {
+  ROOM: "E37S37", // единственная комната-закупщик, остальным O развозит сеть
+  targets: { O: 12000 }, // ресурс: сколько держать в терминале закупщика
+  MAX_PRICE_RATIO: 1.5, // не дороже 1.5 от минимальной цены на рынке
+  MIN_CREDITS: 50000, // ниже этого запаса кредитов не покупаем
+};
+
+function tryBuyReagents(terminal) {
+  if (terminal.room.name !== REAGENT_BUY.ROOM) return false;
+  if (terminal.cooldown > 0) return false;
+  const spendable = Game.market.credits - REAGENT_BUY.MIN_CREDITS;
+  if (spendable <= 0) return false;
+
+  for (const resourceType in REAGENT_BUY.targets) {
+    const needed =
+      REAGENT_BUY.targets[resourceType] - (terminal.store[resourceType] || 0);
+    if (needed < 1000) continue;
+    if (terminal.store.getFreeCapacity() < needed) continue;
+
+    const orders = findAffordableBuyOrders(
+      resourceType,
+      REAGENT_BUY.MAX_PRICE_RATIO,
+    );
+    if (orders.length === 0) continue;
+
+    const order = orders[0];
+    const amount = Math.min(
+      needed,
+      order.amount,
+      Math.floor(spendable / order.price),
+    );
+    if (amount <= 0) continue;
+
+    const energyForDeal = Game.market.calcTransactionCost(
+      amount,
+      terminal.room.name,
+      order.roomName,
+    );
+    if (terminal.store[RESOURCE_ENERGY] < energyForDeal) continue;
+
+    const dealResult = Game.market.deal(order.id, amount, terminal.room.name);
+    if (dealResult === OK) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function tryBuyPower(terminal) {
   const currentPower = terminal.store[RESOURCE_POWER] || 0;
 
@@ -243,6 +292,15 @@ function run() {
   if (terminals.length === 0) return;
 
   let dealsCount = 0;
+
+  // Закупка реагентов идёт ПЕРВОЙ: иначе продажи выбирают весь лимит сделок.
+  for (const terminal of terminals) {
+    if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
+
+    if (tryBuyReagents(terminal)) {
+      dealsCount++;
+    }
+  }
 
   for (const group of MARKET.GROUP_ORDER) {
     if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;

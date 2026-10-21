@@ -389,6 +389,27 @@ function executeFillTerminalEnergy(creep, task) {
     return "SKIP";
   }
 
+  // Обратное направление: излишек энергии из терминала в хранилище.
+  const srcObj = resolveTarget(task.sourceId);
+  if (srcObj && srcObj.structureType === STRUCTURE_TERMINAL) {
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+      const excess =
+        (srcObj.store[RESOURCE_ENERGY] || 0) - TERMINAL_SUPPLY.ENERGY_TARGET;
+      if (excess <= 0) return "DONE";
+      const amount = Math.min(creep.store.getFreeCapacity(), excess);
+      const w = creep.withdraw(srcObj, RESOURCE_ENERGY, amount);
+      if (w === ERR_NOT_IN_RANGE) {
+        creep.travelTo(srcObj);
+        return "CONTINUE";
+      }
+      return w === OK ? "CONTINUE" : "SKIP";
+    }
+    if (isTargetFull(target)) return "DONE";
+    const t = creep.transfer(target, RESOURCE_ENERGY);
+    if (t === ERR_NOT_IN_RANGE) creep.travelTo(target);
+    return t === OK || t === ERR_NOT_IN_RANGE ? "CONTINUE" : "SKIP";
+  }
+
   if (creep.store[RESOURCE_ENERGY] === 0) {
     // source нужен только в ветке забора: у полного крипа резолв не делается.
     const source = resolveTarget(task.sourceId);
@@ -402,8 +423,11 @@ function executeFillTerminalEnergy(creep, task) {
       return "SKIP";
     }
 
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    if ((target.store[RESOURCE_ENERGY] || 0) >= TERMINAL_SUPPLY.ENERGY_TARGET) {
+      return "DONE";
+    }
 
+    const withdrawn = energySource.withdrawFromStorage(creep);
     if (!withdrawn) {
       return "SKIP";
     }
@@ -411,15 +435,23 @@ function executeFillTerminalEnergy(creep, task) {
     return "CONTINUE";
   }
 
-  if (isTargetFull(target)) {
+  const room =
+    TERMINAL_SUPPLY.ENERGY_TARGET - (target.store[RESOURCE_ENERGY] || 0);
+  if (isTargetFull(target) || room <= 0) {
     return "DONE";
   }
 
-  const result = creep.transfer(target, RESOURCE_ENERGY);
+  const result = creep.transfer(
+    target,
+    RESOURCE_ENERGY,
+    Math.min(creep.store[RESOURCE_ENERGY], room),
+  );
 
   switch (result) {
     case OK:
-      return isTargetFull(target) ? "DONE" : "CONTINUE";
+      return isTargetFull(target) || room <= creep.store[RESOURCE_ENERGY]
+        ? "DONE"
+        : "CONTINUE";
 
     case ERR_NOT_IN_RANGE:
       creep.travelTo(target);

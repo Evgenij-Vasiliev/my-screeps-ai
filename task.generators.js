@@ -23,7 +23,12 @@ const TASK_TYPE = "fillSpawnsExtensions";
 const FIELDS_FILLSPAWNS = ["type", "targetId", "sourceId", "resourceType"];
 
 function isDuplicateTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillSpawnsExtensions", candidate, FIELDS_FILLSPAWNS);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillSpawnsExtensions",
+    candidate,
+    FIELDS_FILLSPAWNS,
+  );
 }
 
 function needsEnergy(target) {
@@ -155,14 +160,29 @@ function generateFillSpawnsExtensions(roomState) {
 const FIELDS_POWERSPAWNPOWER = ["type", "targetId", "resourceType"];
 
 function isDuplicatePowerSpawnPowerTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillPowerSpawnPower", candidate, FIELDS_POWERSPAWNPOWER);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillPowerSpawnPower",
+    candidate,
+    FIELDS_POWERSPAWNPOWER,
+  );
 }
 
 // Поля, по которым задача считается дублем (задание 9 плана).
-const FIELDS_POWERSPAWNENERGY = ["type", "sourceId", "targetId", "resourceType"];
+const FIELDS_POWERSPAWNENERGY = [
+  "type",
+  "sourceId",
+  "targetId",
+  "resourceType",
+];
 
 function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillPowerSpawnEnergy", candidate, FIELDS_POWERSPAWNENERGY);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillPowerSpawnEnergy",
+    candidate,
+    FIELDS_POWERSPAWNENERGY,
+  );
 }
 
 function generateFillPowerSpawnPower(roomState) {
@@ -242,10 +262,20 @@ function generateFillPowerSpawnEnergy(roomState) {
 }
 
 // Поля, по которым задача считается дублем (задание 9 плана).
-const FIELDS_FILLFACTORYENERGY = ["type", "sourceId", "targetId", "resourceType"];
+const FIELDS_FILLFACTORYENERGY = [
+  "type",
+  "sourceId",
+  "targetId",
+  "resourceType",
+];
 
 function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillFactoryEnergy", candidate, FIELDS_FILLFACTORYENERGY);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillFactoryEnergy",
+    candidate,
+    FIELDS_FILLFACTORYENERGY,
+  );
 }
 
 function generateFillFactoryEnergy(roomState) {
@@ -285,10 +315,20 @@ function generateFillFactoryEnergy(roomState) {
 }
 
 // Поля, по которым задача считается дублем (задание 9 плана).
-const FIELDS_COLLECTFACTORYBATTERY = ["type", "sourceId", "targetId", "resourceType"];
+const FIELDS_COLLECTFACTORYBATTERY = [
+  "type",
+  "sourceId",
+  "targetId",
+  "resourceType",
+];
 
 function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "collectFactoryBattery", candidate, FIELDS_COLLECTFACTORYBATTERY);
+  return taskManager.hasDuplicate(
+    roomName,
+    "collectFactoryBattery",
+    candidate,
+    FIELDS_COLLECTFACTORYBATTERY,
+  );
 }
 
 function generateCollectFactoryBattery(roomState) {
@@ -322,10 +362,20 @@ function generateCollectFactoryBattery(roomState) {
 }
 
 // Поля, по которым задача считается дублем (задание 9 плана).
-const FIELDS_FILLTERMINALENERGY = ["type", "sourceId", "targetId", "resourceType"];
+const FIELDS_FILLTERMINALENERGY = [
+  "type",
+  "sourceId",
+  "targetId",
+  "resourceType",
+];
 
 function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillTerminalEnergy", candidate, FIELDS_FILLTERMINALENERGY);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillTerminalEnergy",
+    candidate,
+    FIELDS_FILLTERMINALENERGY,
+  );
 }
 
 function generateFillTerminalEnergy(roomState) {
@@ -333,6 +383,23 @@ function generateFillTerminalEnergy(roomState) {
   const { storage, terminal, roomName } = roomState;
 
   if (!storage || !terminal) {
+    return;
+  }
+
+  if (terminal.store[RESOURCE_ENERGY] > TERMINAL_SUPPLY.ENERGY_TARGET) {
+    // Излишек в терминале: везём обратно в хранилище.
+    const back = {
+      type: "transfer",
+      sourceId: terminal.id,
+      targetId: storage.id,
+      resourceType: RESOURCE_ENERGY,
+    };
+    if (
+      storage.store.getFreeCapacity() > 0 &&
+      !isDuplicateFillTerminalEnergyTask(roomName, back)
+    ) {
+      taskManager.addTask(roomName, "fillTerminalEnergy", back);
+    }
     return;
   }
 
@@ -361,10 +428,20 @@ function generateFillTerminalEnergy(roomState) {
 }
 
 // Поля, по которым задача считается дублем (задание 9 плана).
-const FIELDS_FILLTERMINALRESOURCE = ["type", "sourceId", "targetId", "resourceType"];
+const FIELDS_FILLTERMINALRESOURCE = [
+  "type",
+  "sourceId",
+  "targetId",
+  "resourceType",
+];
 
 function isDuplicateFillTerminalResourceTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillTerminalResources", candidate, FIELDS_FILLTERMINALRESOURCE);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillTerminalResources",
+    candidate,
+    FIELDS_FILLTERMINALRESOURCE,
+  );
 }
 
 function generateFillTerminalResources(roomState) {
@@ -410,7 +487,12 @@ function generateFillTerminalResources(roomState) {
 const FIELDS_FILLTOWERS = ["type", "targetId", "sourceId", "resourceType"];
 
 function isDuplicateFillTowersTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "fillTowers", candidate, FIELDS_FILLTOWERS);
+  return taskManager.hasDuplicate(
+    roomName,
+    "fillTowers",
+    candidate,
+    FIELDS_FILLTOWERS,
+  );
 }
 
 function generateFillTowers(roomState) {
@@ -451,7 +533,12 @@ const REPAIR_THRESHOLD_RATIO = 0.5;
 const FIELDS_REPAIR = ["targetId"];
 
 function isDuplicateRepairTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "repairStructures", candidate, FIELDS_REPAIR);
+  return taskManager.hasDuplicate(
+    roomName,
+    "repairStructures",
+    candidate,
+    FIELDS_REPAIR,
+  );
 }
 
 function generateRepairStructures(roomState) {
@@ -605,7 +692,12 @@ function generateBuildStructures(roomState) {
 const FIELDS_UPGRADE = ["targetId"];
 
 function isDuplicateUpgradeTask(roomName, candidate) {
-  return taskManager.hasDuplicate(roomName, "upgradeController", candidate, FIELDS_UPGRADE);
+  return taskManager.hasDuplicate(
+    roomName,
+    "upgradeController",
+    candidate,
+    FIELDS_UPGRADE,
+  );
 }
 
 function generateUpgradeController(roomState) {
