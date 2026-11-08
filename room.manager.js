@@ -832,7 +832,7 @@ module.exports = {
       if (systems.fillFactoryEnergy && !shedHard && energyPolicy.allows(roomState.room, "factory")) {
         gen("fillFactoryEnergy", taskGenerators.generateFillFactoryEnergy);
       }
-      if (systems.collectFactoryBattery && !shedHard && energyPolicy.allows(roomState.room, "factory")) {
+      if (systems.collectFactoryBattery && !shedHard) {
         gen(
           "collectFactoryBattery",
           taskGenerators.generateCollectFactoryBattery,
@@ -875,7 +875,7 @@ module.exports = {
     // попадёт. Цена — один Game.cpu.getUsed() на комнату за тик
     // (0.000256–0.000310 CPU за вызов, docs/PROFILING-ON-DEMAND.md:82).
     if (!shedHard && !loadShed.overBudget()) {
-      if (systems.factoryManager && energyPolicy.allows(roomState.room, "factory")) {
+      if (systems.factoryManager) {
         cpuMonitor.trackRole("factoryManager", () =>
           factoryManager.run(roomState),
         );

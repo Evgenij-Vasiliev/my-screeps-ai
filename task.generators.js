@@ -296,7 +296,12 @@ function generateFillFactoryEnergy(roomState) {
     return;
   }
 
-  if (factory.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+  // Не заливаем до полного склада: держим рабочий буфер, остальное фабрика
+  // сразу перерабатывает в батарейки (600 энергии -> 50 батарей).
+  if (
+    (factory.store[RESOURCE_ENERGY] || 0) >= FACTORY.ENERGY_BUFFER ||
+    factory.store.getFreeCapacity(RESOURCE_ENERGY) === 0
+  ) {
     return;
   }
 
