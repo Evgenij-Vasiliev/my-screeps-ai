@@ -1,4 +1,6 @@
 const taskManager = require("task.manager");
+const systems = require("systems");
+const energyLadder = require("./energy.ladder");
 // Числа повреждённых структур берутся из кэша сканера, а НЕ из room.manager.
 // Это принципиально: room.manager сам подключает task.generators
 // (room.manager.js, строка с require("./task.generators")), поэтому обратный
@@ -64,7 +66,7 @@ function needsEnergy(target) {
 }
 
 function generateFillSpawnsExtensions(roomState) {
-  if (!TASK_CONFIG.fillSpawnsExtensions) return;
+  if (!systems.fillSpawnsExtensions) return;
   const { storage, spawns, extensions, room } = roomState;
 
   if (!storage) {
@@ -186,7 +188,7 @@ function isDuplicatePowerSpawnEnergyTask(roomName, candidate) {
 }
 
 function generateFillPowerSpawnPower(roomState) {
-  if (!TASK_CONFIG.fillPowerSpawnPower) return;
+  if (!systems.fillPowerSpawnPower) return;
   const { powerSpawn, storage, terminal, roomName } = roomState;
 
   if (!powerSpawn) {
@@ -223,7 +225,7 @@ function generateFillPowerSpawnPower(roomState) {
 }
 
 function generateFillPowerSpawnEnergy(roomState) {
-  if (!TASK_CONFIG.fillPowerSpawnEnergy) return;
+  if (!systems.fillPowerSpawnEnergy) return;
   const { powerSpawn, storage, roomName } = roomState;
 
   if (!storage) {
@@ -231,6 +233,10 @@ function generateFillPowerSpawnEnergy(roomState) {
   }
 
   if (!powerSpawn) {
+    return;
+  }
+
+  if (!energyLadder.isEnabled(Game.rooms[roomName], "POWER_SPAWN")) {
     return;
   }
 
@@ -279,7 +285,7 @@ function isDuplicateFillFactoryEnergyTask(roomName, candidate) {
 }
 
 function generateFillFactoryEnergy(roomState) {
-  if (!TASK_CONFIG.fillFactoryEnergy) return;
+  if (!systems.fillFactoryEnergy) return;
   const { factory, storage, roomName } = roomState;
 
   if (!storage) {
@@ -294,9 +300,7 @@ function generateFillFactoryEnergy(roomState) {
     return;
   }
 
-  const reserveThreshold =
-    STORAGE.ENERGY_MIN * FACTORY.ENERGY_RESERVE_MULTIPLIER;
-  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) {
+  if (!energyLadder.isEnabled(Game.rooms[roomName], "FACTORY")) {
     return;
   }
 
@@ -332,7 +336,7 @@ function isDuplicateCollectFactoryBatteryTask(roomName, candidate) {
 }
 
 function generateCollectFactoryBattery(roomState) {
-  if (!TASK_CONFIG.collectFactoryBattery) return;
+  if (!systems.collectFactoryBattery) return;
   const { factory, storage, roomName } = roomState;
 
   if (!storage) {
@@ -379,7 +383,7 @@ function isDuplicateFillTerminalEnergyTask(roomName, candidate) {
 }
 
 function generateFillTerminalEnergy(roomState) {
-  if (!TASK_CONFIG.fillTerminalEnergy) return;
+  if (!systems.fillTerminalEnergy) return;
   const { storage, terminal, roomName } = roomState;
 
   if (!storage || !terminal) {
@@ -407,9 +411,7 @@ function generateFillTerminalEnergy(roomState) {
     return;
   }
 
-  const reserveThreshold =
-    STORAGE.ENERGY_MIN * TERMINAL_SUPPLY.STORAGE_RESERVE_MULTIPLIER;
-  if (storage.store[RESOURCE_ENERGY] <= reserveThreshold) {
+  if (!energyLadder.isEnabled(Game.rooms[roomName], "TERMINAL")) {
     return;
   }
 
@@ -445,14 +447,63 @@ function isDuplicateFillTerminalResourceTask(roomName, candidate) {
 }
 
 function generateFillTerminalResources(roomState) {
-  if (!TASK_CONFIG.fillTerminalResources) return;
+  if (!systems.fillTerminalResources) return;
   const { storage, terminal, roomName } = roomState;
 
   if (!storage || !terminal) {
     return;
   }
 
-  const RESOURCE_TERMINAL_MAX = 10000;
+  const keep = TERMINAL_SUPPLY.RESOURCE_KEEP;
+  const batch = TERMINAL_SUPPLY.DRAIN_BATCH;
+  const exports = (Memory.rooms[roomName] || {}).terminalExports || {};
+
+  // ── Слив: терминал → склад ────────────────────────────────────────────
+  // Только излишек сверх «keep + заказанное сетью», партией не меньше batch.
+  // Энергию не трогаем; power, наоборот, сливаем. На комнату — не больше
+  // одной задачи: все задачи слива имеют один sourceId/targetId, поэтому
+  // проверка по этим двум полям отсекает вторую.
+  const drainBusy = taskManager.hasDuplicate(
+    roomName,
+    "fillTerminalResources",
+    { type: "transfer", sourceId: terminal.id, targetId: storage.id },
+    ["type", "sourceId", "targetId"],
+  );
+
+  if (!drainBusy) {
+    for (const resourceType in terminal.store) {
+      if (resourceType === RESOURCE_ENERGY) continue;
+
+      const amount = terminal.store[resourceType] || 0;
+      const reserve = keep + (exports[resourceType] || 0);
+      if (amount < reserve + batch) continue;
+
+      // Некуда сливать — оставляем в терминале (рынок продаст излишек).
+      if (
+        storage.store.getFreeCapacity(resourceType) <
+        TERMINAL_SUPPLY.DRAIN_BATCH
+      ) {
+        continue;
+      }
+
+      const drain = {
+        type: "transfer",
+        sourceId: terminal.id,
+        targetId: storage.id,
+        resourceType,
+      };
+
+      if (isDuplicateFillTerminalResourceTask(roomName, drain)) continue;
+
+      taskManager.addTask(roomName, "fillTerminalResources", drain);
+      break; // одна задача слива на комнату за тик
+    }
+  }
+
+  // ── Доливка: склад → терминал до keep ─────────────────────────────────
+  // Пока висит задача слива, доливку не ставим: иначе воркеры будут
+  // возить один и тот же ресурс в обе стороны.
+  if (drainBusy) return;
 
   for (const resourceType in storage.store) {
     if (resourceType === RESOURCE_ENERGY || resourceType === RESOURCE_POWER) {
@@ -464,7 +515,7 @@ function generateFillTerminalResources(roomState) {
     }
 
     const currentInTerminal = terminal.store[resourceType] || 0;
-    if (currentInTerminal >= RESOURCE_TERMINAL_MAX) {
+    if (currentInTerminal >= keep) {
       continue;
     }
 
@@ -496,7 +547,7 @@ function isDuplicateFillTowersTask(roomName, candidate) {
 }
 
 function generateFillTowers(roomState) {
-  if (!TASK_CONFIG.fillTowers) return;
+  if (!systems.fillTowers) return;
   const { storage, towers, roomName } = roomState;
 
   if (!storage) {
@@ -542,7 +593,7 @@ function isDuplicateRepairTask(roomName, candidate) {
 }
 
 function generateRepairStructures(roomState) {
-  if (!TASK_CONFIG.repairStructures) return;
+  if (!systems.repairStructures) return;
 
   const { roomName } = roomState;
   const cache = roomState._structureCache;
@@ -665,7 +716,7 @@ function collectTargetIds(roomName, taskType) {
 }
 
 function generateBuildStructures(roomState) {
-  if (!TASK_CONFIG.buildStructures) return;
+  if (!systems.buildStructures) return;
 
   const { roomName } = roomState;
 
@@ -701,7 +752,7 @@ function isDuplicateUpgradeTask(roomName, candidate) {
 }
 
 function generateUpgradeController(roomState) {
-  if (!TASK_CONFIG.upgradeController) return;
+  if (!systems.upgradeController) return;
 
   const { controller, storage, roomName } = roomState;
 

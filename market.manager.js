@@ -5,6 +5,7 @@
 
 const { TERMINAL_SUPPLY, MARKET } = require("./constants");
 const loadShed = require("loadShed");
+const energyPolicy = require("./energy.policy");
 
 // Настройки маркета (включение групп, лимиты сделок, пороги цен, порядок обхода
 // групп, базовые минералы, интервалы) лежат в MARKET из constants.js.
@@ -147,6 +148,9 @@ function findBestOrder(resourceType) {
 }
 
 function trySellResource(terminal, resourceType, surplus) {
+  // Железное правило: всё из BUY_LIST не продаём никогда.
+  if (MARKET.BUY_LIST.includes(resourceType)) return false;
+
   const order = findBestOrder(resourceType);
   if (!order) return false;
 
@@ -161,7 +165,22 @@ function trySellResource(terminal, resourceType, surplus) {
   if (terminal.store[RESOURCE_ENERGY] < energyForDeal) return false;
 
   const result = Game.market.deal(order.id, amount, terminal.room.name);
+  if (result === OK) {
+    if (!Memory.marketBudget) Memory.marketBudget = { earned: 0, spent: 0 };
+    Memory.marketBudget.earned += amount * order.price;
+  }
   return result === OK;
+}
+
+// Бюджет закупок = заработано продажами − потрачено на закупки.
+function budgetLeft() {
+  const b = Memory.marketBudget;
+  return b ? b.earned * MARKET.PURCHASE_SHARE - b.spent : 0;
+}
+
+function recordSpend(credits) {
+  if (!Memory.marketBudget) Memory.marketBudget = { earned: 0, spent: 0 };
+  Memory.marketBudget.spent += credits;
 }
 
 // Закупка реагентов, которые империя не добывает (константы пока здесь).
@@ -173,10 +192,65 @@ const REAGENT_BUY = {
 };
 
 function tryBuyReagents(terminal) {
+  // Экономический регулятор: на ступени «market» закупки стоят, продажи идут.
+  // Отключать рынок целиком нельзя — это единственный источник дохода, и тогда
+  // кредиты не смогут вырасти, чтобы ступень опустилась (ловушка).
+  if (!energyPolicy.allows(terminal.room, "marketBuy")) return false;
   if (terminal.room.name !== REAGENT_BUY.ROOM) return false;
   if (terminal.cooldown > 0) return false;
-  const spendable = Game.market.credits - REAGENT_BUY.MIN_CREDITS;
+  const spendable = Math.min(
+    Game.market.credits - REAGENT_BUY.MIN_CREDITS,
+    budgetLeft(),
+  );
   if (spendable <= 0) return false;
+
+  // K и U — собственная добыча: покупаем только когда их нет ни на одном
+  // складе и терминале. Порция докупается целиком, остаток — в Memory.reagentBuy.
+  const OWN_MINERALS = { K: 15000, U: 15000 };
+  if (!Memory.reagentBuy) Memory.reagentBuy = {};
+  for (const mineral in OWN_MINERALS) {
+    let left = Memory.reagentBuy[mineral] || 0;
+    if (left <= 0) {
+      let stock = 0;
+      for (const roomName in Game.rooms) {
+        const r = Game.rooms[roomName];
+        if (!r.controller || !r.controller.my) continue;
+        if (r.storage) stock += r.storage.store[mineral] || 0;
+        if (r.terminal) stock += r.terminal.store[mineral] || 0;
+      }
+      if (stock > 0) continue;
+      left = OWN_MINERALS[mineral];
+    }
+
+    const orders = findAffordableBuyOrders(
+      mineral,
+      REAGENT_BUY.MAX_PRICE_RATIO,
+    );
+    if (orders.length === 0) continue;
+
+    const order = orders[0];
+    const amount = Math.min(
+      left,
+      order.amount,
+      terminal.store.getFreeCapacity(),
+      Math.floor(spendable / order.price),
+    );
+    if (amount <= 0) continue;
+
+    const energyForDeal = Game.market.calcTransactionCost(
+      amount,
+      terminal.room.name,
+      order.roomName,
+    );
+    if (terminal.store[RESOURCE_ENERGY] < energyForDeal) continue;
+
+    if (Game.market.deal(order.id, amount, terminal.room.name) === OK) {
+      Memory.reagentBuy[mineral] = left - amount;
+      recordSpend(amount * order.price);
+
+      return true;
+    }
+  }
 
   for (const resourceType in REAGENT_BUY.targets) {
     const needed =
@@ -207,6 +281,7 @@ function tryBuyReagents(terminal) {
 
     const dealResult = Game.market.deal(order.id, amount, terminal.room.name);
     if (dealResult === OK) {
+      recordSpend(amount * order.price);
       return true;
     }
   }
@@ -214,6 +289,7 @@ function tryBuyReagents(terminal) {
 }
 
 function tryBuyPower(terminal) {
+  if (!energyPolicy.allows(terminal.room, "marketBuy")) return false;
   const currentPower = terminal.store[RESOURCE_POWER] || 0;
 
   if (currentPower >= MARKET.POWER_TARGET) {
@@ -231,7 +307,11 @@ function tryBuyPower(terminal) {
   }
 
   const order = orders[0];
-  const amount = Math.min(needed, order.amount);
+  const amount = Math.min(
+    needed,
+    order.amount,
+    Math.floor(budgetLeft() / order.price),
+  );
 
   if (amount <= 0) {
     return false;
@@ -248,6 +328,7 @@ function tryBuyPower(terminal) {
   }
 
   const result = Game.market.deal(order.id, amount, terminal.room.name);
+  if (result === OK) recordSpend(amount * order.price);
   return result === OK;
 }
 
@@ -312,8 +393,23 @@ function run() {
     for (const terminal of terminals) {
       if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
+      // Продажа по лестнице с полосы marketSell (240k). Исключение: склад
+      // забит — тогда излишек терминала продаём вне лестницы, иначе империя
+      // встанет из-за нехватки места (решение владельца 30.10.2026).
+      const roomStorage = terminal.room.storage;
+      const storageFull =
+        roomStorage &&
+        roomStorage.store.getFreeCapacity() <
+          TERMINAL_SUPPLY.STORAGE_FULL_MARGIN;
+      if (!storageFull && !energyPolicy.allows(terminal.room, "marketSell")) {
+        continue;
+      }
+
       for (const resourceType in terminal.store) {
         if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
+        if (MARKET.NEVER_SELL.includes(resourceType)) continue;
+        if (MARKET.BUY_LIST.includes(resourceType)) continue;
+        if (!MARKET.SELL_LIST.includes(resourceType)) continue;
         if (getResourceGroup(resourceType) !== group) continue;
 
         const surplus = terminal.store[resourceType] - reserve;

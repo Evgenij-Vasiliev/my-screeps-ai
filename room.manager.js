@@ -30,9 +30,10 @@ const roleLabWorker = require("lab.worker");
 const roleMineralMiner = require("role.mineralMiner");
 const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
-const { TOWER, TASK_CONFIG } = require("./constants");
+const { TOWER, TASK_CONFIG, SPAWN } = require("./constants");
 const loadShed = require("loadShed");
 const systems = require("systems");
+const energyPolicy = require("./energy.policy");
 const labManager = require("lab.manager");
 const boostManager = require("boost.manager");
 
@@ -767,6 +768,15 @@ module.exports = {
     const shedLite = shed >= 1;
     const shedHard = shed >= 2;
 
+    // Расширения недолиты: пока энергия комнаты ниже доли от ёмкости,
+    // фоновые задачи (ремонт, стройка, апгрейд) не ставим — единственный
+    // воркер должен заливать spawn/extension, иначе комната садится.
+    const energyLow = roomState.room &&
+      typeof roomState.room.energyAvailable === "number" &&
+      typeof roomState.room.energyCapacityAvailable === "number" &&
+      roomState.room.energyAvailable <
+        roomState.room.energyCapacityAvailable * SPAWN.FILL_PRIORITY_RATIO;
+
     if (systems.spawnManager) {
       cpuMonitor.trackRole("spawnManager", () => spawnManager.run(roomState));
     }
@@ -804,57 +814,57 @@ module.exports = {
       // сохраняется), а срочное (спавны, башни, терминал на hard) ставится
       // всегда. При max срочное тоже продолжает ставиться — бот должен
       // выжить, а не остановиться.
-      if (TASK_CONFIG.fillSpawnsExtensions) {
+      if (systems.fillSpawnsExtensions) {
         gen(
           "fillSpawnsExtensions",
           taskGenerators.generateFillSpawnsExtensions,
         );
       }
-      if (TASK_CONFIG.fillPowerSpawnPower && !shedHard) {
+      if (systems.fillPowerSpawnPower && !shedHard && energyPolicy.allows(roomState.room, "powerSpawn")) {
         gen("fillPowerSpawnPower", taskGenerators.generateFillPowerSpawnPower);
       }
-      if (TASK_CONFIG.fillPowerSpawnEnergy && !shedHard) {
+      if (systems.fillPowerSpawnEnergy && !shedHard && energyPolicy.allows(roomState.room, "powerSpawn")) {
         gen(
           "fillPowerSpawnEnergy",
           taskGenerators.generateFillPowerSpawnEnergy,
         );
       }
-      if (TASK_CONFIG.fillFactoryEnergy && !shedHard) {
+      if (systems.fillFactoryEnergy && !shedHard && energyPolicy.allows(roomState.room, "factory")) {
         gen("fillFactoryEnergy", taskGenerators.generateFillFactoryEnergy);
       }
-      if (TASK_CONFIG.collectFactoryBattery && !shedHard) {
+      if (systems.collectFactoryBattery && !shedHard && energyPolicy.allows(roomState.room, "factory")) {
         gen(
           "collectFactoryBattery",
           taskGenerators.generateCollectFactoryBattery,
         );
       }
-      if (TASK_CONFIG.fillTerminalEnergy && !shedHard) {
+      if (systems.fillTerminalEnergy && !shedHard && !energyLow) {
         gen("fillTerminalEnergy", taskGenerators.generateFillTerminalEnergy);
       }
-      if (TASK_CONFIG.fillTerminalResources && !shedHard) {
+      if (systems.fillTerminalResources && !shedHard) {
         gen(
           "fillTerminalResources",
           taskGenerators.generateFillTerminalResources,
         );
       }
-      if (TASK_CONFIG.fillTowers) {
+      if (systems.fillTowers && energyPolicy.allows(roomState.room, "towers")) {
         gen("fillTowers", taskGenerators.generateFillTowers);
       }
       // Фоновое: апгрейд, стройка, ремонт — только в обычном режиме.
-      if (TASK_CONFIG.repairStructures && !shedLite) {
+      if (systems.repairStructures && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "repair")) {
         gen("repairStructures", taskGenerators.generateRepairStructures);
       }
-      if (TASK_CONFIG.buildStructures && !shedLite) {
+      if (systems.buildStructures && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "build")) {
         gen("buildStructures", taskGenerators.generateBuildStructures);
       }
-      if (TASK_CONFIG.upgradeController && !shedLite) {
+      if (systems.upgradeController && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "upgrade")) {
         gen("upgradeController", taskGenerators.generateUpgradeController);
       }
     });
     if (systems.creeps) runCreepLogic(roomState);
     if (systems.towers) runTowerLogic(roomState);
     if (systems.linkManager) runLinkLogic(roomState);
-    if (systems.labManager) {
+    if (systems.labManager && energyPolicy.allows(roomState.room, "labs")) {
       cpuMonitor.trackRole("labManager", () =>
         labManager.run(Game.rooms[roomState.roomName]),
       );
@@ -865,12 +875,12 @@ module.exports = {
     // попадёт. Цена — один Game.cpu.getUsed() на комнату за тик
     // (0.000256–0.000310 CPU за вызов, docs/PROFILING-ON-DEMAND.md:82).
     if (!shedHard && !loadShed.overBudget()) {
-      if (systems.factoryManager) {
+      if (systems.factoryManager && energyPolicy.allows(roomState.room, "factory")) {
         cpuMonitor.trackRole("factoryManager", () =>
           factoryManager.run(roomState),
         );
       }
-      if (systems.powerSpawnManager) {
+      if (systems.powerSpawnManager && energyPolicy.allows(roomState.room, "powerSpawn")) {
         cpuMonitor.trackRole("powerSpawnManager", () =>
           powerSpawnManager.run(roomState),
         );

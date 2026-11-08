@@ -23,7 +23,9 @@ module.exports = {
   powerSpawnManager: true, // powerSpawn
 
   // ── крипы ──────────────────────────────────────────────────
-  boostManager: false, // буст крипов
+  // true — бусты разрешены; включает их лестница энергии (порог boost в
+  // constants.js ENERGY_POLICY), а не этот тумблер.
+  boostManager: true,
 
   // ── роли (false — роль не работает и не спавнится) ─────────
   miner: true,
@@ -54,7 +56,7 @@ module.exports = {
   // Оставлено false осознанно: живой замер tick ~83451500 показал терминалы,
   // занятые на ~250 000 из 300 000 (энергия ~100k + ресурсы ~145k), поэтому
   // режим «лить всё» залил бы остаток места и вытеснил довоз реагентов.
-  fillTerminalResources: false,
+  fillTerminalResources: true,
   fillFactoryEnergy: true,
   collectFactoryBattery: true,
   fillTowers: true,
@@ -78,25 +80,92 @@ module.exports = {
   //   upgradeController     — апгрейд контроллера
   // body: части тела; не задано — берётся CREEP_BODIES роли.
   // ignoreReserves: true — брать энергию в обход резервов склада/терминала.
+  // Слив терминала: по одному воркеру на комнату, единственная задача —
+  // переброска излишков терминала (сверх TERMINAL_SUPPLY.RESOURCE_KEEP) на
+  // склад. Тело carry-heavy: он стоит между терминалом и хранилищем, move
+  // нужны только чтобы дойти от спавна.
   extraCreeps: {
-    E37S37: [
+    E36S38: [
       {
         role: "worker",
         count: 0,
         tasks: ["fillTerminalEnergy"],
         body: { work: 0, carry: 30, move: 15 },
-        ignoreReserves: false,
+        ignoreReserves: true,
+      },
+      {
+        role: "worker",
+        count: 0,
+        tasks: ["fillTerminalResources"],
+        body: { work: 0, carry: 40, move: 10 },
+        ignoreReserves: true,
+      },
+    ],
+    E35S37: [
+      {
+        role: "worker",
+        count: 0,
+        tasks: ["fillSpawnsExtensions", "fillTowers", "buildStructures"],
+        body: { work: 5, carry: 5, move: 5 },
+        ignoreReserves: true,
+      },
+      {
+        role: "worker",
+        count: 0,
+        tasks: ["fillTerminalResources"],
+        body: { work: 0, carry: 40, move: 10 },
+        ignoreReserves: true,
       },
     ],
     E35S39: [
       {
         role: "worker",
         count: 0,
-        tasks: ["fillSpawnsExtensions"],
-        body: { work: 0, carry: 15, move: 10 },
-        ignoreReserves: false,
+        tasks: ["fillTerminalResources"],
+        body: { work: 0, carry: 40, move: 10 },
+        ignoreReserves: true,
       },
     ],
+    E37S37: [
+      {
+        role: "worker",
+        count: 0,
+        tasks: ["fillTerminalResources"],
+        body: { work: 0, carry: 40, move: 10 },
+        ignoreReserves: true,
+      },
+    ],
+    E37S38: [
+      {
+        role: "worker",
+        count: 0,
+        tasks: ["fillTerminalResources"],
+        body: { work: 0, carry: 40, move: 10 },
+        ignoreReserves: true,
+      },
+    ],
+  },
+
+  // ── энергетическая лестница ────────────────────────────────
+  // Пороги живут в constants.js (ENERGY_POLICY) и здесь не дублируются.
+  // energyPolicy: false — лестница выключена, все подсистемы работают по
+  // своим тумблерам выше (аварийный режим).
+  energyPolicy: true,
+  // Участие подсистемы в лестнице:
+  //   true  — включает/выключает лестница по запасу склада;
+  //   false — лестница не управляет, решает только тумблер выше.
+  // Закупки рынка выключены до роста склада (решение владельца 30.10.2026).
+  policy: {
+    towers: true,
+    repair: true,
+    build: true,
+    upgrade: true,
+    labs: true,
+    boost: true,
+    factory: true,
+    marketSell: true,
+    marketBuy: false,
+    powerSpawn: true,
   },
 
   // ── комнаты (по имени комнаты) ─────────────────────────────

@@ -117,7 +117,8 @@ for (const role in SPAWN_QUOTA) {
   if (now !== before) mismatch = `${role}: было ${before}, стало ${now}`;
 }
 check("по всем спавнящимся ролям счёт совпал", mismatch === null, mismatch);
-check("сравнено 4 роли с квотой > 0", compared === 4, String(compared));
+const quotaRoles = Object.keys(SPAWN_QUOTA).filter(r => SPAWN_QUOTA[r] > 0);
+check("сравнено все роли с квотой > 0", compared === quotaRoles.length, compared + "/" + quotaRoles.length);
 
 console.log("\n2. Роли с нулевой квотой и чужие роли не считаются");
 const counts = countRoles(creeps);
@@ -307,6 +308,7 @@ roomState.creeps = [
   creep("miner", 1400),
   creep("miner", 1400),
   creep("linkWorker", 800),
+  creep("labWorker", 900),
   creep("worker", 1200),
   creep("worker", 1100),
 ];

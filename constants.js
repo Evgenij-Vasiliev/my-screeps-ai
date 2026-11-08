@@ -18,11 +18,58 @@ const TERMINAL_SUPPLY = {
   MINERAL_MAX: 10000,
   BATTERY_MAX: 10000,
   COMPOUND_MAX: 10000,
+  // Сколько ресурса (кроме энергии) держим в терминале. Всё, что выше
+  // RESOURCE_KEEP + DRAIN_BATCH, уезжает на склад отдельным воркером.
+  RESOURCE_KEEP: 10000,
+  DRAIN_BATCH: 2000,
+  // Склад считается забитым при остатке меньше этого: слив останавливается,
+  // а рынку разрешается продавать излишек терминала вне лестницы.
+  STORAGE_FULL_MARGIN: 20000,
   STORAGE_RESERVE_MULTIPLIER: 1.3, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня терминал не забирает энергию из хранилища
 };
 
 const FACTORY = {
   ENERGY_RESERVE_MULTIPLIER: 1.1, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня фабрика не забирает энергию из хранилища
+};
+
+// ЛЕСТНИЦА ЭНЕРГИИ. Одна общая «ступень» на комнату: чем выше запас в
+// хранилище, тем больше подсистем разрешено. Пороги — ТОЛЬКО здесь; в логике
+// используются имена, а не числа. Гистерезис общий: включаем на пороге,
+// выключаем ниже «порог − HYSTERESIS», но не ниже OFF_FLOOR (дно, до которого
+// склад не доводим: ниже начинаются проблемы с забором энергии крипами).
+const ENERGY_POLICY = {
+  HYSTERESIS: 15000, // общий зазор вниз, против мигания
+  OFF_FLOOR: 160000, // ниже этого лестница не опускается — ядро держит склад
+  EVAL_EVERY: 50, // тиков между пересчётами ступени
+  // Порядок строго по возрастанию `on`. Индекс в массиве = номер ступени.
+  BANDS: [
+    { name: "towers", on: 165000 },
+    { name: "repair", on: 170000 },
+    { name: "build", on: 175000 },
+    { name: "upgrade", on: 180000 },
+    { name: "labs", on: 195000 },
+    { name: "boost", on: 210000 },
+    { name: "factory", on: 225000 },
+    { name: "marketSell", on: 240000 },
+    { name: "powerSpawn", on: 255000 },
+    { name: "marketBuy", on: 270000 },
+  ],
+};
+
+// Совместимость со старым energy.ladder.js и task.generators.js (тройка
+// порогов в виде множителей к STORAGE.ENERGY_MIN). Значения выведены из
+// ENERGY_POLICY, чтобы не было второго источника правды.
+const ladderOf = name => {
+  const band = ENERGY_POLICY.BANDS.find(b => b.name === name);
+  return {
+    on: band.on / STORAGE.ENERGY_MIN,
+    off: (band.on - ENERGY_POLICY.HYSTERESIS) / STORAGE.ENERGY_MIN,
+  };
+};
+const ENERGY_LADDER = {
+  TERMINAL: { on: 1.3, off: 1.2 }, // энергия в терминал — базовая логистика
+  FACTORY: ladderOf("factory"),
+  POWER_SPAWN: ladderOf("powerSpawn"),
 };
 
 const TOWER = {
@@ -89,17 +136,7 @@ const TASK_CONFIG = {
   // на месте цели (вплотную). Используется в task.manager.js (обрыв перебора)
   // и в worker.runner.js (обрыв перебора типов очередей).
   NEAREST_STOP_RANGE: 1,
-  fillSpawnsExtensions: true,
-  fillPowerSpawnPower: true,
-  fillPowerSpawnEnergy: true,
-  fillTerminalEnergy: true,
-  fillTerminalResources: true,
-  fillFactoryEnergy: true,
-  collectFactoryBattery: true,
-  repairStructures: true,
-  buildStructures: true,
-  fillTowers: true,
-  upgradeController: true,
+  // Включение и выключение генераторов задач — только в systems.js.
 };
 
 const POWER_SPAWN = {
@@ -157,6 +194,16 @@ const MINERAL_MIN_AMOUNT_TO_SPAWN = 1500;
  */
 const SPAWN = {
   SCAN_INTERVAL: 10,
+  // «Мягкие» роли не критичны для выживания: их спавним только когда энергия
+  // комнаты почти полна. Иначе одновременный вывод пачки (5 labWorker или 5
+  // сливщиков) выедает расширения, и комната садится: 30.10.2026 после
+  // выгрузки 5 labWorker родились в один тик на ~6000 энергии, ещё ~12500
+  // забрали дополнительные воркеры — расширения опустели во всех комнатах.
+  SOFT_ROLES: { labWorker: true },
+  SOFT_ENERGY_RATIO: 0.9,
+  // Ниже этой доли заполнения spawn+extension фоновые задачи (ремонт,
+  // стройка, апгрейд) не ставятся: воркер сначала заливает расширения.
+  FILL_PRIORITY_RATIO: 0.8,
 };
 
 // ── ПОРОГИ МАЙНЕРА: ЗДЕСЬ ЛЕГКО СЛОМАТЬ ДОБЫЧУ ──────────────────────────
@@ -348,7 +395,7 @@ const MARKET = {
   // наполняют терминал до BATTERY_MAX, поэтому продажа идёт непрерывно.
   BATTERY_SELL_RESERVE: 0,
   ENABLE_MINERALS: true,
-  ENABLE_COMPOUNDS: true,
+  ENABLE_COMPOUNDS: false,
 
   // Максимум сделок Game.market.deal за один проход рынка.
   MAX_DEALS_PER_TICK: 3,
@@ -358,8 +405,15 @@ const MARKET = {
 
   // Закупка power: сколько держать в терминале и во сколько раз цена SELL-ордера
   // может превышать минимальную среди всех SELL-ордеров.
-  ENABLE_POWER_BUY: false,
-  POWER_TARGET: 100000,
+  ENABLE_POWER_BUY: true,
+  PURCHASE_SHARE: 0.75, // доля выручки, которую можно тратить на закупки
+  NEVER_SELL: ["power"], // ресурсы, которые рынок не продает никогда
+  NEVER_BUY: [], // ресурсы, которые рынок не закупает никогда
+  // Единый список закупок: только эти ресурсы рынок покупает и НИКОГДА не продаёт.
+  BUY_LIST: ["O", "K", "U", "power"],
+  // Единый список продаж: только эти ресурсы рынок продаёт. Пересечение с BUY_LIST запрещено.
+  SELL_LIST: ["battery"], // "energy", "battery", "H", "L", "Z", "X"
+  POWER_TARGET: 10000,
   POWER_MAX_PRICE_RATIO: 1.2,
 
   // Порядок обхода групп (ENERGY первой). Без явного порядка перебор
@@ -447,6 +501,8 @@ module.exports = {
   TASK_TYPES,
   TERMINAL_SUPPLY,
   FACTORY,
+  ENERGY_LADDER,
+  ENERGY_POLICY,
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
   MINER,

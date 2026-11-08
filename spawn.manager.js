@@ -165,6 +165,14 @@ function idleDue(roomName, now, firstScan) {
 /**
  * @param {Object} roomState
  */
+function softEnergyBlocked(roomState) {
+  const room = roomState.room;
+  if (!room || typeof room.energyAvailable !== "number") return false;
+  const cap = room.energyCapacityAvailable;
+  if (typeof cap !== "number" || cap <= 0) return false;
+  return room.energyAvailable < cap * SPAWN.SOFT_ENERGY_RATIO;
+}
+
 function run(roomState) {
   const roomName = roomState.roomName;
   const now = Game.time;
@@ -213,6 +221,10 @@ function run(roomState) {
     // Квота уже набрана. Проверка идёт ДО дорогих условий ниже: например,
     // для mineralMiner это экономит Game.getObjectById на каждом тике.
     if ((counts[role] || 0) >= quota) continue;
+
+    // «Мягкая» роль ждёт, пока комната накопит энергию (~90 %): иначе
+    // пачка одновременных спавнов выедает расширения.
+    if (SPAWN.SOFT_ROLES[role] && softEnergyBlocked(roomState)) continue;
 
     if (
       role === "upgrader" &&
@@ -263,6 +275,16 @@ function run(roomState) {
       const group = extraGroups[g];
       const key = roomName + "#" + g;
       if (!group.count || (extraCounts[key] || 0) >= group.count) continue;
+
+      // Сливщик терминала — тоже «мягкий»: его пачка не должна садить
+      // расширения, ждём накопления энергии.
+      if (
+        Array.isArray(group.tasks) &&
+        group.tasks.indexOf("fillTerminalResources") !== -1 &&
+        softEnergyBlocked(roomState)
+      ) {
+        continue;
+      }
 
       roomWants = true;
       if (!spawn) {

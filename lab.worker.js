@@ -165,7 +165,10 @@ module.exports = {
     // резерва, поэтому снабжение фабрики гейтится отдельно и с рабочим буфером
     // (FACTORY.ENERGY_RESERVE_MULTIPLIER).
     if (resource === RESOURCE_ENERGY) {
-      if (storage && (storage.store[RESOURCE_ENERGY] || 0) > STORAGE.ENERGY_MIN) {
+      if (
+        storage &&
+        (storage.store[RESOURCE_ENERGY] || 0) > STORAGE.ENERGY_MIN
+      ) {
         return storage;
       }
       return null;
@@ -374,7 +377,11 @@ module.exports = {
         // терминал или склад комнаты).
         const curMineral = boostLab.mineralType;
         const leftover = curMineral ? boostLab.store[curMineral] || 0 : 0;
-        if (curMineral && leftover > 0 && leftover < 30) {
+        if (
+          curMineral &&
+          leftover > 0 &&
+          (leftover < 30 || !boostResources().includes(curMineral))
+        ) {
           creep.memory.task = "clear_lab";
           creep.memory.resource = curMineral;
           creep.memory.targetId = boostConfig.lab1;
@@ -417,170 +424,177 @@ module.exports = {
       // той же комнаты. Из-за этого «простаивающие» тройки не запускались
       // никогда, хотя реагент для них уже был в комнате.
       for (let pass = 1; pass <= 2 && !creep.memory.task; pass++) {
-      for (const { key, config } of configs) {
-        if (creep.memory.task) break;
-        // Разрешение объектов идёт через tick-кэш lab.recipes (он же использует
-        // lab.manager): один Game.getObjectById на id за тик на комнату вместо
-        // повторных разыменований теми же подсистемами.
-        const lab1 = recipes.labById(creep.room, config.lab1);
-        const lab2 = recipes.labById(creep.room, config.lab2);
-        const reactor = recipes.labById(creep.room, config.reactor);
+        for (const { key, config } of configs) {
+          if (creep.memory.task) break;
+          // Разрешение объектов идёт через tick-кэш lab.recipes (он же использует
+          // lab.manager): один Game.getObjectById на id за тик на комнату вместо
+          // повторных разыменований теми же подсистемами.
+          const lab1 = recipes.labById(creep.room, config.lab1);
+          const lab2 = recipes.labById(creep.room, config.lab2);
+          const reactor = recipes.labById(creep.room, config.reactor);
 
-        // Конфиг буст-лабы обслуживается выше (энергия первым приоритетом),
-        // в логику троек он не попадает: у него нет lab2/reactor.
-        if (config.boost) continue;
+          // Конфиг буст-лабы обслуживается выше (энергия первым приоритетом),
+          // в логику троек он не попадает: у него нет lab2/reactor.
+          if (config.boost) continue;
 
-        if (!lab1 || !lab2 || !reactor) continue;
+          if (!lab1 || !lab2 || !reactor) continue;
 
-        if (pass === 1) {
-        // Приоритет 1: чужой ресурс в lab1
-        for (const res in lab1.store) {
-          if (res !== config.reagent1 && lab1.store[res] > 0) {
-            creep.memory.task = "clear_lab";
-            creep.memory.resource = res;
-            creep.memory.targetId = config.lab1;
-            creep.memory.labKey = key;
-            break;
-          }
-        }
-        if (creep.memory.task) break;
+          if (pass === 1) {
+            // Приоритет 1: чужой ресурс в lab1
+            for (const res in lab1.store) {
+              if (res !== config.reagent1 && lab1.store[res] > 0) {
+                creep.memory.task = "clear_lab";
+                creep.memory.resource = res;
+                creep.memory.targetId = config.lab1;
+                creep.memory.labKey = key;
+                break;
+              }
+            }
+            if (creep.memory.task) break;
 
-        // Приоритет 2: чужой ресурс в lab2
-        for (const res in lab2.store) {
-          if (res !== config.reagent2 && lab2.store[res] > 0) {
-            creep.memory.task = "clear_lab";
-            creep.memory.resource = res;
-            creep.memory.targetId = config.lab2;
-            creep.memory.labKey = key;
-            break;
-          }
-        }
-        if (creep.memory.task) break;
+            // Приоритет 2: чужой ресурс в lab2
+            for (const res in lab2.store) {
+              if (res !== config.reagent2 && lab2.store[res] > 0) {
+                creep.memory.task = "clear_lab";
+                creep.memory.resource = res;
+                creep.memory.targetId = config.lab2;
+                creep.memory.labKey = key;
+                break;
+              }
+            }
+            if (creep.memory.task) break;
 
-        // Приоритет 3: чужой ресурс в реакторе
-        for (const res in reactor.store) {
-          if (res !== config.product && reactor.store[res] > 0) {
-            creep.memory.task = "clear_lab";
-            creep.memory.resource = res;
-            creep.memory.targetId = config.reactor;
-            creep.memory.labKey = key;
-            break;
-          }
-        }
-        if (creep.memory.task) break;
+            // Приоритет 3: чужой ресурс в реакторе
+            for (const res in reactor.store) {
+              if (res !== config.product && reactor.store[res] > 0) {
+                creep.memory.task = "clear_lab";
+                creep.memory.resource = res;
+                creep.memory.targetId = config.reactor;
+                creep.memory.labKey = key;
+                break;
+              }
+            }
+            if (creep.memory.task) break;
 
-        // Приоритет 4: выгрузить продукт из реактора
-        if ((reactor.store[config.product] || 0) >= MIN_UNLOAD) {
-          creep.memory.task = "unload_reactor";
-          creep.memory.resource = config.product;
-          creep.memory.targetId = config.reactor;
-          creep.memory.labKey = key;
-          break;
-        }
-
-        // Приоритет 4.5 — КРИТИЧЕСКИЙ РЕАГЕНТ (ТЗ владельца «ЗАПУСТИТЬ ЛАБЫ —
-        // ВСЕ»). Тройка варит ТОЛЬКО когда ОБА реагента ≥ LAB_REACTION_AMOUNT
-        // (lab.recipes.reactionReady). Прежний порядок (сначала буферная доливка
-        // lab1 до LAB_CAPACITY, затем lab2) означал, что курьер возит «доливку» в
-        // одну лабу, пока вторая стоит ПУСТОЙ, — и тройка не варит вовсе. Живой
-        // shard3 25.09.2026 (tick 83194866): E37S38.labs — U 600 в lab1, O 0 в
-        // lab2 при O 3400 в терминале ТОЙ ЖЕ комнаты, а курьер вёз доливку U;
-        // E37S37.labs — O 600, H 0; E36S38.labs3 — O 2107, H 0; E37S38.labs2 —
-        // Z 0, O 0. Теперь первым везём то, чего не хватает ДЛЯ РЕАКЦИИ, а
-        // буферная доливка (приоритеты 5/6) остаётся ниже.
-        const reactionNeed = recipes.reactionAmount();
-        if ((lab1.store[config.reagent1] || 0) < reactionNeed) {
-          const critSrc1 = this.findSource(creep.room, config.reagent1, lab1);
-          if (critSrc1) {
-            creep.memory.task = "load_lab1";
-            creep.memory.resource = config.reagent1;
-            creep.memory.sourceId = critSrc1.id;
-            creep.memory.targetId = config.lab1;
-            creep.memory.labKey = key;
-            creep.memory.amount = Math.min(
-              LAB_CAPACITY - (lab1.store[config.reagent1] || 0),
-              critSrc1.store[config.reagent1],
-              creep.store.getFreeCapacity(),
-            );
-            break;
-          }
-        }
-        if ((lab2.store[config.reagent2] || 0) < reactionNeed) {
-          const critSrc2 = this.findSource(creep.room, config.reagent2, lab2);
-          if (critSrc2) {
-            creep.memory.task = "load_lab2";
-            creep.memory.resource = config.reagent2;
-            creep.memory.sourceId = critSrc2.id;
-            creep.memory.targetId = config.lab2;
-            creep.memory.labKey = key;
-            creep.memory.amount = Math.min(
-              LAB_CAPACITY - (lab2.store[config.reagent2] || 0),
-              critSrc2.store[config.reagent2],
-              creep.store.getFreeCapacity(),
-            );
-            break;
-          }
-        }
-
-        } else {
-        // Приоритет 5: загрузить реагент1 в lab1.
-        // Гистерезис (см. п.1 в шапке): новый рейс начинаем, только если
-        // дефицит не меньше рюкзака. Если крип уже везёт этот реагент — задачу
-        // даём всегда, чтобы он сдал привезённое.
-        //
-        // ВАЖНО ПРО ПРОСТОЙ (config.paused). Простаивающую тройку НЕЛЬЗЯ
-        // исключать из загрузки: простой означает «не варим», а не «тройка
-        // выключена». Если тройка ушла в простой, ожидая первый подвоз реагента
-        // (продукт ниже LOW), то именно эта загрузка и есть условие выхода из
-        // простоя: lab.recipes.selectRecipe возобновляет работу только по
-        // canRun(slot) — «реагенты реально лежат в lab1/lab2». Запрет загрузки
-        // навсегда запирал бы тройку в простое (проверено и откачено).
-        const cur1 = lab1.store[config.reagent1] || 0;
-        if (cur1 < LAB_CAPACITY) {
-          const needed1 = LAB_CAPACITY - cur1;
-          const carries1 = (creep.store[config.reagent1] || 0) > 0;
-          if (carries1 || needed1 >= freeCapacity) {
-            const src = this.findSource(creep.room, config.reagent1, lab1);
-            if (src) {
-              creep.memory.task = "load_lab1";
-              creep.memory.resource = config.reagent1;
-              creep.memory.sourceId = src.id;
-              creep.memory.targetId = config.lab1;
+            // Приоритет 4: выгрузить продукт из реактора
+            if ((reactor.store[config.product] || 0) >= MIN_UNLOAD) {
+              creep.memory.task = "unload_reactor";
+              creep.memory.resource = config.product;
+              creep.memory.targetId = config.reactor;
               creep.memory.labKey = key;
-              creep.memory.amount = Math.min(
-                needed1,
-                src.store[config.reagent1],
-                creep.store.getFreeCapacity(),
-              );
               break;
+            }
+
+            // Приоритет 4.5 — КРИТИЧЕСКИЙ РЕАГЕНТ (ТЗ владельца «ЗАПУСТИТЬ ЛАБЫ —
+            // ВСЕ»). Тройка варит ТОЛЬКО когда ОБА реагента ≥ LAB_REACTION_AMOUNT
+            // (lab.recipes.reactionReady). Прежний порядок (сначала буферная доливка
+            // lab1 до LAB_CAPACITY, затем lab2) означал, что курьер возит «доливку» в
+            // одну лабу, пока вторая стоит ПУСТОЙ, — и тройка не варит вовсе. Живой
+            // shard3 25.09.2026 (tick 83194866): E37S38.labs — U 600 в lab1, O 0 в
+            // lab2 при O 3400 в терминале ТОЙ ЖЕ комнаты, а курьер вёз доливку U;
+            // E37S37.labs — O 600, H 0; E36S38.labs3 — O 2107, H 0; E37S38.labs2 —
+            // Z 0, O 0. Теперь первым везём то, чего не хватает ДЛЯ РЕАКЦИИ, а
+            // буферная доливка (приоритеты 5/6) остаётся ниже.
+            const reactionNeed = recipes.reactionAmount();
+            if ((lab1.store[config.reagent1] || 0) < reactionNeed) {
+              const critSrc1 = this.findSource(
+                creep.room,
+                config.reagent1,
+                lab1,
+              );
+              if (critSrc1) {
+                creep.memory.task = "load_lab1";
+                creep.memory.resource = config.reagent1;
+                creep.memory.sourceId = critSrc1.id;
+                creep.memory.targetId = config.lab1;
+                creep.memory.labKey = key;
+                creep.memory.amount = Math.min(
+                  LAB_CAPACITY - (lab1.store[config.reagent1] || 0),
+                  critSrc1.store[config.reagent1],
+                  creep.store.getFreeCapacity(),
+                );
+                break;
+              }
+            }
+            if ((lab2.store[config.reagent2] || 0) < reactionNeed) {
+              const critSrc2 = this.findSource(
+                creep.room,
+                config.reagent2,
+                lab2,
+              );
+              if (critSrc2) {
+                creep.memory.task = "load_lab2";
+                creep.memory.resource = config.reagent2;
+                creep.memory.sourceId = critSrc2.id;
+                creep.memory.targetId = config.lab2;
+                creep.memory.labKey = key;
+                creep.memory.amount = Math.min(
+                  LAB_CAPACITY - (lab2.store[config.reagent2] || 0),
+                  critSrc2.store[config.reagent2],
+                  creep.store.getFreeCapacity(),
+                );
+                break;
+              }
+            }
+          } else {
+            // Приоритет 5: загрузить реагент1 в lab1.
+            // Гистерезис (см. п.1 в шапке): новый рейс начинаем, только если
+            // дефицит не меньше рюкзака. Если крип уже везёт этот реагент — задачу
+            // даём всегда, чтобы он сдал привезённое.
+            //
+            // ВАЖНО ПРО ПРОСТОЙ (config.paused). Простаивающую тройку НЕЛЬЗЯ
+            // исключать из загрузки: простой означает «не варим», а не «тройка
+            // выключена». Если тройка ушла в простой, ожидая первый подвоз реагента
+            // (продукт ниже LOW), то именно эта загрузка и есть условие выхода из
+            // простоя: lab.recipes.selectRecipe возобновляет работу только по
+            // canRun(slot) — «реагенты реально лежат в lab1/lab2». Запрет загрузки
+            // навсегда запирал бы тройку в простое (проверено и откачено).
+            const cur1 = lab1.store[config.reagent1] || 0;
+            if (cur1 < LAB_CAPACITY) {
+              const needed1 = LAB_CAPACITY - cur1;
+              const carries1 = (creep.store[config.reagent1] || 0) > 0;
+              if (carries1 || needed1 >= freeCapacity) {
+                const src = this.findSource(creep.room, config.reagent1, lab1);
+                if (src) {
+                  creep.memory.task = "load_lab1";
+                  creep.memory.resource = config.reagent1;
+                  creep.memory.sourceId = src.id;
+                  creep.memory.targetId = config.lab1;
+                  creep.memory.labKey = key;
+                  creep.memory.amount = Math.min(
+                    needed1,
+                    src.store[config.reagent1],
+                    creep.store.getFreeCapacity(),
+                  );
+                  break;
+                }
+              }
+            }
+
+            // Приоритет 6: загрузить реагент2 в lab2 (та же логика гистерезиса)
+            const cur2 = lab2.store[config.reagent2] || 0;
+            if (cur2 < LAB_CAPACITY) {
+              const needed2 = LAB_CAPACITY - cur2;
+              const carries2 = (creep.store[config.reagent2] || 0) > 0;
+              if (carries2 || needed2 >= freeCapacity) {
+                const src = this.findSource(creep.room, config.reagent2, lab2);
+                if (src) {
+                  creep.memory.task = "load_lab2";
+                  creep.memory.resource = config.reagent2;
+                  creep.memory.sourceId = src.id;
+                  creep.memory.targetId = config.lab2;
+                  creep.memory.labKey = key;
+                  creep.memory.amount = Math.min(
+                    needed2,
+                    src.store[config.reagent2],
+                    creep.store.getFreeCapacity(),
+                  );
+                  break;
+                }
+              }
             }
           }
         }
-
-        // Приоритет 6: загрузить реагент2 в lab2 (та же логика гистерезиса)
-        const cur2 = lab2.store[config.reagent2] || 0;
-        if (cur2 < LAB_CAPACITY) {
-          const needed2 = LAB_CAPACITY - cur2;
-          const carries2 = (creep.store[config.reagent2] || 0) > 0;
-          if (carries2 || needed2 >= freeCapacity) {
-            const src = this.findSource(creep.room, config.reagent2, lab2);
-            if (src) {
-              creep.memory.task = "load_lab2";
-              creep.memory.resource = config.reagent2;
-              creep.memory.sourceId = src.id;
-              creep.memory.targetId = config.lab2;
-              creep.memory.labKey = key;
-              creep.memory.amount = Math.min(
-                needed2,
-                src.store[config.reagent2],
-                creep.store.getFreeCapacity(),
-              );
-              break;
-            }
-          }
-        }
-        }
-      }
       }
 
       // Перебор не дал задачи — не повторяем его каждый тик.
