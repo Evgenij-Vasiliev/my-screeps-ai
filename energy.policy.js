@@ -13,7 +13,7 @@
  * Управление из консоли не предусмотрено: выключатели — в systems.js,
  * пороги — в constants.js.
  */
-const { ENERGY_POLICY } = require("./constants");
+const { ENERGY_POLICY, TASK_ENERGY_LIMITS } = require("./constants");
 const systems = require("./systems");
 
 const BANDS = ENERGY_POLICY.BANDS;
@@ -57,12 +57,52 @@ function band(room) {
   return st.band;
 }
 
+// Старые имена подсистем (для policy-флагов systems.js). Лимит — у задачи,
+// но выключатель подсистемы по-прежнему один на все её задачи.
+const POLICY_KEY = {
+  fillTowers: "towers",
+  repairStructures: "repair",
+  buildStructures: "build",
+  upgradeController: "upgrade",
+  labManager: "labs",
+  boost: "boost",
+  fillFactoryEnergy: "factory",
+  fillPowerSpawnPower: "powerSpawn",
+  fillPowerSpawnEnergy: "powerSpawn",
+  powerSpawnManager: "powerSpawn",
+  marketSell: "marketSell",
+  marketBuy: "marketBuy",
+};
+
+function taskState(room) {
+  if (!Memory.rooms) Memory.rooms = {};
+  const mem = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
+  return mem.taskEnergy || (mem.taskEnergy = {});
+}
+
 /**
- * Разрешена ли подсистема `name` в комнате `room`.
+ * Разрешена ли задача `name` в комнате `room`.
+ * Для имён из TASK_ENERGY_LIMITS порог берётся у задачи; для старых имён
+ * полос (towers/repair/...) — прежняя лестница (совместимость и диагностика).
  * Неизвестное имя — false (опечатка не должна включать лишнее).
  */
 function allows(room, name) {
-  if (systems.policy && systems.policy[name] === false) return false;
+  const policyKey = POLICY_KEY[name];
+  if (systems.policy && systems.policy[policyKey || name] === false) return false;
+
+  if (Object.prototype.hasOwnProperty.call(TASK_ENERGY_LIMITS, name)) {
+    const min = TASK_ENERGY_LIMITS[name];
+    if (min <= 0) return true;
+    const energy = energyOf(room);
+    const st = taskState(room);
+    let on = st[name];
+    if (on === undefined) on = energy >= min;
+    else if (energy >= min) on = true;
+    else if (energy < Math.max(min - HYSTERESIS, 0)) on = false;
+    if (st[name] !== on) st[name] = on;
+    return on;
+  }
+
   const idx = INDEX[name];
   if (!idx) return false;
   return band(room) >= idx;
@@ -77,4 +117,4 @@ function status(room) {
   return { band: st.band, energy, enabled };
 }
 
-module.exports = { band, allows, status, BANDS };
+module.exports = { band, allows, status, BANDS, TASK_ENERGY_LIMITS };

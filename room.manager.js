@@ -820,16 +820,16 @@ module.exports = {
           taskGenerators.generateFillSpawnsExtensions,
         );
       }
-      if (systems.fillPowerSpawnPower && !shedHard && energyPolicy.allows(roomState.room, "powerSpawn")) {
+      if (systems.fillPowerSpawnPower && !shedHard && energyPolicy.allows(roomState.room, "fillPowerSpawnPower")) {
         gen("fillPowerSpawnPower", taskGenerators.generateFillPowerSpawnPower);
       }
-      if (systems.fillPowerSpawnEnergy && !shedHard && energyPolicy.allows(roomState.room, "powerSpawn")) {
+      if (systems.fillPowerSpawnEnergy && !shedHard && energyPolicy.allows(roomState.room, "fillPowerSpawnEnergy")) {
         gen(
           "fillPowerSpawnEnergy",
           taskGenerators.generateFillPowerSpawnEnergy,
         );
       }
-      if (systems.fillFactoryEnergy && !shedHard && energyPolicy.allows(roomState.room, "factory")) {
+      if (systems.fillFactoryEnergy && !shedHard && energyPolicy.allows(roomState.room, "fillFactoryEnergy")) {
         gen("fillFactoryEnergy", taskGenerators.generateFillFactoryEnergy);
       }
       if (systems.collectFactoryBattery && !shedHard) {
@@ -847,24 +847,24 @@ module.exports = {
           taskGenerators.generateFillTerminalResources,
         );
       }
-      if (systems.fillTowers && energyPolicy.allows(roomState.room, "towers")) {
+      if (systems.fillTowers && energyPolicy.allows(roomState.room, "fillTowers")) {
         gen("fillTowers", taskGenerators.generateFillTowers);
       }
       // Фоновое: апгрейд, стройка, ремонт — только в обычном режиме.
-      if (systems.repairStructures && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "repair")) {
+      if (systems.repairStructures && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "repairStructures")) {
         gen("repairStructures", taskGenerators.generateRepairStructures);
       }
-      if (systems.buildStructures && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "build")) {
+      if (systems.buildStructures && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "buildStructures")) {
         gen("buildStructures", taskGenerators.generateBuildStructures);
       }
-      if (systems.upgradeController && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "upgrade")) {
+      if (systems.upgradeController && !shedLite && !energyLow && energyPolicy.allows(roomState.room, "upgradeController")) {
         gen("upgradeController", taskGenerators.generateUpgradeController);
       }
     });
     if (systems.creeps) runCreepLogic(roomState);
     if (systems.towers) runTowerLogic(roomState);
     if (systems.linkManager) runLinkLogic(roomState);
-    if (systems.labManager && energyPolicy.allows(roomState.room, "labs")) {
+    if (systems.labManager && energyPolicy.allows(roomState.room, "labManager")) {
       cpuMonitor.trackRole("labManager", () =>
         labManager.run(Game.rooms[roomState.roomName]),
       );
@@ -880,7 +880,7 @@ module.exports = {
           factoryManager.run(roomState),
         );
       }
-      if (systems.powerSpawnManager && energyPolicy.allows(roomState.room, "powerSpawn")) {
+      if (systems.powerSpawnManager && energyPolicy.allows(roomState.room, "powerSpawnManager")) {
         cpuMonitor.trackRole("powerSpawnManager", () =>
           powerSpawnManager.run(roomState),
         );

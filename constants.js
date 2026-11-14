@@ -59,6 +59,29 @@ const ENERGY_POLICY = {
   ],
 };
 
+// ЛИМИТЫ ЗАДАЧ: порог — у задачи, а не у объекта. Задача включается, когда
+// энергии в хранилище комнаты не меньше её порога, и выключается ниже
+// «порог − ENERGY_POLICY.HYSTERESIS». Объекты (терминал/фабрика/powerSpawn)
+// собственных лимитов больше не имеют.
+const TASK_ENERGY_LIMITS = {
+  fillSpawnsExtensions: 0,
+  fillTowers: 165000,
+  repairStructures: 170000,
+  buildStructures: 175000,
+  upgradeController: 180000,
+  labManager: 195000,
+  fillTerminalEnergy: 195000,
+  boost: 210000,
+  marketSell: 240000,
+  fillPowerSpawnPower: 255000,
+  fillPowerSpawnEnergy: 255000,
+  powerSpawnManager: 255000,
+  marketBuy: 270000,
+  fillFactoryEnergy: 300000,
+  collectFactoryBattery: 0,
+  fillTerminalResources: 0,
+};
+
 // Совместимость со старым energy.ladder.js и task.generators.js (тройка
 // порогов в виде множителей к STORAGE.ENERGY_MIN). Значения выведены из
 // ENERGY_POLICY, чтобы не было второго источника правды.
@@ -506,6 +529,7 @@ module.exports = {
   FACTORY,
   ENERGY_LADDER,
   ENERGY_POLICY,
+  TASK_ENERGY_LIMITS,
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
   MINER,

@@ -1,6 +1,6 @@
 const taskManager = require("task.manager");
 const systems = require("systems");
-const energyLadder = require("./energy.ladder");
+const energyPolicy = require("./energy.policy");
 // Числа повреждённых структур берутся из кэша сканера, а НЕ из room.manager.
 // Это принципиально: room.manager сам подключает task.generators
 // (room.manager.js, строка с require("./task.generators")), поэтому обратный
@@ -236,7 +236,7 @@ function generateFillPowerSpawnEnergy(roomState) {
     return;
   }
 
-  if (!energyLadder.isEnabled(Game.rooms[roomName], "POWER_SPAWN")) {
+  if (!energyPolicy.allows(Game.rooms[roomName], "fillPowerSpawnEnergy")) {
     return;
   }
 
@@ -305,7 +305,7 @@ function generateFillFactoryEnergy(roomState) {
     return;
   }
 
-  if (!energyLadder.isEnabled(Game.rooms[roomName], "FACTORY")) {
+  if (!energyPolicy.allows(Game.rooms[roomName], "fillFactoryEnergy")) {
     return;
   }
 
@@ -416,7 +416,7 @@ function generateFillTerminalEnergy(roomState) {
     return;
   }
 
-  if (!energyLadder.isEnabled(Game.rooms[roomName], "TERMINAL")) {
+  if (!energyPolicy.allows(Game.rooms[roomName], "fillTerminalEnergy")) {
     return;
   }
 
