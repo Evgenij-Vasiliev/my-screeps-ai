@@ -98,7 +98,7 @@ function allows(room, name) {
     let on = st[name];
     if (on === undefined) on = energy >= min;
     else if (energy >= min) on = true;
-    else if (energy < Math.max(min - HYSTERESIS, 0)) on = false;
+    else if (energy < Math.max(min - HYSTERESIS, OFF_FLOOR)) on = false;
     if (st[name] !== on) st[name] = on;
     return on;
   }

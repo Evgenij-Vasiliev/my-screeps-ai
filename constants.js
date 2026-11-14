@@ -64,7 +64,6 @@ const ENERGY_POLICY = {
 // «порог − ENERGY_POLICY.HYSTERESIS». Объекты (терминал/фабрика/powerSpawn)
 // собственных лимитов больше не имеют.
 const TASK_ENERGY_LIMITS = {
-  fillSpawnsExtensions: 0,
   fillTowers: 165000,
   repairStructures: 170000,
   buildStructures: 175000,
@@ -72,14 +71,12 @@ const TASK_ENERGY_LIMITS = {
   labManager: 195000,
   fillTerminalEnergy: 195000,
   boost: 210000,
+  fillFactoryEnergy: 225000,
   marketSell: 240000,
   fillPowerSpawnPower: 255000,
   fillPowerSpawnEnergy: 255000,
   powerSpawnManager: 255000,
   marketBuy: 270000,
-  fillFactoryEnergy: 300000,
-  collectFactoryBattery: 0,
-  fillTerminalResources: 0,
 };
 
 // Совместимость со старым energy.ladder.js и task.generators.js (тройка
