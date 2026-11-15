@@ -141,6 +141,8 @@ function generateFillSpawnsExtensions(roomState) {
         sourceId: storageId,
         targetId: target.id,
         resourceType: RESOURCE_ENERGY,
+        reserve: 1600,
+        maxEnergy: 1600,
       };
 
       if (isDuplicateTask(roomName, candidate)) {
@@ -296,16 +298,14 @@ function generateFillFactoryEnergy(roomState) {
     return;
   }
 
-  // Не заливаем до полного склада: держим рабочий буфер, остальное фабрика
-  // сразу перерабатывает в батарейки (600 энергии -> 50 батарей).
-  if (
-    (factory.store[RESOURCE_ENERGY] || 0) >= FACTORY.ENERGY_BUFFER ||
-    factory.store.getFreeCapacity(RESOURCE_ENERGY) === 0
-  ) {
+  // Партия уже лежит в фабрике — подвоз не нужен, производство решит
+  // factory.manager. Буфера 2000 больше нет: одна задача = ровно 600.
+  if ((factory.store[RESOURCE_ENERGY] || 0) >= FACTORY.BATCH_ENERGY) {
     return;
   }
 
-  if (!energyPolicy.allows(Game.rooms[roomName], "fillFactoryEnergy")) {
+  const room = Game.rooms[roomName] || roomState.room;
+  if (!energyPolicy.factoryAllowed(room)) {
     return;
   }
 
@@ -314,6 +314,8 @@ function generateFillFactoryEnergy(roomState) {
     sourceId: storage.id,
     targetId: factory.id,
     resourceType: RESOURCE_ENERGY,
+    reserve: 600,
+    maxEnergy: 600,
   };
 
   if (isDuplicateFillFactoryEnergyTask(roomName, candidate)) {
@@ -573,6 +575,8 @@ function generateFillTowers(roomState) {
       sourceId: storage.id,
       targetId: tower.id,
       resourceType: RESOURCE_ENERGY,
+      reserve: 500,
+      maxEnergy: 500,
     };
 
     if (isDuplicateFillTowersTask(roomName, candidate)) {
@@ -688,6 +692,8 @@ function addRepairTask(roomName, targetId) {
   const candidate = {
     type: "repair",
     targetId,
+    reserve: 500,
+    maxEnergy: 500,
   };
 
   if (isDuplicateRepairTask(roomName, candidate)) return;
@@ -739,6 +745,8 @@ function generateBuildStructures(roomState) {
     taskManager.addTask(roomName, "buildStructures", {
       type: "build",
       targetId: siteId,
+      reserve: 500,
+      maxEnergy: 500,
     });
     existing.add(siteId);
   }
@@ -772,6 +780,8 @@ function generateUpgradeController(roomState) {
   const candidate = {
     type: "upgrade",
     targetId: controller.id,
+    reserve: 500,
+    maxEnergy: 500,
   };
 
   if (isDuplicateUpgradeTask(roomName, candidate)) {

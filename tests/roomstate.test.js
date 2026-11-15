@@ -397,7 +397,11 @@ check(
 check(
   "в задачу не попали служебные поля",
   repairQueue.length > 0 &&
-    repairQueue.every(t => Object.keys(t).sort().join(",") === "targetId,taskId,type"),
+    repairQueue.every(
+      t =>
+        Object.keys(t).sort().join(",") ===
+        "maxEnergy,reserve,targetId,taskId,type",
+    ),
   repairQueue.length ? Object.keys(repairQueue[0]).join(",") : "(нет задачи)",
 );
 

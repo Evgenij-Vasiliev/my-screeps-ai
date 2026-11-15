@@ -3,6 +3,10 @@
 
 const STORAGE = {
   ENERGY_MIN: 150000, // не опускаться ниже — резерв комнаты
+  // Дополнительный резерв на оборону/аварийное восстановление. Входит в
+  // свободный остаток energy.policy.free(), но не меняет поведение старых
+  // задач: резерв учитывается только при reserve > 0.
+  DEFENSE_RESERVE: 20000,
 };
 
 const TASK_TYPES = {
@@ -29,10 +33,17 @@ const TERMINAL_SUPPLY = {
 };
 
 const FACTORY = {
-  ENERGY_RESERVE_MULTIPLIER: 1.1, // множитель к STORAGE.ENERGY_MIN — ниже этого уровня фабрика не забирает энергию из хранилища
-  // Рабочий буфер фабрики. Подвоз больше не идёт «до полного склада» (50 000):
-  // привезли буфер — фабрика сразу перерабатывает его в батарейки.
-  ENERGY_BUFFER: 2000,
+  // Одна партия: 600 энергии -> 50 батарей, кулдаун 10 тиков.
+  BATCH_ENERGY: 600,
+  BATCH_BATTERIES: 50,
+  // Империя не производит, пока суммарный запас батареек (склады + терминалы)
+  // выше цели: иначе энергия уходит в неликвид.
+  STOCK_TARGET: 20000,
+  // Минимальный запас склада и свободный бюджет комнаты для запуска партии.
+  MIN_STORAGE: 200000,
+  MIN_FREE: 1200,
+  // Минимум тиков между партиями одной фабрики.
+  INTERVAL: 10,
 };
 
 // ЛЕСТНИЦА ЭНЕРГИИ. Одна общая «ступень» на комнату: чем выше запас в
@@ -77,6 +88,22 @@ const TASK_ENERGY_LIMITS = {
   fillPowerSpawnEnergy: 255000,
   powerSpawnManager: 255000,
   marketBuy: 270000,
+};
+
+// КОНТРАКТ ЭНЕРГЕТИЧЕСКОЙ ЗАДАЧИ (этап 0).
+// Поля контракта: reserve — сколько энергии задача вправе забрать за рейс,
+// maxEnergy — потолок рейса, priority — приоритет, expiresAt — TTL
+// (0 = не истекает). Пока значения нулевые: поведение империи не меняется.
+// Заполнение по задачам — этапы 1–4; структура уже готова.
+const TASK_ENERGY_POLICY = {
+  defaults: {
+    reserve: 0,
+    maxEnergy: 0,
+    priority: 0,
+    expiresAt: 0,
+  },
+  // per-task overrides добавляются здесь: tasks.fillFactoryEnergy = {...}
+  tasks: {},
 };
 
 // Совместимость со старым energy.ladder.js и task.generators.js (тройка
@@ -527,6 +554,7 @@ module.exports = {
   ENERGY_LADDER,
   ENERGY_POLICY,
   TASK_ENERGY_LIMITS,
+  TASK_ENERGY_POLICY,
   PRESPAWN_THRESHOLD,
   CREEP_BODIES,
   MINER,

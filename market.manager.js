@@ -3,7 +3,7 @@
  * Автоматическая продажа избыточных ресурсов через Market.
  */
 
-const { TERMINAL_SUPPLY, MARKET } = require("./constants");
+const { TERMINAL_SUPPLY, MARKET, FACTORY } = require("./constants");
 const loadShed = require("loadShed");
 const energyPolicy = require("./energy.policy");
 
@@ -149,27 +149,38 @@ function findBestOrder(resourceType) {
 
 function trySellResource(terminal, resourceType, surplus) {
   // Железное правило: всё из BUY_LIST не продаём никогда.
-  if (MARKET.BUY_LIST.includes(resourceType)) return false;
+  if (MARKET.BUY_LIST.includes(resourceType)) return 0;
 
   const order = findBestOrder(resourceType);
-  if (!order) return false;
+  if (!order) return 0;
 
   const amount = Math.min(surplus, order.amount);
-  if (amount <= 0) return false;
+  if (amount <= 0) return 0;
 
   const energyForDeal = Game.market.calcTransactionCost(
     amount,
     terminal.room.name,
     order.roomName,
   );
-  if (terminal.store[RESOURCE_ENERGY] < energyForDeal) return false;
+
+  // Комиссия оплачивается энергией терминала. Для батареек не опускаем
+  // терминал ниже TERMINAL_SUPPLY.ENERGY_MIN; для остальных групп сохраняем
+  // прежнюю проверку «энергии хватает на комиссию».
+  const energyFloor =
+    resourceType === RESOURCE_BATTERY
+      ? TERMINAL_SUPPLY.ENERGY_MIN
+      : 0;
+  if (terminal.store[RESOURCE_ENERGY] - energyForDeal < energyFloor) {
+    return 0;
+  }
 
   const result = Game.market.deal(order.id, amount, terminal.room.name);
   if (result === OK) {
     if (!Memory.marketBudget) Memory.marketBudget = { earned: 0, spent: 0 };
     Memory.marketBudget.earned += amount * order.price;
+    return amount;
   }
-  return result === OK;
+  return 0;
 }
 
 // Бюджет закупок = заработано продажами − потрачено на закупки.
@@ -372,6 +383,14 @@ function run() {
   const terminals = getEmpireTerminals();
   if (terminals.length === 0) return;
 
+  // Общий излишек батареек империи. Считаем один раз за проход: продажи
+  // уменьшают его на фактически проданное, поэтому один и тот же излишек
+  // не продаётся повторно из разных терминалов.
+  let batteryExcess = Math.max(
+    0,
+    energyPolicy.batteryStock() - FACTORY.STOCK_TARGET,
+  );
+
   let dealsCount = 0;
 
   // Закупка реагентов идёт ПЕРВОЙ: иначе продажи выбирают весь лимит сделок.
@@ -390,18 +409,26 @@ function run() {
     // Порог группы одинаков для всех ресурсов и терминалов — считаем один раз.
     const reserve = getReserve(group);
 
+    // Батарейки продаются по запасу империи, а не по лестнице склада:
+    // сначала реализуем излишек над STOCK_TARGET. Остальные группы
+    // сохраняют прежний гейт marketSell/заполненного склада.
+    if (group === "BATTERY") {
+      if (batteryExcess <= 0) continue;
+    }
+
     for (const terminal of terminals) {
       if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
-      // Продажа по лестнице с полосы marketSell (240k). Исключение: склад
-      // забит — тогда излишек терминала продаём вне лестницы, иначе империя
-      // встанет из-за нехватки места (решение владельца 30.10.2026).
       const roomStorage = terminal.room.storage;
       const storageFull =
         roomStorage &&
         roomStorage.store.getFreeCapacity() <
           TERMINAL_SUPPLY.STORAGE_FULL_MARGIN;
-      if (!storageFull && !energyPolicy.allows(terminal.room, "marketSell")) {
+      if (
+        group !== "BATTERY" &&
+        !storageFull &&
+        !energyPolicy.allows(terminal.room, "marketSell")
+      ) {
         continue;
       }
 
@@ -412,11 +439,17 @@ function run() {
         if (!MARKET.SELL_LIST.includes(resourceType)) continue;
         if (getResourceGroup(resourceType) !== group) continue;
 
-        const surplus = terminal.store[resourceType] - reserve;
+        let surplus = terminal.store[resourceType] - reserve;
+        if (group === "BATTERY") {
+          surplus = Math.min(surplus, batteryExcess);
+        }
         if (surplus <= 0) continue;
 
-        if (trySellResource(terminal, resourceType, surplus)) {
+        const sold = trySellResource(terminal, resourceType, surplus);
+        if (sold > 0) {
           dealsCount++;
+          if (group === "BATTERY") batteryExcess -= sold;
+          if (batteryExcess <= 0 && group === "BATTERY") break;
         }
       }
     }

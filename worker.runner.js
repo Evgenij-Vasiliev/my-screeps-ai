@@ -1,5 +1,6 @@
 const taskManager = require("task.manager");
 const taskExecutors = require("task.executors");
+const energyPolicy = require("./energy.policy");
 const { TASK_CONFIG } = require("./constants");
 
 const TASK_CHAIN = taskManager.TASK_CHAIN;
@@ -84,7 +85,7 @@ function rangeToNextStop(creep, full, task) {
  * Индекс ближайшей очереди, в которой есть свободная задача.
  * Возвращает -1, если свободных задач нет ни в одной очереди комнаты.
  */
-function nearestTypeIndex(creep, roomName, fromIndex, full) {
+function nearestTypeIndex(creep, roomName, fromIndex, full, acceptFn) {
   let best = -1;
   let bestRange = Infinity;
 
@@ -120,7 +121,7 @@ function nearestTypeIndex(creep, roomName, fromIndex, full) {
     // Задачу здесь НЕ резервируем: резерв делает reserveTask, когда выбор
     // уже подтверждён. Индекс очереди и счётчик свободных при этом не портятся.
     // rangeFn просит менеджер отдать БЛИЖАЙШУЮ задачу очереди (шаг 1, часть 2).
-    const candidate = taskManager.getNextTask(roomName, type, rangeFn);
+    const candidate = taskManager.getNextTask(roomName, type, rangeFn, acceptFn);
     if (!candidate) continue;
 
     // Дальность уже посчитана, если менеджер вернул лучшего из просмотренных;
@@ -178,6 +179,8 @@ function run(creep) {
   }
 
   const roomName = creep.room.name;
+  const room = Game.rooms && Game.rooms[roomName];
+  const acceptTask = task => energyPolicy.canReserve(room, task);
 
   // Состояние «грузен/пуст» читается один раз на тик и передаётся в rangeFn:
   // до исполнителя стор не меняется (см. комментарий к isFull).
@@ -226,15 +229,24 @@ function run(creep) {
     // Текущая очередь крипу не разрешена — сразу ищем среди разрешённых.
     let candidate = null;
     if (allowsTask(creep, currentTaskType)) {
-      candidate = taskManager.getNextTask(roomName, currentTaskType, task =>
-        rangeToNextStop(creep, full, task),
+      candidate = taskManager.getNextTask(
+        roomName,
+        currentTaskType,
+        task => rangeToNextStop(creep, full, task),
+        acceptTask,
       );
     }
 
     if (!candidate) {
       // Очередь текущего типа пуста (или все Task зарезервированы) — берём
       // ближайшую свободную задачу комнаты вместо поворота указателя.
-      const index = nearestTypeIndex(creep, roomName, taskIndex, full);
+      const index = nearestTypeIndex(
+        creep,
+        roomName,
+        taskIndex,
+        full,
+        acceptTask,
+      );
 
       if (index === -1) {
         // Свободных задач нет нигде: в этом тике ничего не делаем и НЕ
@@ -255,8 +267,11 @@ function run(creep) {
         creep.memory.taskIndex = index;
       }
 
-      candidate = taskManager.getNextTask(roomName, currentTaskType, task =>
-        rangeToNextStop(creep, full, task),
+      candidate = taskManager.getNextTask(
+        roomName,
+        currentTaskType,
+        task => rangeToNextStop(creep, full, task),
+        acceptTask,
       );
 
       if (!candidate) {
@@ -264,6 +279,12 @@ function run(creep) {
         // попробуем в следующем тике, выбранный тип остаётся в памяти.
         return;
       }
+    }
+
+    // Финальная проверка перед резервацией: acceptTask уже отфильтровал
+    // недоступные задачи при выборе, здесь страховка от гонки в этом тике.
+    if (!energyPolicy.canReserve(room, candidate)) {
+      return;
     }
 
     if (

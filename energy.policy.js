@@ -13,7 +13,12 @@
  * Управление из консоли не предусмотрено: выключатели — в systems.js,
  * пороги — в constants.js.
  */
-const { ENERGY_POLICY, TASK_ENERGY_LIMITS } = require("./constants");
+const {
+  ENERGY_POLICY,
+  TASK_ENERGY_LIMITS,
+  STORAGE,
+  FACTORY,
+} = require("./constants");
 const systems = require("./systems");
 
 const BANDS = ENERGY_POLICY.BANDS;
@@ -36,7 +41,122 @@ function energyOf(room) {
   return room.storage.store[RESOURCE_ENERGY] || 0;
 }
 
-/** Текущая ступень комнаты (0 — только ядро). Обновляет состояние раз в EVAL_EVERY тиков. */
+/** Остаток контракта задачи: reserve минус уже снятое этой задачей. */
+function remainingReserve(task) {
+  if (!task || typeof task.reserve !== "number") return 0;
+  const spent =
+    typeof task.energyTaken === "number" ? task.energyTaken : 0;
+  return Math.max(0, task.reserve - spent);
+}
+
+/**
+ * Сумма резервов задач, уже назначенных живым крипам.
+ *
+ * Считается из очередей, а не из инкрементального счётчика: завершённые
+ * (`null`-надгробия), освобождённые, просроченные задачи и задачи мёртвых
+ * крипов не учитываются автоматически. Никаких записей в Memory.
+ *
+ * @param {Object} room
+ * @returns {number}
+ */
+function reserved(room) {
+  if (!room || !room.name || !Memory.rooms) return 0;
+  const mem = Memory.rooms[room.name];
+  const tasks = mem && mem.tasks;
+  if (!tasks) return 0;
+
+  const creeps = Game.creeps || {};
+  let sum = 0;
+
+  // Memory.rooms[].tasks содержит только очереди TASK_CHAIN; обход по ключам
+  // не тянет task.manager в energy.policy (иначе офлайн-тесты политики
+  // требуют глобального резолва модулей).
+  for (const type in tasks) {
+    const queue = tasks[type];
+    if (!Array.isArray(queue)) continue;
+
+    for (let j = 0; j < queue.length; j++) {
+      const task = queue[j];
+      if (!task || !task.reservedBy) continue;
+      if (task.expiresAt && task.expiresAt <= Game.time) continue;
+      if (!creeps[task.reservedBy]) continue;
+      const remaining = remainingReserve(task);
+      if (remaining <= 0) continue;
+      sum += remaining;
+    }
+  }
+
+  return sum;
+}
+
+/** Свободная энергия сверх резерва комнаты и уже назначенных задач. */
+function free(room) {
+  if (!room || !room.storage) return 0;
+  return (
+    energyOf(room) -
+    STORAGE.ENERGY_MIN -
+    STORAGE.DEFENSE_RESERVE -
+    reserved(room)
+  );
+}
+
+/**
+ * Может ли задача `task` зарезервировать свою энергию в комнате `room`.
+ * При reserve <= 0 — всегда true: старые задачи не меняют поведение.
+ *
+ * @param {Object} room
+ * @param {Object} task
+ * @returns {boolean}
+ */
+function canReserve(room, task) {
+  const reserve = remainingReserve(task);
+  if (reserve <= 0) return true;
+  if (!room || !room.storage) return false;
+  return free(room) >= reserve;
+}
+
+/** Суммарный запас батареек империи: склады + терминалы своих комнат. */
+function batteryStock() {
+  const rooms = Game.rooms || {};
+  let sum = 0;
+  for (const name in rooms) {
+    const room = rooms[name];
+    if (!room || !room.controller || !room.controller.my) continue;
+    if (room.storage) {
+      sum += room.storage.store[RESOURCE_BATTERY] || 0;
+    }
+    if (room.terminal) {
+      sum += room.terminal.store[RESOURCE_BATTERY] || 0;
+    }
+  }
+  return sum;
+}
+
+/**
+ * Разрешено ли фабрике комнаты производство партии.
+ *
+ * Условия этапа 3:
+ *   - суммарный запас батареек ниже FACTORY.STOCK_TARGET;
+ *   - склад не ниже FACTORY.MIN_STORAGE;
+ *   - свободный бюджет после резерва/задач не ниже FACTORY.MIN_FREE;
+ *   - с прошлой партии прошло не менее FACTORY.INTERVAL тиков.
+ * Готовность самой фабрики (600 энергии, кулдаун, место под 50 батарей)
+ * проверяет factory.manager: политика не должна блокировать подвоз.
+ */
+function factoryAllowed(room) {
+  if (!room || !room.storage) return false;
+  if (batteryStock() >= FACTORY.STOCK_TARGET) return false;
+  if (energyOf(room) < FACTORY.MIN_STORAGE) return false;
+  if (free(room) < FACTORY.MIN_FREE) return false;
+
+  const mem = Memory.rooms && Memory.rooms[room.name];
+  if (mem && mem.factoryNextBatchAt && Game.time < mem.factoryNextBatchAt) {
+    return false;
+  }
+  return true;
+}
+
+/** Текущая ступень комнаты (0 — только ядро). Обновляется раз в EVAL_EVERY тиков. */
 function band(room) {
   const st = state(room);
   if (Game.time - st.tick < EVAL_EVERY) return st.band;
@@ -117,4 +237,16 @@ function status(room) {
   return { band: st.band, energy, enabled };
 }
 
-module.exports = { band, allows, status, BANDS, TASK_ENERGY_LIMITS };
+module.exports = {
+  band,
+  allows,
+  reserved,
+  free,
+  canReserve,
+  remainingReserve,
+  batteryStock,
+  factoryAllowed,
+  status,
+  BANDS,
+  TASK_ENERGY_LIMITS,
+};

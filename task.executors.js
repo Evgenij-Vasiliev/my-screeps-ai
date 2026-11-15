@@ -39,6 +39,38 @@ function resolveTarget(id) {
   return target;
 }
 
+/** Остаток бюджета задачи. Нет контракта — без ограничения (старое поведение). */
+function taskEnergyLimit(task) {
+  if (!task || typeof task.maxEnergy !== "number") return Infinity;
+  const spent =
+    typeof task.energyTaken === "number" ? task.energyTaken : 0;
+  return Math.max(0, task.maxEnergy - spent);
+}
+
+/**
+ * Снятие энергии под контракт задачи: не больше остатка maxEnergy и не больше
+ * свободной вместимости carry. Учитывает уже снятое в этой задаче, поэтому
+ * повторный CONTINUE не снимает полный бюджет заново.
+ */
+function withdrawForTask(creep, task) {
+  const limit = taskEnergyLimit(task);
+  if (limit <= 0) return false;
+
+  const before = (creep.store && creep.store[RESOURCE_ENERGY]) || 0;
+  const withdrawn = energySource.withdrawFromStorage(creep, false, limit);
+  if (!withdrawn) return false;
+
+  const after = (creep.store && creep.store[RESOURCE_ENERGY]) || 0;
+  const delta = after - before;
+  if (delta > 0 && typeof task.maxEnergy === "number") {
+    task.energyTaken = Math.min(
+      task.maxEnergy,
+      (task.energyTaken || 0) + delta,
+    );
+  }
+  return true;
+}
+
 function withdrawPower(creep) {
   const storage = creep.room.storage;
   const terminal = creep.room.terminal;
@@ -107,7 +139,7 @@ function executeFillSpawnsExtensions(creep, task) {
   }
 
   if (creep.store[RESOURCE_ENERGY] === 0) {
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
 
     if (!withdrawn) {
       return "SKIP";
@@ -177,7 +209,7 @@ function executeFillFactoryEnergy(creep, task) {
       return "DONE"; // условие 1: фабрика уже полна
     }
 
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
     if (!withdrawn) {
       delete creep.memory.working;
       return "SKIP"; // условие 2: невыполнима — нет энергии/резерв не позволяет
@@ -336,7 +368,7 @@ function executeFillTowers(creep, task) {
       return "DONE";
     }
 
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
     if (!withdrawn) {
       delete creep.memory.working;
       return "SKIP";
@@ -429,7 +461,7 @@ function executeFillTerminalEnergy(creep, task) {
       return "DONE";
     }
 
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
     if (!withdrawn) {
       return "SKIP";
     }
@@ -755,7 +787,7 @@ function executeRepairStructures(creep, task) {
       return "DONE";
     }
 
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
     if (!withdrawn) {
       delete creep.memory.working;
       return "SKIP";
@@ -822,7 +854,7 @@ function executeBuildStructures(creep, task) {
   }
 
   if (!creep.memory.working) {
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
     if (!withdrawn) {
       delete creep.memory.working;
       return "SKIP";
@@ -887,7 +919,7 @@ function executeUpgradeController(creep, task) {
       return "DONE";
     }
 
-    const withdrawn = energySource.withdrawFromStorage(creep);
+    const withdrawn = withdrawForTask(creep, task);
     if (!withdrawn) {
       delete creep.memory.working;
       return "SKIP";

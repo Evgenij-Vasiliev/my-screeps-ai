@@ -231,8 +231,12 @@ function getTaskById(roomName, taskType, taskId) {
 
   const entry = getQueueEntry(roomName, taskType);
   const index = ensureIndex(entry).get(taskId);
+  const task = index === undefined ? null : entry.queue[index] || null;
 
-  return index === undefined ? null : entry.queue[index] || null;
+  // Просроченная задача не должна исполняться старым taskId: воркер снимет
+  // её и возьмёт следующую. Резерв она уже не удерживает (energy.policy).
+  if (task && task.expiresAt && task.expiresAt <= Game.time) return null;
+  return task;
 }
 
 /**
@@ -381,9 +385,10 @@ function addTask(roomName, taskType, task) {
  * @param {string} roomName
  * @param {string} taskType
  * @param {Function} [rangeFn]
+ * @param {Function} [acceptFn] дополнительный фильтр: false — пропустить задачу
  * @returns {Object|null}
  */
-function getNextTask(roomName, taskType, rangeFn) {
+function getNextTask(roomName, taskType, rangeFn, acceptFn) {
   const entry = getQueueEntry(roomName, taskType);
   const queue = entry.queue;
 
@@ -411,8 +416,22 @@ function getNextTask(roomName, taskType, rangeFn) {
 
     if (!task) continue; // надгробие
 
+    // Просроченная задача: освобождаем место в очереди (надгробие) и не
+    // отдаём её воркеру. Резерв считается по reservedBy и снимается сразу.
+    if (task.expiresAt && task.expiresAt <= Game.time) {
+      if (!task.reservedBy || !Game.creeps[task.reservedBy]) entry.free--;
+      if (entry.indexById) entry.indexById.delete(task.taskId);
+      queue[i] = null;
+      entry.dead++;
+      continue;
+    }
+
     // Задача, зарезервированная умершим крипом, считается свободной.
     if (task.reservedBy && Game.creeps[task.reservedBy]) continue;
+
+    // Фильтр резерва: задача не подходит — ищем следующую, не блокируя
+    // остальные задачи и очереди.
+    if (typeof acceptFn === "function" && !acceptFn(task)) continue;
 
     if (!nearest) {
       // Прежнее поведение: первая свободная задача.
@@ -450,6 +469,7 @@ function reserveTask(roomName, taskType, task, creepName) {
   const queued = index === undefined ? null : entry.queue[index];
 
   if (!queued) return false;
+  if (queued.expiresAt && queued.expiresAt <= Game.time) return false;
 
   if (!queued.reservedBy) entry.free--;
   queued.reservedBy = creepName;
