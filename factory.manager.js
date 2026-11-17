@@ -1,17 +1,9 @@
 const { FACTORY } = require("./constants");
-const energyPolicy = require("./energy.policy");
 
 function run(roomState) {
-  const { factory, roomName } = roomState;
+  const { factory } = roomState;
 
   if (!factory) return;
-
-  const room =
-    roomState.room || (Game.rooms && Game.rooms[roomName]);
-  if (!room) return;
-
-  // Политика: сток батареек, минимальный склад, свободный бюджет, интервал.
-  if (!energyPolicy.factoryAllowed(room)) return;
 
   if (factory.cooldown > 0) return;
 
@@ -25,12 +17,7 @@ function run(roomState) {
     return;
   }
 
-  const result = factory.produce(RESOURCE_BATTERY);
-  if (result === OK) {
-    if (!Memory.rooms) Memory.rooms = {};
-    const mem = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
-    mem.factoryNextBatchAt = Game.time + FACTORY.INTERVAL;
-  }
+  factory.produce(RESOURCE_BATTERY);
 }
 
 module.exports = { run };

@@ -190,6 +190,27 @@ function run(roomState) {
     return;
   }
 
+  // АВАРИЙНОЕ ВОССТАНОВЛЕНИЕ: в комнате нет ни одного своего крипа.
+  // Обычный worker стоит 2550 и не влезет в пустые расширения; создаём
+  // минимальное тело (1W/1C/1M) по стоимости частей, без фиксированной цены.
+  // Повторно не создаём: при живом крипе эта ветка не выполняется, а пока
+  // идёт spawnCreep, findFreeSpawn вернёт null.
+  if (roomState.creeps.length === 0) {
+    const emergencySpawn = findFreeSpawn(roomState.spawns);
+    const energy =
+      emergencySpawn && emergencySpawn.room
+        ? emergencySpawn.room.energyAvailable
+        : 0;
+    if (!emergencySpawn || energy < creepFactory.emergencyCost()) {
+      // Не пытаемся создать невозможное полное тело; ждём энергию/спавн.
+      gate[roomName] = now + 1;
+      return;
+    }
+    creepFactory.runEmergency(emergencySpawn, roomName);
+    gate[roomName] = now + 1;
+    return;
+  }
+
   // Профиль по требованию: пока флаг не задан, лишних Game.cpu.getUsed нет.
   const prof = Memory.cpuSpawnProfile === true;
   let mark = prof ? Game.cpu.getUsed() : 0;

@@ -4,7 +4,18 @@
  * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
-const { CREEP_BODIES } = require("./constants");
+const { CREEP_BODIES, SPAWN } = require("./constants");
+
+const PART_COST =
+  typeof BODYPART_COST !== "undefined"
+    ? BODYPART_COST
+    : { work: 100, carry: 50, move: 50, tough: 10, attack: 80, ranged_attack: 150, heal: 250, claim: 600 };
+
+function bodyCost(body) {
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) sum += PART_COST[body[i]] || 0;
+  return sum;
+}
 
 const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
   const body = [];
@@ -106,6 +117,25 @@ const factory = {
         working: false,
       },
     }),
+  },
+
+  /** Тело и стоимость аварийного восстановительного крипа. */
+  emergencyBody: function () {
+    return prepareBody(SPAWN.EMERGENCY_BODY);
+  },
+  emergencyCost: function () {
+    return bodyCost(this.emergencyBody());
+  },
+  runEmergency: function (spawn, roomName) {
+    const body = this.emergencyBody();
+    const cost = bodyCost(body);
+    if (!spawn || !spawn.room || spawn.room.energyAvailable < cost) {
+      return ERR_NOT_ENOUGH_ENERGY;
+    }
+    const name = `worker_${roomName}_${Game.time}_e`;
+    return spawn.spawnCreep(body, name, {
+      memory: { role: "worker", homeRoom: roomName },
+    });
   },
 
   /**

@@ -180,7 +180,9 @@ function run(creep) {
 
   const roomName = creep.room.name;
   const room = Game.rooms && Game.rooms[roomName];
-  const acceptTask = task => energyPolicy.canReserve(room, task);
+  const acceptTask = task =>
+    energyPolicy.canReserve(room, task) &&
+    energyPolicy.budgetAvailable(task);
 
   // Состояние «грузен/пуст» читается один раз на тик и передаётся в rangeFn:
   // до исполнителя стор не меняется (см. комментарий к isFull).
@@ -286,12 +288,19 @@ function run(creep) {
     if (!energyPolicy.canReserve(room, candidate)) {
       return;
     }
-
     if (
       !taskManager.reserveTask(roomName, currentTaskType, candidate, creep.name)
     ) {
       // Защитный случай: не удалось зарезервировать (например, Task уже
-      // не в очереди). В этом тике ничего не берём.
+      // не в очереди). В этом тике ничего не берём и бюджет не тратим.
+      return;
+    }
+
+    // Бюджет списывается только после успешного reserveTask. Если бюджета
+    // не хватило, задача освобождается и остаётся доступной в FIFO;
+    // стоимость не теряется.
+    if (!energyPolicy.tryChargeTaskBudget(candidate)) {
+      taskManager.releaseTask(roomName, currentTaskType, candidate);
       return;
     }
 

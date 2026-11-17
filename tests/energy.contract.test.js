@@ -119,8 +119,8 @@ console.log("1. Генераторы выставляют контракт");
     room: { energyAvailable: 0, energyCapacityAvailable: 300 },
   });
   const t = tasks(room, "fillSpawnsExtensions")[0];
-  check("fillSpawns reserve=1600", t && t.reserve === 1600, t && t.reserve);
-  check("fillSpawns maxEnergy=1600", t && t.maxEnergy === 1600, t && t.maxEnergy);
+  check("fillSpawns reserve=300 (потребность цели)", t && t.reserve === 300, t && t.reserve);
+  check("fillSpawns maxEnergy=300", t && t.maxEnergy === 300, t && t.maxEnergy);
 }
 
 console.log("\n2. Фактическое снятие и повторный CONTINUE");

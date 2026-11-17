@@ -130,8 +130,8 @@ module.exports = {
       {
         role: "worker",
         count: 0,
-        tasks: ["fillTerminalResources"],
-        body: { work: 0, carry: 40, move: 10 },
+        tasks: ["fillSpawnsExtensions"],
+        body: { work: 0, carry: 1, move: 1 },
         ignoreReserves: true,
       },
     ],

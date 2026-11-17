@@ -400,7 +400,7 @@ check(
     repairQueue.every(
       t =>
         Object.keys(t).sort().join(",") ===
-        "maxEnergy,reserve,targetId,taskId,type",
+        "direction,maxEnergy,reserve,targetId,taskId,type",
     ),
   repairQueue.length ? Object.keys(repairQueue[0]).join(",") : "(нет задачи)",
 );

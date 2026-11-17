@@ -33,36 +33,17 @@ function isDuplicateTask(roomName, candidate) {
   );
 }
 
-function needsEnergy(target) {
-  if (!target) {
-    return false;
-  }
-
-  // Есть ли свободное место под энергию — БЕЗ вызова store.getFreeCapacity().
-  //
-  // `.energy` и `.energyCapacity` — документированные алиасы store[RESOURCE_ENERGY]
-  // и store.getCapacity(RESOURCE_ENERGY): @types/screeps:4685-4696 (spawn),
-  // :5104-5116 (extension), :5343-5355 (tower). Поэтому `energy < energyCapacity`
-  // тождественно прежнему `getFreeCapacity(RESOURCE_ENERGY) > 0`.
-  //
-  // Зачем: обход spawn/extension — самый дорогой цикл генерации (62 объекта на
-  // комнату за тик). Замер на живом shard3 30.09.2026
-  // (scripts/task.manager.bench.js, N=300, реплика ровно этого цикла):
-  // 0.0240 и 0.0209 CPU на комнату с вызовом getFreeCapacity против 0.0034 и
-  // 0.0061 CPU с алиасами — 4-7 раз дешевле. Живая сверка эквивалентности:
-  // 282 объекта spawn+extension в 5 комнатах, расхождений между
-  // `energy < energyCapacity` и `getFreeCapacity(ENERGY) > 0` — 0
-  // (Game.time ≈ 83331255).
-  //
-  // Проверка типа — для офлайн-фикстур: у заглушки без этих полей ответ
-  // «места нет», как и раньше у заглушки без store.
+function neededEnergy(target) {
+  if (!target) return 0;
   const capacity = target.energyCapacity;
+  if (typeof capacity !== "number") return 0;
+  const energy = target.energy;
+  if (typeof energy !== "number") return 0;
+  return energy < capacity ? capacity - energy : 0;
+}
 
-  if (typeof capacity !== "number") {
-    return false;
-  }
-
-  return target.energy < capacity;
+function needsEnergy(target) {
+  return neededEnergy(target) > 0;
 }
 
 function generateFillSpawnsExtensions(roomState) {
@@ -132,17 +113,23 @@ function generateFillSpawnsExtensions(roomState) {
     for (let i = 0; i < list.length; i++) {
       const target = list[i];
 
-      if (!needsEnergy(target)) {
+      // Стоимость для бюджета — реальная потребность цели, а не полный
+      // рюкзак 1600: иначе одна задача на extension забирала бы весь
+      // периодный лимит spawn. neededEnergy читает .energy один раз.
+      const need = neededEnergy(target);
+      if (need <= 0) {
         continue;
       }
-
       const candidate = {
         type: "transfer",
         sourceId: storageId,
         targetId: target.id,
         resourceType: RESOURCE_ENERGY,
-        reserve: 1600,
-        maxEnergy: 1600,
+        reserve: need,
+        maxEnergy: need,
+        budgetCost: need,
+        direction: "spawn",
+        mandatory: true,
       };
 
       if (isDuplicateTask(roomName, candidate)) {
@@ -260,6 +247,9 @@ function generateFillPowerSpawnEnergy(roomState) {
     sourceId: storage.id,
     targetId: powerSpawn.id,
     resourceType: RESOURCE_ENERGY,
+    reserve: 500,
+    maxEnergy: 500,
+    direction: "powerSpawn",
   };
 
   if (isDuplicatePowerSpawnEnergyTask(roomName, candidate)) {
@@ -304,11 +294,6 @@ function generateFillFactoryEnergy(roomState) {
     return;
   }
 
-  const room = Game.rooms[roomName] || roomState.room;
-  if (!energyPolicy.factoryAllowed(room)) {
-    return;
-  }
-
   const candidate = {
     type: "transfer",
     sourceId: storage.id,
@@ -316,6 +301,7 @@ function generateFillFactoryEnergy(roomState) {
     resourceType: RESOURCE_ENERGY,
     reserve: 600,
     maxEnergy: 600,
+    direction: "factory",
   };
 
   if (isDuplicateFillFactoryEnergyTask(roomName, candidate)) {
@@ -577,6 +563,7 @@ function generateFillTowers(roomState) {
       resourceType: RESOURCE_ENERGY,
       reserve: 500,
       maxEnergy: 500,
+      direction: "towers",
     };
 
     if (isDuplicateFillTowersTask(roomName, candidate)) {
@@ -694,6 +681,7 @@ function addRepairTask(roomName, targetId) {
     targetId,
     reserve: 500,
     maxEnergy: 500,
+    direction: "repair",
   };
 
   if (isDuplicateRepairTask(roomName, candidate)) return;
@@ -747,6 +735,7 @@ function generateBuildStructures(roomState) {
       targetId: siteId,
       reserve: 500,
       maxEnergy: 500,
+      direction: "build",
     });
     existing.add(siteId);
   }
@@ -782,6 +771,7 @@ function generateUpgradeController(roomState) {
     targetId: controller.id,
     reserve: 500,
     maxEnergy: 500,
+    direction: "controller",
   };
 
   if (isDuplicateUpgradeTask(roomName, candidate)) {

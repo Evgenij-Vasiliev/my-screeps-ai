@@ -17,7 +17,7 @@ const {
   ENERGY_POLICY,
   TASK_ENERGY_LIMITS,
   STORAGE,
-  FACTORY,
+  BUDGET,
 } = require("./constants");
 const systems = require("./systems");
 
@@ -115,45 +115,167 @@ function canReserve(room, task) {
   return free(room) >= reserve;
 }
 
-/** Суммарный запас батареек империи: склады + терминалы своих комнат. */
-function batteryStock() {
+/** Номер расчётного периода. */
+function budgetPeriod() {
+  return Math.floor(Game.time / BUDGET.PERIOD_TICKS);
+}
+
+/** Расчётная добыча периода: источники * 3000 * (период/300). */
+function periodIncome() {
   const rooms = Game.rooms || {};
-  let sum = 0;
+  let sources = 0;
   for (const name in rooms) {
     const room = rooms[name];
     if (!room || !room.controller || !room.controller.my) continue;
-    if (room.storage) {
-      sum += room.storage.store[RESOURCE_BATTERY] || 0;
-    }
-    if (room.terminal) {
-      sum += room.terminal.store[RESOURCE_BATTERY] || 0;
+    if (Array.isArray(room.sources)) {
+      sources += room.sources.length;
+    } else if (
+      typeof room.find === "function" &&
+      typeof FIND_SOURCES !== "undefined"
+    ) {
+      sources += room.find(FIND_SOURCES).length;
     }
   }
-  return sum;
+  return Math.floor(
+    (sources * BUDGET.SOURCE_ENERGY * BUDGET.PERIOD_TICKS) / 300,
+  );
 }
 
 /**
- * Разрешено ли фабрике комнаты производство партии.
- *
- * Условия этапа 3:
- *   - суммарный запас батареек ниже FACTORY.STOCK_TARGET;
- *   - склад не ниже FACTORY.MIN_STORAGE;
- *   - свободный бюджет после резерва/задач не ниже FACTORY.MIN_FREE;
- *   - с прошлой партии прошло не менее FACTORY.INTERVAL тиков.
- * Готовность самой фабрики (600 энергии, кулдаун, место под 50 батарей)
- * проверяет factory.manager: политика не должна блокировать подвоз.
+ * Текущее состояние периодических бюджетов.
+ * На границе периода лимиты пересчитываются из расчётной добычи; остаток
+ * прошлого периода не переносится. Состояние — только числовые лимиты,
+ * реальная энергия Storage не перемещается.
  */
-function factoryAllowed(room) {
-  if (!room || !room.storage) return false;
-  if (batteryStock() >= FACTORY.STOCK_TARGET) return false;
-  if (energyOf(room) < FACTORY.MIN_STORAGE) return false;
-  if (free(room) < FACTORY.MIN_FREE) return false;
+function budgetState() {
+  if (!Memory.energyBudget) Memory.energyBudget = null;
+  const period = budgetPeriod();
+  let state = Memory.energyBudget;
 
-  const mem = Memory.rooms && Memory.rooms[room.name];
-  if (mem && mem.factoryNextBatchAt && Game.time < mem.factoryNextBatchAt) {
-    return false;
+  if (
+    !state ||
+    state.period !== period ||
+    state.version !== BUDGET.VERSION
+  ) {
+    const income = periodIncome();
+    const limits = {};
+    const remaining = {};
+    const charged = {};
+    for (const direction in BUDGET.SHARES) {
+      const limit = Math.floor(
+        (income * BUDGET.SHARES[direction]) / 10000,
+      );
+      limits[direction] = limit;
+      remaining[direction] = limit;
+      charged[direction] = 0;
+    }
+    state = {
+      version: BUDGET.VERSION,
+      period,
+      income,
+      limits,
+      remaining,
+      charged,
+    };
+    Memory.energyBudget = state;
   }
+  return state;
+}
+
+/**
+ * Совместимость с задачами, созданными до появления budgetCost: для spawn
+ * стоимость — реальная потребность цели. Иначе старая задача на extension
+ * с maxEnergy=1600 снова съедала бы весь периодный лимит.
+ */
+function normalizeTaskBudget(task) {
+  if (
+    !task ||
+    task.direction !== "spawn" ||
+    typeof task.budgetCost === "number"
+  ) {
+    return task;
+  }
+  if (!task.targetId || typeof Game.getObjectById !== "function") {
+    return task;
+  }
+  const target = Game.getObjectById(task.targetId);
+  if (!target) return task;
+
+  const capacity = target.energyCapacity;
+  const energy = target.energy;
+  if (typeof capacity !== "number" || typeof energy !== "number") {
+    return task;
+  }
+
+  const need = Math.max(0, capacity - energy);
+  task.budgetCost = need;
+  task.reserve = need;
+  task.maxEnergy = need;
+  // Все штатные fillSpawnsExtensions — обязательные: им доступен резерв.
+  task.mandatory = true;
+  return task;
+}
+
+/** Стоимость задачи для бюджета: полная стоимость штатной задачи. */
+function taskBudgetCost(task) {
+  if (!task) return 0;
+  normalizeTaskBudget(task);
+  // budgetCost — фактическая стоимость конкретной задачи (например, сколько
+  // реально нужно данному spawn/extension), а не максимум рюкзака.
+  if (typeof task.budgetCost === "number" && task.budgetCost > 0) {
+    return task.budgetCost;
+  }
+  if (typeof task.maxEnergy === "number" && task.maxEnergy > 0) {
+    return task.maxEnergy;
+  }
+  if (typeof task.reserve === "number" && task.reserve > 0) {
+    return task.reserve;
+  }
+  return 0;
+}
+
+/** Защищённая часть лимита направления, недоступная обычным задачам. */
+function protectedBudget(direction) {
+  return (BUDGET.PROTECTED && BUDGET.PROTECTED[direction]) || 0;
+}
+
+/** Хватает ли остатка с учётом защищённой части для этой задачи. */
+function hasBudget(state, task, cost) {
+  const reserve = task.mandatory === true ? 0 : protectedBudget(task.direction);
+  return (state.remaining[task.direction] || 0) - reserve >= cost;
+}
+
+/** Достаточно ли в бюджете направления на полную стоимость задачи. */
+function budgetAvailable(task) {
+  if (!task || !task.direction) return true;
+  const cost = taskBudgetCost(task);
+  if (cost <= 0) return true;
+  return hasBudget(budgetState(), task, cost);
+}
+
+/**
+ * Списывает полную стоимость задачи с бюджета направления при успешном
+ * назначении. Никаких бюджетных полей на задаче не хранится: период и
+ * остаток — свойство направления, а не задачи.
+ */
+function tryChargeTaskBudget(task) {
+  if (!task || !task.direction) return true;
+  const cost = taskBudgetCost(task);
+  if (cost <= 0) return true;
+
+  const state = budgetState();
+  if (!hasBudget(state, task, cost)) return false;
+  const left = state.remaining[task.direction] || 0;
+
+  state.remaining[task.direction] = left - cost;
+  state.charged[task.direction] =
+    (state.charged[task.direction] || 0) + cost;
   return true;
+}
+
+/** Диагностика: Memory.__budget = JSON.stringify(energyPolicy.budgetStatus()) */
+function budgetStatus() {
+  return budgetState();
 }
 
 /** Текущая ступень комнаты (0 — только ядро). Обновляется раз в EVAL_EVERY тиков. */
@@ -244,8 +366,14 @@ module.exports = {
   free,
   canReserve,
   remainingReserve,
-  batteryStock,
-  factoryAllowed,
+  budgetPeriod,
+  periodIncome,
+  budgetState,
+  taskBudgetCost,
+  normalizeTaskBudget,
+  budgetAvailable,
+  tryChargeTaskBudget,
+  budgetStatus,
   status,
   BANDS,
   TASK_ENERGY_LIMITS,

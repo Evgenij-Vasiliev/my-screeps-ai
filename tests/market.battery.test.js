@@ -39,7 +39,7 @@ global.RESOURCES_ALL = [
 ];
 global.Memory = {};
 
-const { MARKET, FACTORY, TERMINAL_SUPPLY } = require("../constants");
+const { MARKET, TERMINAL_SUPPLY } = require("../constants");
 const marketManager = require("../market.manager");
 
 let passed = 0;
@@ -115,7 +115,7 @@ const orders = [
   { id: "low", price: 0.5, amount: 100000, roomName: "W9N9" },
 ];
 
-console.log("1. Запас 71 200 — продаётся только излишек над 20 000");
+console.log("1. Батарейки продаются без складского резерва");
 {
   const rooms = [];
   for (let i = 1; i <= 5; i++) {
@@ -125,36 +125,36 @@ console.log("1. Запас 71 200 — продаётся только излиш
   marketManager.run();
   const total = dealCalls.reduce((a, d) => a + d.amount, 0);
   check("сделки есть", dealCalls.length > 0, dealCalls.length);
-  check("сумма сделок <= излишка 51200", total <= 51200, total);
+  check("сумма сделок <= доступных в терминалах 50000", total <= 50000, total);
   check("сумма сделок <= MAX_DEALS*10000", total <= MARKET.MAX_DEALS_PER_TICK * 10000, total);
   check("цена не ниже low-ордера", dealCalls.every(d => d.orderId === "high"), JSON.stringify(dealCalls));
 }
 
-console.log("\n2. Запас ровно 20 000 — продажи нет");
+console.log("\n2. Ровно 20 000 — продаётся всё доступное");
 {
   const rooms = [makeRoom("W2N1", 210000, 0, 20000, 150000)];
   setup(MARKET.INTERVAL, rooms, orders);
   marketManager.run();
-  check("сделок нет", dealCalls.length === 0, dealCalls.length);
+  check("продано 20 000", dealCalls.length === 1 && dealCalls[0].amount === 20000, JSON.stringify(dealCalls));
 }
 
-console.log("\n3. Запас ниже 20 000 — продажи нет");
+console.log("\n3. Ниже 20 000 — продаётся всё доступное");
 {
   const rooms = [makeRoom("W3N1", 210000, 0, 19999, 150000)];
   setup(MARKET.INTERVAL, rooms, orders);
   marketManager.run();
-  check("сделок нет", dealCalls.length === 0, dealCalls.length);
+  check("продано 19 999", dealCalls.length === 1 && dealCalls[0].amount === 19999, JSON.stringify(dealCalls));
 }
 
-console.log("\n4. Объём не превышает излишек");
+console.log("\n4. Объём не превышает доступное в терминале");
 {
   const rooms = [makeRoom("W4N1", 210000, 0, 21000, 150000)];
   setup(MARKET.INTERVAL, rooms, orders);
   marketManager.run();
-  check("продано 1000", dealCalls.length === 1 && dealCalls[0].amount === 1000, JSON.stringify(dealCalls));
+  check("продано 21 000", dealCalls.length === 1 && dealCalls[0].amount === 21000, JSON.stringify(dealCalls));
 }
 
-console.log("\n5. Несколько комнат — излишек не продаётся повторно");
+console.log("\n5. Несколько комнат — каждая продаёт свои батарейки");
 {
   const rooms = [];
   for (let i = 1; i <= 5; i++) {
@@ -163,7 +163,7 @@ console.log("\n5. Несколько комнат — излишек не про
   setup(MARKET.INTERVAL, rooms, orders);
   marketManager.run();
   const total = dealCalls.reduce((a, d) => a + d.amount, 0);
-  check("суммарно не больше 51200", total <= 51200, total);
+  check("суммарно не больше доступных 50000", total <= 50000, total);
   const perRoom = {};
   for (const d of dealCalls) perRoom[d.roomName] = (perRoom[d.roomName] || 0) + 1;
   check("каждая комната продала не больше одного раза", Object.values(perRoom).every(n => n === 1), JSON.stringify(perRoom));
@@ -177,13 +177,13 @@ console.log("\n6. Недостаточно энергии на комиссию 
   check("сделок нет", dealCalls.length === 0, dealCalls.length);
 }
 
-console.log("\n7. Сделка не нарушает целевой запас");
+console.log("\n7. Сделка не оставляет складской резерв");
 {
   const rooms = [makeRoom("W7N1", 210000, 0, 70000, 150000)];
   setup(MARKET.INTERVAL, rooms, orders);
   marketManager.run();
-  check("продано 50000", dealCalls.length === 1 && dealCalls[0].amount === 50000, JSON.stringify(dealCalls));
-  check("после сделки остаётся 20000", 70000 - dealCalls[0].amount === FACTORY.STOCK_TARGET);
+  check("продано 70 000", dealCalls.length === 1 && dealCalls[0].amount === 70000, JSON.stringify(dealCalls));
+  check("после сделки остаётся 0", 70000 - dealCalls[0].amount === 0);
 }
 
 console.log("\n8. Дешёвый ордер не выбирается при дорогом");

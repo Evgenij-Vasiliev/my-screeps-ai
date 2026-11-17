@@ -433,7 +433,7 @@ global.Game.cpu.getUsed = () => {
   usedCalls++;
   return 0;
 };
-roomState.creeps = [];
+roomState.creeps = [{ memory: { role: "worker" }, ticksToLive: 1200 }];
 delete Memory.cpuSpawnProfile;
 spawnCalls.length = 0;
 resetGate();

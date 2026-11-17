@@ -3,7 +3,7 @@
  * Автоматическая продажа избыточных ресурсов через Market.
  */
 
-const { TERMINAL_SUPPLY, MARKET, FACTORY } = require("./constants");
+const { TERMINAL_SUPPLY, MARKET } = require("./constants");
 const loadShed = require("loadShed");
 const energyPolicy = require("./energy.policy");
 
@@ -383,14 +383,6 @@ function run() {
   const terminals = getEmpireTerminals();
   if (terminals.length === 0) return;
 
-  // Общий излишек батареек империи. Считаем один раз за проход: продажи
-  // уменьшают его на фактически проданное, поэтому один и тот же излишек
-  // не продаётся повторно из разных терминалов.
-  let batteryExcess = Math.max(
-    0,
-    energyPolicy.batteryStock() - FACTORY.STOCK_TARGET,
-  );
-
   let dealsCount = 0;
 
   // Закупка реагентов идёт ПЕРВОЙ: иначе продажи выбирают весь лимит сделок.
@@ -409,13 +401,8 @@ function run() {
     // Порог группы одинаков для всех ресурсов и терминалов — считаем один раз.
     const reserve = getReserve(group);
 
-    // Батарейки продаются по запасу империи, а не по лестнице склада:
-    // сначала реализуем излишек над STOCK_TARGET. Остальные группы
-    // сохраняют прежний гейт marketSell/заполненного склада.
-    if (group === "BATTERY") {
-      if (batteryExcess <= 0) continue;
-    }
-
+    // Батарейки — готовый товар: продаём всё доступное в терминалах.
+    // Остальные группы сохраняют гейт marketSell/заполненного склада.
     for (const terminal of terminals) {
       if (dealsCount >= MARKET.MAX_DEALS_PER_TICK) break;
 
@@ -439,18 +426,11 @@ function run() {
         if (!MARKET.SELL_LIST.includes(resourceType)) continue;
         if (getResourceGroup(resourceType) !== group) continue;
 
-        let surplus = terminal.store[resourceType] - reserve;
-        if (group === "BATTERY") {
-          surplus = Math.min(surplus, batteryExcess);
-        }
+        const surplus = terminal.store[resourceType] - reserve;
         if (surplus <= 0) continue;
 
         const sold = trySellResource(terminal, resourceType, surplus);
-        if (sold > 0) {
-          dealsCount++;
-          if (group === "BATTERY") batteryExcess -= sold;
-          if (batteryExcess <= 0 && group === "BATTERY") break;
-        }
+        if (sold > 0) dealsCount++;
       }
     }
   }

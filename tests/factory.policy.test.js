@@ -1,16 +1,16 @@
 "use strict";
 /**
- * FACTORY.POLICY.TEST.JS — этап 3: производство батареек по политике.
+ * FACTORY.POLICY.TEST.JS — фабрика управляется бюджетом задач, а не запасом.
  *
  * Проверяем:
- *   1) сток батареек >= 20 000 блокирует производство и подвоз;
- *   2) при стоке ниже цели и достаточном бюджете разрешена одна партия;
- *   3) склад < 200 000 или free < 1 200 блокируют;
- *   4) интервал 10 тиков между партиями;
- *   5) factory.manager не производит без 600 энергии/кулдауна;
- *   6) fillFactoryEnergy несёт reserve/maxEnergy = 600 и не создаётся
- *      без разрешения;
- *   7) несколько фабрик в разных комнатах проверяются независимо.
+ *   1) запас 71 200/20 000 не мешает создать fillFactoryEnergy;
+ *   2) задача создаётся при любой потребности фабрики в энергии;
+ *   3) при полной энергии задачи нет;
+ *   4) задача несёт полные reserve/maxEnergy=600;
+ *   5) достаточный бюджет списывает 600, недостаточный — не выдаёт;
+ *   6) другие направления не затронуты;
+ *   7) производство с уже имеющейся энергией работает независимо от стока;
+ *   8) несколько фабрик используют общий бюджет.
  *
  * Запуск: node tests/factory.policy.test.js
  */
@@ -42,7 +42,16 @@ global.STRUCTURE_OBSERVER = "observer";
 global.STRUCTURE_EXTRACTOR = "extractor";
 global.STRUCTURE_NUKER = "nuker";
 global.Memory = { rooms: {} };
-global.Game = { time: 1000, creeps: {}, rooms: {} };
+global.Game = { time: 0, creeps: {}, rooms: {} };
+
+// Пять комнат-источников: расчётная добыча 10 * 3000 = 30 000.
+for (let i = 0; i < 5; i++) {
+  Game.rooms["S" + i] = {
+    name: "S" + i,
+    controller: { my: true },
+    sources: [{}, {}],
+  };
+}
 
 const { FACTORY } = require("../constants");
 const systems = require("../systems");
@@ -67,124 +76,90 @@ function check(label, cond, extra) {
 
 let seq = 0;
 function roomState(energy, battery, factoryEnergy) {
-  // Каждый сценарий начинает с чистого имперского стока батареек.
-  for (const name in Game.rooms) {
-    const r = Game.rooms[name];
-    if (r.storage) r.storage.store.battery = 0;
-    if (r.terminal) r.terminal.store.battery = 0;
-  }
   const name = "W1N" + ++seq;
   const storage = {
     id: "st" + seq,
-    store: { energy, getFreeCapacity: () => 1000000 },
+    store: { energy, battery, getFreeCapacity: () => 1000000 },
   };
-  const terminal = { store: { battery: 0 } };
   const factory = {
     id: "f" + seq,
     cooldown: 0,
+    produceCalls: 0,
     store: {
       energy: factoryEnergy || 0,
       battery: 0,
       getFreeCapacity: type => (type === RESOURCE_BATTERY ? 50000 : 0),
     },
-    produceCalls: 0,
     produce() {
       this.produceCalls++;
       return OK;
     },
   };
-  const room = {
-    name,
-    controller: { my: true },
-    storage,
-    terminal,
-    factory,
-  };
-  Game.rooms[name] = room;
   Memory.rooms[name] = { tasks: {} };
-  return { roomName: name, room, storage, factory };
+  Game.rooms[name] = { name, controller: { my: true }, storage, factory };
+  return { roomName: name, room: Game.rooms[name], storage, factory };
+}
+function tasks(room, type) {
+  return (Memory.rooms[room].tasks[type] || []);
 }
 
-function tasks(roomName, type) {
-  return (Memory.rooms[roomName].tasks[type] || []);
-}
-function setStock(room, amount) {
-  room.storage.store.battery = amount;
-}
-
-console.log("1. Сток батареек блокирует производство");
+console.log("1. Запас батареек не блокирует fillFactoryEnergy");
 {
-  const s = roomState(250000, 0, 600);
-  setStock(s.room, 71200);
-  check("factoryAllowed = false при стоке 71 200", energyPolicy.factoryAllowed(s.room) === false);
+  const high = roomState(250000, 71200, 0);
+  taskGenerators.generateFillFactoryEnergy(high);
+  const t = tasks(high.roomName, "fillFactoryEnergy")[0];
+  check("при 71 200 задача создана", !!t);
+  check("reserve/maxEnergy 600", t && t.reserve === 600 && t.maxEnergy === 600);
+  check("direction factory", t && t.direction === "factory");
+
+  const target = roomState(210000, 20000, 0);
+  taskGenerators.generateFillFactoryEnergy(target);
+  check("при ровно 20 000 задача создана", tasks(target.roomName, "fillFactoryEnergy").length === 1);
+}
+
+console.log("\n2. Нет потребности — нет задачи");
+{
+  const full = roomState(250000, 71200, FACTORY.BATCH_ENERGY);
+  taskGenerators.generateFillFactoryEnergy(full);
+  check("полная энергия — задачи нет", tasks(full.roomName, "fillFactoryEnergy").length === 0);
+}
+
+console.log("\n3. Производство не зависит от стока");
+{
+  const s = roomState(250000, 71200, FACTORY.BATCH_ENERGY);
   s.factory.produceCalls = 0;
   factoryManager.run(s);
-  check("produce не вызван", s.factory.produceCalls === 0, s.factory.produceCalls);
-  taskGenerators.generateFillFactoryEnergy(s);
-  check("fillFactoryEnergy не создан", tasks(s.roomName, "fillFactoryEnergy").length === 0);
-}
+  check("produce вызван", s.factory.produceCalls === 1, s.factory.produceCalls);
 
-console.log("\n2. Ниже цели и достаточный бюджет разрешает партию");
-{
-  const s = roomState(210000, 0, 0);
-  setStock(s.room, FACTORY.STOCK_TARGET - 1);
-  check("factoryAllowed = true", energyPolicy.factoryAllowed(s.room) === true);
-  taskGenerators.generateFillFactoryEnergy(s);
-  const t = tasks(s.roomName, "fillFactoryEnergy")[0];
-  check("задача создана", !!t);
-  check("reserve = 600", t && t.reserve === 600, t && t.reserve);
-  check("maxEnergy = 600", t && t.maxEnergy === 600, t && t.maxEnergy);
-}
-
-console.log("\n3. Склад и свободный бюджет");
-{
-  const low = roomState(FACTORY.MIN_STORAGE - 1, 0, 0);
-  check("склад < 200k — false", energyPolicy.factoryAllowed(low.room) === false);
-  const noFree = roomState(170500, 0, 0); // free = 500 < 1200
-  check("free < 1200 — false", energyPolicy.factoryAllowed(noFree.room) === false);
-}
-
-console.log("\n4. Интервал 10 тиков");
-{
-  const s = roomState(210000, 0, 0);
-  Memory.rooms[s.roomName].factoryNextBatchAt = Game.time + 5;
-  check("интервал не истёк — false", energyPolicy.factoryAllowed(s.room) === false);
-  Memory.rooms[s.roomName].factoryNextBatchAt = Game.time;
-  check("интервал истёк — true", energyPolicy.factoryAllowed(s.room) === true);
-}
-
-console.log("\n5. factory.manager: полная партия и интервал");
-{
-  const s = roomState(210000, 0, FACTORY.BATCH_ENERGY);
-  s.factory.produceCalls = 0;
-  factoryManager.run(s);
-  check("produce вызван один раз", s.factory.produceCalls === 1, s.factory.produceCalls);
-  check(
-    "factoryNextBatchAt = time + 10",
-    Memory.rooms[s.roomName].factoryNextBatchAt === Game.time + FACTORY.INTERVAL,
-    Memory.rooms[s.roomName].factoryNextBatchAt,
-  );
-  factoryManager.run(s);
-  check("второй запуск в интервале запрещён", s.factory.produceCalls === 1, s.factory.produceCalls);
-
-  const short = roomState(210000, 0, FACTORY.BATCH_ENERGY - 1);
+  const short = roomState(250000, 71200, FACTORY.BATCH_ENERGY - 1);
   short.factory.produceCalls = 0;
   factoryManager.run(short);
   check("меньше 600 — produce не вызван", short.factory.produceCalls === 0);
 }
 
-console.log("\n6. Несколько фабрик в разных комнатах");
+console.log("\n4. Бюджет: полная стоимость и недостаток");
 {
-  const a = roomState(210000, 0, 0);
-  const b = roomState(210000, 0, 0);
-  setStock(a.room, 0);
-  setStock(b.room, 0);
-  check("комната A разрешена", energyPolicy.factoryAllowed(a.room) === true);
-  check("комната B разрешена", energyPolicy.factoryAllowed(b.room) === true);
+  delete Memory.energyBudget;
+  const state = energyPolicy.budgetStatus();
+  check("лимит factory 11 700", state.limits.factory === 11700, state.limits.factory);
+  state.remaining.factory = 600;
+  const t = { direction: "factory", maxEnergy: 600 };
+  check("достаточный бюджет списывает 600", energyPolicy.tryChargeTaskBudget(t) === true);
+  check("остаток 0", energyPolicy.budgetStatus().remaining.factory === 0);
+  check("недостаточный бюджет не списывает", energyPolicy.tryChargeTaskBudget({ direction: "factory", maxEnergy: 600 }) === false);
+  check("spawn не затронут", energyPolicy.budgetStatus().remaining.spawn === 8010, energyPolicy.budgetStatus().remaining.spawn);
+}
+
+console.log("\n5. Несколько фабрик — общий бюджет");
+{
+  const a = roomState(250000, 71200, 0);
+  const b = roomState(250000, 71200, 0);
   taskGenerators.generateFillFactoryEnergy(a);
   taskGenerators.generateFillFactoryEnergy(b);
   check("задача A создана", tasks(a.roomName, "fillFactoryEnergy").length === 1);
   check("задача B создана", tasks(b.roomName, "fillFactoryEnergy").length === 1);
+  const budget = energyPolicy.budgetStatus();
+  check("бюджет factory общий", budget.limits.factory === 11700);
 }
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);
