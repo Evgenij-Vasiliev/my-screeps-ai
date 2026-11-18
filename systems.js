@@ -105,8 +105,8 @@ module.exports = {
       {
         role: "worker",
         count: 0,
-        tasks: ["fillSpawnsExtensions", "fillTowers", "buildStructures"],
-        body: { work: 5, carry: 5, move: 5 },
+        tasks: ["fillSpawnsExtensions"], // , "fillTowers", "buildStructures"
+        body: { work: 0, carry: 5, move: 5 },
         ignoreReserves: true,
       },
       {
@@ -121,8 +121,8 @@ module.exports = {
       {
         role: "worker",
         count: 0,
-        tasks: ["fillTerminalResources"],
-        body: { work: 0, carry: 40, move: 10 },
+        tasks: ["fillSpawnsExtensions"],
+        body: { work: 0, carry: 5, move: 5 },
         ignoreReserves: true,
       },
     ],
@@ -131,7 +131,7 @@ module.exports = {
         role: "worker",
         count: 0,
         tasks: ["fillSpawnsExtensions"],
-        body: { work: 0, carry: 1, move: 1 },
+        body: { work: 0, carry: 5, move: 5 },
         ignoreReserves: true,
       },
     ],
@@ -139,8 +139,8 @@ module.exports = {
       {
         role: "worker",
         count: 0,
-        tasks: ["fillTerminalResources"],
-        body: { work: 0, carry: 40, move: 10 },
+        tasks: ["fillSpawnsExtensions"],
+        body: { work: 0, carry: 1, move: 1 },
         ignoreReserves: true,
       },
     ],
@@ -164,7 +164,7 @@ module.exports = {
     boost: true,
     factory: true,
     marketSell: true,
-    marketBuy: false,
+    marketBuy: true,
     powerSpawn: true,
   },
 

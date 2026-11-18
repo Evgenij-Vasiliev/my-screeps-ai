@@ -676,6 +676,13 @@ function isLiveDamaged(id) {
 
 /** Ставит repair-задачу, если такой ещё нет. */
 function addRepairTask(roomName, targetId) {
+  const existing =
+    Memory.rooms &&
+    Memory.rooms[roomName] &&
+    Memory.rooms[roomName].tasks &&
+    Memory.rooms[roomName].tasks.repairStructures;
+  if (existing && existing.length >= TASK_CONFIG.MAX_REPAIR_TASKS) return;
+
   const candidate = {
     type: "repair",
     targetId,

@@ -65,14 +65,35 @@ function check(label, cond, extra) {
   }
 }
 
+function fillBudget() {
+  const st = energyPolicy.budgetStatus();
+  for (const k in st.limits) st.remaining[k] = st.limits[k];
+}
+
 console.log("1. Расчёт от источников");
 {
   const s = energyPolicy.budgetStatus();
   check("период 0", s.period === 0, s.period);
   check("добыча 30 000", s.income === 30000, s.income);
-  check("фабрики 11 700", s.limits.factory === 11700, s.limits.factory);
+  check("фабрики 9 702", s.limits.factory === 9702, s.limits.factory);
   check("spawn 8 010", s.limits.spawn === 8010, s.limits.spawn);
-  check("towers 510", s.limits.towers === 510, s.limits.towers);
+  check("towers 1 002", s.limits.towers === 1002, s.limits.towers);
+  check("старт token bucket — 0", s.remaining.factory === 0, s.remaining.factory);
+  fillBudget();
+}
+
+console.log("\n1a. Token bucket начисляет постепенно");
+{
+  delete Memory.energyBudget;
+  Game.time = 0;
+  check("в начале 0", energyPolicy.budgetStatus().remaining.factory === 0);
+  Game.time = 150;
+  const half = energyPolicy.budgetStatus();
+  const halfValue = half.remaining.factory;
+  check("половина периода — часть лимита", halfValue > 0 && halfValue < half.limits.factory, halfValue);
+  Game.time = 299;
+  const late = energyPolicy.budgetStatus();
+  check("к концу — почти лимит", late.remaining.factory > halfValue && late.remaining.factory <= late.limits.factory, late.remaining.factory);
 }
 
 console.log("\n1b. Старое состояние бюджета сбрасывается версией");
@@ -80,7 +101,8 @@ console.log("\n1b. Старое состояние бюджета сбрасыв
   energyPolicy.budgetStatus().version = 0;
   const reset = energyPolicy.budgetStatus();
   check("версия восстановлена", reset.version === BUDGET.VERSION, reset.version);
-  check("лимит фабрик после сброса", reset.remaining.factory === 11700, reset.remaining.factory);
+  check("лимит фабрик после сброса", reset.limits.factory === 9702, reset.limits.factory);
+  fillBudget();
 }
 
 console.log("\n1c. budgetCost — фактическая потребность цели");
@@ -118,11 +140,13 @@ console.log("\n1e. Защищённый резерв spawn");
   check("обычная после резерва всё ещё blocked", energyPolicy.tryChargeTaskBudget({ direction: "spawn", maxEnergy: 200 }) === false);
 }
 
+fillBudget();
+
 console.log("\n2. Полная стоимость задачи и общий лимит");
 {
   const first = { direction: "factory", maxEnergy: 600 };
   check("первая задача списана", energyPolicy.tryChargeTaskBudget(first) === true);
-  check("остаток 11 100", energyPolicy.budgetStatus().remaining.factory === 11100, energyPolicy.budgetStatus().remaining.factory);
+  check("остаток 9 102", energyPolicy.budgetStatus().remaining.factory === 9102, energyPolicy.budgetStatus().remaining.factory);
 
   let charged = 1;
   for (;;) {
@@ -130,19 +154,22 @@ console.log("\n2. Полная стоимость задачи и общий л�
     if (!energyPolicy.tryChargeTaskBudget(t)) break;
     charged++;
   }
-  check("всего 19 задач по 600", charged === 19, charged);
-  check("остаток 300", energyPolicy.budgetStatus().remaining.factory === 300, energyPolicy.budgetStatus().remaining.factory);
-  check("20-я не проходит", energyPolicy.budgetAvailable({ direction: "factory", maxEnergy: 600 }) === false);
+  check("всего 16 задач по 600", charged === 16, charged);
+  check("остаток 102", energyPolicy.budgetStatus().remaining.factory === 102, energyPolicy.budgetStatus().remaining.factory);
+  check("17-я не проходит", energyPolicy.budgetAvailable({ direction: "factory", maxEnergy: 600 }) === false);
 }
 
 console.log("\n3. Направления независимы и проверка не списывает");
 {
   const tower = { direction: "towers", maxEnergy: 500 };
   check("башни ещё имеют бюджет", energyPolicy.tryChargeTaskBudget(tower) === true);
-  check("остаток башен 10", energyPolicy.budgetStatus().remaining.towers === 10, energyPolicy.budgetStatus().remaining.towers);
+  check("остаток башен 502", energyPolicy.budgetStatus().remaining.towers === 502, energyPolicy.budgetStatus().remaining.towers);
   check("задача не хранит budgetPeriod/budgetCharged", !("budgetPeriod" in tower) && !("budgetCharged" in tower));
-  check("budgetAvailable не списывает", energyPolicy.budgetAvailable(tower) === false);
-  check("остаток башен всё ещё 10", energyPolicy.budgetStatus().remaining.towers === 10, energyPolicy.budgetStatus().remaining.towers);
+  check("budgetAvailable не списывает", energyPolicy.budgetAvailable(tower) === true);
+  check("остаток башен всё ещё 502", energyPolicy.budgetStatus().remaining.towers === 502, energyPolicy.budgetStatus().remaining.towers);
+  const secondTower = { direction: "towers", maxEnergy: 500 };
+  check("вторая задача башен проходит", energyPolicy.tryChargeTaskBudget(secondTower) === true);
+  check("остаток башен 2", energyPolicy.budgetStatus().remaining.towers === 2, energyPolicy.budgetStatus().remaining.towers);
 }
 
 console.log("\n4. Граница периода");
@@ -150,18 +177,35 @@ console.log("\n4. Граница периода");
   Game.time = BUDGET.PERIOD_TICKS;
   const s = energyPolicy.budgetStatus();
   check("новый период", s.period === 1, s.period);
-  check("лимит фабрик восстановлен", s.remaining.factory === 11700, s.remaining.factory);
-  check("лимит башен восстановлен", s.remaining.towers === 510, s.remaining.towers);
+  check("лимит фабрик восстановлен", s.limits.factory === 9702, s.limits.factory);
+  check("остаток нового периода 0", s.remaining.factory === 0, s.remaining.factory);
+  check("лимит башен восстановлен", s.limits.towers === 1002, s.limits.towers);
+  fillBudget();
   const newTask = { direction: "factory", maxEnergy: 600 };
   check("новая задача списывает новый период", energyPolicy.tryChargeTaskBudget(newTask) === true);
-  check("остаток 11 100", energyPolicy.budgetStatus().remaining.factory === 11100, energyPolicy.budgetStatus().remaining.factory);
+  check("остаток 9 102", energyPolicy.budgetStatus().remaining.factory === 9102, energyPolicy.budgetStatus().remaining.factory);
   check("новая задача не хранит бюджетные поля", !("budgetPeriod" in newTask) && !("budgetCharged" in newTask));
 }
 
 console.log("\n5. Задача без направления");
 {
   check("без направления — true", energyPolicy.tryChargeTaskBudget({ maxEnergy: 600 }) === true);
-  check("бюджеты не изменились", energyPolicy.budgetStatus().remaining.factory === 11100, energyPolicy.budgetStatus().remaining.factory);
+  check("бюджеты не изменились", energyPolicy.budgetStatus().remaining.factory === 9102, energyPolicy.budgetStatus().remaining.factory);
+}
+
+console.log("\n6. Factory overflow при высоком Storage");
+{
+  Game.time = 600;
+  Game.rooms["W1N1"].storage = { store: { energy: 2500000 } };
+  const high = energyPolicy.budgetStatus();
+  check("overflow включён", high.overflowFactory === 15000, high.overflowFactory);
+  check("factory 24 702", high.limits.factory === 24702, high.limits.factory);
+
+  Game.time = 900;
+  Game.rooms["W1N1"].storage.store.energy = 1000000;
+  const low = energyPolicy.budgetStatus();
+  check("overflow выключен", low.overflowFactory === 0, low.overflowFactory);
+  check("factory 9 702", low.limits.factory === 9702, low.limits.factory);
 }
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);

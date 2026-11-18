@@ -141,8 +141,9 @@ console.log("\n4. Бюджет: полная стоимость и недост�
 {
   delete Memory.energyBudget;
   const state = energyPolicy.budgetStatus();
-  check("лимит factory 11 700", state.limits.factory === 11700, state.limits.factory);
+  check("лимит factory 9 702", state.limits.factory === 9702, state.limits.factory);
   state.remaining.factory = 600;
+  state.remaining.spawn = 8010;
   const t = { direction: "factory", maxEnergy: 600 };
   check("достаточный бюджет списывает 600", energyPolicy.tryChargeTaskBudget(t) === true);
   check("остаток 0", energyPolicy.budgetStatus().remaining.factory === 0);
@@ -159,7 +160,7 @@ console.log("\n5. Несколько фабрик — общий бюджет");
   check("задача A создана", tasks(a.roomName, "fillFactoryEnergy").length === 1);
   check("задача B создана", tasks(b.roomName, "fillFactoryEnergy").length === 1);
   const budget = energyPolicy.budgetStatus();
-  check("бюджет factory общий", budget.limits.factory === 11700);
+  check("бюджет factory общий", budget.limits.factory === 9702);
 }
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);

@@ -115,6 +115,20 @@ console.log("\n2. Живой крип — дубля нет");
   check("аварийный спавн не вызван", calls.length === 0, calls.length);
 }
 
+console.log("\n2b. Есть linkWorker, но нет worker — аварийный рабочий создаётся");
+{
+  calls = [];
+  const spawn = makeSpawn(200);
+  resetGate();
+  spawnManager.run({
+    roomName: "W1N1",
+    room: spawn.room,
+    spawns: [spawn],
+    creeps: [{ memory: { role: "linkWorker" }, ticksToLive: 1200 }],
+  });
+  check("аварийный worker создан", calls.length === 1 && calls[0].body.join(",") === "work,carry,move", JSON.stringify(calls));
+}
+
 console.log("\n3. Недостаточно энергии — невозможное тело не создаётся");
 {
   calls = [];

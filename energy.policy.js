@@ -141,6 +141,29 @@ function periodIncome() {
   );
 }
 
+/** Суммарная энергия Storage всех своих комнат. */
+function storageEnergy() {
+  const rooms = Game.rooms || {};
+  let sum = 0;
+  for (const name in rooms) {
+    const room = rooms[name];
+    if (!room || !room.controller || !room.controller.my) continue;
+    if (room.storage && room.storage.store) {
+      sum += room.storage.store[RESOURCE_ENERGY] || 0;
+    }
+  }
+  return sum;
+}
+
+/** Дополнительный лимит фабрик при переполнении Storage. */
+function factoryOverflow() {
+  const cfg = BUDGET.OVERFLOW && BUDGET.OVERFLOW.FACTORY;
+  if (!cfg) return 0;
+  return storageEnergy() >= cfg.STORAGE_THRESHOLD
+    ? cfg.EXTRA_PER_PERIOD
+    : 0;
+}
+
 /**
  * Текущее состояние периодических бюджетов.
  * На границе периода лимиты пересчитываются из расчётной добычи; остаток
@@ -158,15 +181,18 @@ function budgetState() {
     state.version !== BUDGET.VERSION
   ) {
     const income = periodIncome();
+    const overflowFactory = factoryOverflow();
     const limits = {};
     const remaining = {};
     const charged = {};
     for (const direction in BUDGET.SHARES) {
       const limit = Math.floor(
         (income * BUDGET.SHARES[direction]) / 10000,
-      );
+      ) + (direction === "factory" ? overflowFactory : 0);
       limits[direction] = limit;
-      remaining[direction] = limit;
+      // Новый период начинается с нуля: бюджет начисляется постепенно,
+      // а не выдаётся залпом в начале 300-тикового окна.
+      remaining[direction] = 0;
       charged[direction] = 0;
     }
     state = {
@@ -176,8 +202,27 @@ function budgetState() {
       limits,
       remaining,
       charged,
+      lastTick: Game.time,
+      overflowFactory,
     };
     Memory.energyBudget = state;
+  }
+
+  // Token bucket: за каждый прошедший тик направлению начисляется
+  // limit / PERIOD_TICKS. Сверху — не больше периодного лимита; между
+  // периодами остаток не переносится. Задача по-прежнему списывает полную
+  // стоимость, поэтому дробить штатные задачи не нужно.
+  const elapsed = Math.max(0, Game.time - (state.lastTick || 0));
+  if (elapsed > 0) {
+    for (const direction in state.limits) {
+      const cap = state.limits[direction];
+      const add = (cap * elapsed) / BUDGET.PERIOD_TICKS;
+      state.remaining[direction] = Math.min(
+        cap,
+        (state.remaining[direction] || 0) + add,
+      );
+    }
+    state.lastTick = Game.time;
   }
   return state;
 }
@@ -369,6 +414,8 @@ module.exports = {
   budgetPeriod,
   periodIncome,
   budgetState,
+  storageEnergy,
+  factoryOverflow,
   taskBudgetCost,
   normalizeTaskBudget,
   budgetAvailable,

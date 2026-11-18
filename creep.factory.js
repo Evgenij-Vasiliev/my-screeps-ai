@@ -4,7 +4,7 @@
  * prepareBody — порядок частей: TOUGH → WORK → CARRY → MOVE
  */
 
-const { CREEP_BODIES, SPAWN } = require("./constants");
+const { CREEP_BODIES, SPAWN, LAB_BOOST } = require("./constants");
 
 const PART_COST =
   typeof BODYPART_COST !== "undefined"
@@ -27,6 +27,38 @@ const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
 
   return body;
 };
+
+/**
+ * Есть ли полный комплект буста для уменьшенного тела.
+ * Проверяем наличие буст-лабы и суммарный запас KH/UO на складах/терминалах.
+ * Если буста нет — спавним полное тело, чтобы крип не потерял производительность.
+ */
+function boostReady(roomName, role, resource) {
+  const policy = LAB_BOOST.BOOST_POLICY[role];
+  const row = policy && policy[0];
+  if (!row || row.resource !== resource) return false;
+
+  const mem = Memory.rooms && Memory.rooms[roomName];
+  const map = (mem && mem.boostLabs) || null;
+  const fallback = LAB_BOOST.BOOST_LAB && LAB_BOOST.BOOST_LAB[roomName];
+  const labId = map && map[resource] || fallback && fallback[resource] || mem && mem.boostLab;
+  if (!labId || typeof Game.getObjectById !== "function") return false;
+
+  const lab = Game.getObjectById(labId);
+  if (!lab || !lab.store) return false;
+  if (lab.mineralType && lab.mineralType !== resource) return false;
+
+  const need = row.parts * 30;
+  let stock = lab.store[resource] || 0;
+  const rooms = Game.rooms || {};
+  for (const name in rooms) {
+    const room = rooms[name];
+    if (!room || !room.controller || !room.controller.my) continue;
+    if (room.storage) stock += room.storage.store[resource] || 0;
+    if (room.terminal) stock += room.terminal.store[resource] || 0;
+  }
+  return stock >= need;
+}
 
 /**
  * Привязка майнера к споту БОЛЬШЕ НЕ ВЫДАЁТСЯ (правка 01.10.2026).
@@ -60,7 +92,11 @@ const factory = {
       // сам (role.miner.js, creep.memory.wp) и переходит на соседнее, когда
       // источник под ним вычерпан.
       return {
-        body: prepareBody(CREEP_BODIES.miner),
+        body: prepareBody(
+          boostReady(roomName, "miner", "UO")
+            ? CREEP_BODIES.minerBoosted
+            : CREEP_BODIES.miner,
+        ),
         memory: {
           homeRoom: roomName,
         },
@@ -104,8 +140,12 @@ const factory = {
       memory: {},
     }),
 
-    worker: () => ({
-      body: prepareBody(CREEP_BODIES.worker),
+    worker: spawn => ({
+      body: prepareBody(
+        boostReady(spawn && spawn.room ? spawn.room.name : "", "worker", "KH")
+          ? CREEP_BODIES.workerBoosted
+          : CREEP_BODIES.worker,
+      ),
       memory: {
         working: false,
       },

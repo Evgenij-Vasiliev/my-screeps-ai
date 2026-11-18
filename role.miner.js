@@ -173,18 +173,36 @@ module.exports = {
     // src/processor/intents/creeps/harvest.js). Значит остаток 10 снимается
     // ЦЕЛИКОМ — важно лишь позвать harvest.
     //
-    // Число WORK берётся из ФАКТИЧЕСКОГО тела крипа: тело майнера менялось
-    // 01.10.2026 ({23,10,17} -> {35,7,8}, см. constants.js CREEP_BODIES.miner), и
-    // майнеры старого поколения доживают свой срок рядом с новыми. Константа тут
-    // дала бы старому майнеру неверный удар (ждал бы 70, а снимает 46).
-    // Значение кэшируется в памяти крипа при первом вызове: тело за жизнь не
-    // меняется, а `getActiveBodyparts(WORK)` стоит 0.000851 CPU за вызов (замер
-    // 01.10.2026, K=200). Бустов WORK у майнеров нет; если появятся — кэш надо
-    // сбрасывать вместе с бустом.
+    // Число WORK берётся из ФАКТИЧЕСКОГО тела. Уменьшенное тело (12 WORK)
+    // спавнится только при наличии UO, и после буста каждый WORK даёт не 2,
+    // а 2 × BOOSTS.work.UO.harvest (6). Кэш harvestTake обязан сбрасываться,
+    // когда число бустнутых WORK изменилось: иначе майнер навсегда останется
+    // с допотбустовым ударом 24 вместо 72.
+    const workParts = creep.getActiveBodyparts(WORK);
+    let boostedWork = 0;
+    if (creep.body) {
+      for (let i = 0; i < creep.body.length; i++) {
+        const part = creep.body[i];
+        if (part.type === WORK && part.boost === "UO") boostedWork++;
+      }
+    }
     let take = creep.memory.harvestTake;
-    if (take === undefined) {
-      take = creep.getActiveBodyparts(WORK) * HARVEST_PER_WORK;
+    if (
+      take === undefined ||
+      creep.memory.harvestBoosted !== boostedWork
+    ) {
+      const uoMultiplier =
+        typeof BOOSTS !== "undefined" &&
+        BOOSTS[WORK] &&
+        BOOSTS[WORK].UO &&
+        BOOSTS[WORK].UO.harvest
+          ? BOOSTS[WORK].UO.harvest
+          : 3;
+      take =
+        (workParts - boostedWork) * HARVEST_PER_WORK +
+        boostedWork * HARVEST_PER_WORK * uoMultiplier;
       creep.memory.harvestTake = take;
+      creep.memory.harvestBoosted = boostedWork;
     }
 
     // «Вычерпан» = снимать больше нечего. Отдельное от `canHarvest` условие,
