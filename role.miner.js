@@ -114,6 +114,40 @@ function linkAt(creep, wp) {
 
 module.exports = {
   run: function (creep) {
+    // Майнер не имеет права носить ничего, кроме энергии. Любой чужой
+    // ресурс (UO из упавшей пачки, остаток буста и т.п.) сначала сдаём
+    // в Storage/терминал; до этого добыча не начинается.
+    for (const resource in creep.store) {
+      if (resource === RESOURCE_ENERGY || creep.store[resource] <= 0) continue;
+      const storage = creep.room.storage;
+      const terminal = creep.room.terminal;
+      let dest = null;
+      if (
+        storage &&
+        storage.store.getFreeCapacity(resource) > 0
+      ) {
+        dest = storage;
+      } else if (
+        terminal &&
+        terminal.store.getFreeCapacity(resource) > 0
+      ) {
+        dest = terminal;
+      }
+
+      if (dest) {
+        if (creep.pos.isNearTo(dest)) {
+          creep.transfer(dest, resource);
+        } else {
+          creep.travelTo(dest);
+        }
+      } else {
+        // Места на складе нет — освобождаем рюкзак, иначе майнер не сможет
+        // добывать. Это аварийный сброс, а не штатный маршрут.
+        if (typeof creep.drop === "function") creep.drop(resource);
+      }
+      return;
+    }
+
     const roomName = creep.room.name;
     const roomMemory = Memory.rooms && Memory.rooms[roomName];
     if (!roomMemory) return;

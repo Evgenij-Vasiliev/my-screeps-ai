@@ -157,8 +157,8 @@ console.log("\n2. Фактическое снятие и повторный CONT
     maxEnergy: 500,
   };
   const r1 = taskExecutors.executors.fillTowers(creep, task);
-  check("первое снятие = 500", withdrawAmounts[0] === 500, withdrawAmounts[0]);
-  check("энергия в carry = 500", creep.store.energy === 500, creep.store.energy);
+  check("первое снятие = 1600", withdrawAmounts[0] === 1600, withdrawAmounts[0]);
+  check("энергия в carry = 1600", creep.store.energy === 1600, creep.store.energy);
   check("первый вызов CONTINUE", r1 === "CONTINUE", r1);
   check("energyTaken = 500", task.energyTaken === 500, task.energyTaken);
 

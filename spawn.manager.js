@@ -67,7 +67,15 @@ function countRoles(creeps) {
     if (!creep) continue;
 
     // Дополнительные крипы (systems.extraCreeps) в квоту роли не входят.
-    if (creep.memory.extra !== undefined) continue;
+    // Аварийные worker'ы старого образца получили имя с суффиксом `_e`,
+    // но ещё не имеют memory.extra; их тоже не считаем в квоте, иначе
+    // обычный полноценный worker никогда не заспавнится.
+    if (
+      creep.memory.extra !== undefined ||
+      (typeof creep.name === "string" && /_e$/.test(creep.name))
+    ) {
+      continue;
+    }
 
     const role = creep.memory.role;
 

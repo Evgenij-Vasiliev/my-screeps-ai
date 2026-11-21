@@ -174,7 +174,9 @@ const factory = {
     }
     const name = `worker_${roomName}_${Game.time}_e`;
     return spawn.spawnCreep(body, name, {
-      memory: { role: "worker", homeRoom: roomName },
+      // extra: аварийный крип не должен занимать квоту SPAWN_QUOTA.worker,
+      // иначе обычный полноценный worker никогда не появится.
+      memory: { role: "worker", homeRoom: roomName, extra: "emergency" },
     });
   },
 

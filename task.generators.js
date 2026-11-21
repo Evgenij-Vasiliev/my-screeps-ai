@@ -596,21 +596,12 @@ function generateRepairStructures(roomState) {
   const hasNumbers =
     !!cache && !!cache.damagedRoadIds && !!cache.damagedRoadHits;
 
-  // 1. Дороги — числами из кэша сканера. Ни Game.getObjectById, ни массива
-  //    дескрипторов: отбор идёт прямо по типизированным массивам кэша.
   if (hasNumbers) {
-    const ids = cache.damagedRoadIds;
-    const hits = cache.damagedRoadHits;
-    const maxes = cache.damagedRoadHitsMax;
+    // Дороги воркерам больше не ставим: их ремонтируют башни. Дальние
+    // дороги сейчас не используются (будут нужны на этапе дальней добычи).
 
-    for (let i = 0; i < ids.length; i++) {
-      if (!isBelowRepairThreshold(hits[i], maxes[i])) continue;
-      if (!isLiveDamaged(ids[i])) continue;
-      addRepairTask(roomName, ids[i]);
-    }
-
-    // 2. Группы структур (spawns/towers/extensions/links/labs и остальные) —
-    //    тоже числами. Дескрипторы собираются в один массив на вызов.
+    // Группы структур (spawns/towers/extensions/links/labs и остальные) —
+    // числами. Дескрипторы собираются в один массив на вызов.
     const groups = [];
     scanner.collectDamagedStructures(cache, groups);
 
@@ -631,6 +622,7 @@ function generateRepairStructures(roomState) {
 
   for (let i = 0; i < damagedStructures.length; i++) {
     const structure = damagedStructures[i];
+    if (structure.structureType === "road") continue;
     if (!isBelowRepairThreshold(structure.hits, structure.hitsMax)) continue;
     addRepairTask(roomName, structure.id);
   }
@@ -730,6 +722,13 @@ function generateBuildStructures(roomState) {
   // на каждую комнату за тик.
   const sites = roomState.constructionSites;
   if (!sites || sites.length === 0) return;
+
+  const queued =
+    Memory.rooms &&
+    Memory.rooms[roomName] &&
+    Memory.rooms[roomName].tasks &&
+    Memory.rooms[roomName].tasks.buildStructures;
+  if (queued && queued.length >= TASK_CONFIG.MAX_BUILD_TASKS) return;
 
   const existing = collectTargetIds(roomName, "buildStructures");
 

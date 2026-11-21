@@ -580,6 +580,22 @@ function runDelivery(roomState, creep, room, lab, row) {
   }
 
   if (creep.store.getUsedCapacity(row.resource) === 0) {
+    // Не начинаем рейс, если лаба не примет полный комплект или не оплатит
+    // его энергией. Иначе крип снимет KH/UO со склада и будет вынужден
+    // сбросить остаток.
+    const have = labAmount(lab, row.resource);
+    const need = row.parts * BOOST_PER_PART - have;
+    const labFree = lab.store.getFreeCapacity(row.resource) || 0;
+    const labEnergy = lab.store[RESOURCE_ENERGY] || 0;
+    if (
+      need <= 0 ||
+      labFree < need ||
+      labEnergy < row.parts * BOOST_ENERGY_PER_PART
+    ) {
+      delete creep.memory.boostLab;
+      return false;
+    }
+
     const source =
       Game.getObjectById(task.sourceId) ||
       storeWith(roomState, room, row.resource, lab.id);
@@ -610,7 +626,12 @@ function runDelivery(roomState, creep, room, lab, row) {
     // lab.worker.js так и делает: Math.min(нужно, src.store[res], free).
     const free = creep.store.getFreeCapacity(row.resource);
     const stock = source.store[row.resource] || 0;
-    const amount = Math.min(row.parts * BOOST_PER_PART, free, stock);
+    const existing = labAmount(lab, row.resource);
+    const amount = Math.min(
+      row.parts * BOOST_PER_PART - existing,
+      free,
+      stock,
+    );
     if (amount <= 0) return false;
 
     const result = creep.withdraw(source, row.resource, amount);
@@ -641,7 +662,7 @@ function runDelivery(roomState, creep, room, lab, row) {
     // рюкзак у ролей теперь маленький: у miner'а 3–4 CARRY, то есть комплект
     // XUHO2 (150) занимал ВЕСЬ объём — майнер переставал добывать, линки
     // переставали наполняться, спавны пустели (живая авария).
-    dropCarriedBoost(creep, row.resource);
+    startBoostReturn(creep, row.resource);
     delete creep.memory.boostLab;
     delete creep.memory.boostTask;
     delete creep.memory.boostSince;
@@ -653,23 +674,53 @@ function runDelivery(roomState, creep, room, lab, row) {
 }
 
 /**
- * Сбросить из рюкзака буст, который лаба принять не может.
- *
- * ЗАЧЕМ. Лаборатория держит один минерал за раз. Если крип уже взял буст, а в
- * лабе лежит ДРУГОЙ минерал (обычная картина: worker'ы держат в лабе XKH2O, а
- * miner'у нужен XUHO2), движок отклоняет transfer (ERR_INVALID_ARGS). Раньше
- * крип терял память процедуры и оставался С ЭТИМ ГРУЗОМ В РЮКЗАКЕ навсегда:
- * рюкзак больше ничего не принимал, роль вставала целиком (авария: майнеры не
- * добывали, linkWorker'ы не разгружали линки, спавны и расширения пустели).
- * Потеря 150 единиц минерала дешевле полностью выключенной роли.
- * @param {Object} creep
- * @param {string} resource
- * @returns {boolean} был ли сброс
+ * Запланировать возврат буста в Storage/терминал вместо сброса на пол.
+ * Роль не выполняется, пока груз не сдан; ресурс не теряется.
  */
-function dropCarriedBoost(creep, resource) {
-  if (!resource || !creep.store || typeof creep.drop !== "function") return false;
+function startBoostReturn(creep, resource) {
+  if (!resource || !creep.store) return false;
   if (creep.store.getUsedCapacity(resource) <= 0) return false;
-  creep.drop(resource);
+  const current = creep.memory.boostReturn;
+  if (!current || current.resource !== resource) {
+    creep.memory.boostReturn = { resource };
+  }
+  return true;
+}
+
+/**
+ * Вернуть застрявший KH/UO в Storage (или терминал). Вызывается первым
+ * действием в run(), в том числе при Memory.labBoostOff: уже взятый груз
+ * нельзя бросать на пол.
+ * @returns {boolean} true — управление крипом занято возвратом
+ */
+function runBoostReturn(roomState, creep) {
+  const state = creep.memory.boostReturn;
+  const resource = state && state.resource;
+  if (!resource || creep.store.getUsedCapacity(resource) <= 0) {
+    delete creep.memory.boostReturn;
+    return false;
+  }
+
+  const room = (roomState && roomState.room) || creep.room;
+  let dest = room.storage;
+  if (!dest || dest.store.getFreeCapacity(resource) <= 0) {
+    dest = room.terminal;
+  }
+  if (!dest || dest.store.getFreeCapacity(resource) <= 0) {
+    // Места нет: не выбрасываем ресурс, ждём освобождения склада.
+    return true;
+  }
+
+  if (!creep.pos.isNearTo(dest)) {
+    creep.travelTo(dest);
+    return true;
+  }
+
+  const result = creep.transfer(dest, resource);
+  if (result === OK || creep.store.getUsedCapacity(resource) <= 0) {
+    delete creep.memory.boostReturn;
+    return false;
+  }
   return true;
 }
 
@@ -713,7 +764,7 @@ function runBoost(roomState, creep, room, lab, row, cap) {
       labType !== row.resource &&
       labAmount(lab, labType) > 0
     ) {
-      dropCarriedBoost(creep, row.resource);
+      startBoostReturn(creep, row.resource);
       delete creep.memory.boostTask;
       delete creep.memory.boostLab;
       delete creep.memory.boostSince;
@@ -761,7 +812,7 @@ function runBoost(roomState, creep, room, lab, row, cap) {
   if (partsPaid < 1) {
     // Груз буста из рюкзака снимаем: с ним роль встанет целиком (та же причина,
     // что и в остальных ветках отказа — см. dropCarriedBoost).
-    dropCarriedBoost(creep, row.resource);
+    startBoostReturn(creep, row.resource);
     delete creep.memory.boostTask;
     delete creep.memory.boostLab;
     delete creep.memory.boostSince;
@@ -796,13 +847,19 @@ function runBoost(roomState, creep, room, lab, row, cap) {
       delete creep.memory.boostTask;
       delete creep.memory.boostLab;
       delete creep.memory.boostSince;
+      if (creep.store.getUsedCapacity(row.resource) > 0) {
+        startBoostReturn(creep, row.resource);
+      }
       mark(room.name, "boosted " + row.resource);
       return true;
     case ERR_NOT_ENOUGH_RESOURCES:
       // Ресурса хватило на часть частей — буст уже применён, крип может
-      // работать; остаток добустится, когда запас вернётся в лабу.
+      // работать; остаток груза возвращаем на склад.
       delete creep.memory.boostTask;
       delete creep.memory.boostSince;
+      if (creep.store.getUsedCapacity(row.resource) > 0) {
+        startBoostReturn(creep, row.resource);
+      }
       mark(room.name, "partial " + row.resource);
       return true;
     case ERR_TIRED:
@@ -839,9 +896,26 @@ function runBoost(roomState, creep, room, lab, row, cap) {
 function run(roomState, creep) {
   if (!LAB_BOOST.ENABLED) return false;
   if (!creep || !creep.my || creep.spawning) return false;
-  if (Memory[LAB_BOOST.OFF_FLAG]) return false;
 
   const creepMemory = creep.memory;
+  // Уже взятый буст возвращаем даже при выключенных бустах — не теряем ресурс.
+  if (creepMemory.boostReturn) return runBoostReturn(roomState, creep);
+
+  // Задача важнее оппортунистического буста. Иначе worker с taskId уходит
+  // в процедуру буста, задача остаётся зарезервированной и оплаченной, а
+  // воркер стоит. Буст делается только когда задача уже выполнена.
+  if (creepMemory.taskId) {
+    const pendingResource =
+      (creepMemory.boostLab && creepMemory.boostLab.resource) ||
+      (creepMemory.boostTask && creepMemory.boostTask.resource);
+    if (pendingResource) startBoostReturn(creep, pendingResource);
+    delete creepMemory.boostTask;
+    delete creepMemory.boostLab;
+    delete creepMemory.boostSince;
+    return false;
+  }
+
+  if (Memory[LAB_BOOST.OFF_FLAG]) return false;
   const policy = LAB_BOOST.BOOST_POLICY[creepMemory.role];
   if (!policy || policy.length === 0) return false;
 
@@ -871,7 +945,7 @@ function run(roomState, creep) {
     ) {
       // В комнате без энергии процедура не доводится — груз буста из рюкзака
       // тоже снимаем, иначе крип останется с ним и роль не восстановится.
-      dropCarriedBoost(
+      startBoostReturn(
         creep,
         (creepMemory.boostLab && creepMemory.boostLab.resource) ||
           (creepMemory.boostTask && creepMemory.boostTask.resource),
@@ -905,7 +979,7 @@ function run(roomState, creep) {
       // рюкзак 3 CARRY = 150, комплект XUHO2 на 5 частей — те же 150: груз
       // занимал 100 % объёма, добыча вставала, линки не наполнялись, спавны
       // пустели. Теперь груз сбрасывается.
-      dropCarriedBoost(
+      startBoostReturn(
         creep,
         (creepMemory.boostLab && creepMemory.boostLab.resource) ||
           (creepMemory.boostTask && creepMemory.boostTask.resource),
@@ -943,7 +1017,7 @@ function run(roomState, creep) {
     ) {
       // Груз, который лаба не примет, тоже сбрасываем — иначе крип остаётся с
       // ним в рюкзаке и роль встаёт целиком (см. dropCarriedBoost).
-      dropCarriedBoost(creep, pendingResource);
+      startBoostReturn(creep, pendingResource);
       delete creepMemory.boostTask;
       delete creepMemory.boostLab;
       delete creepMemory.boostSince;
@@ -975,7 +1049,7 @@ function run(roomState, creep) {
     if (!row) {
       // Строки политики больше нет (буст израсходован/сменился) — груз из
       // рюкзака снимаем, чтобы роль не осталась заблокированной.
-      dropCarriedBoost(
+      startBoostReturn(
         creep,
         (creepMemory.boostLab && creepMemory.boostLab.resource) ||
           (creepMemory.boostTask && creepMemory.boostTask.resource),
@@ -991,7 +1065,7 @@ function run(roomState, creep) {
       partsOfType(creep, row.resource) - boostedParts(creep, row.resource),
     );
     if (cap <= 0) {
-      dropCarriedBoost(
+      startBoostReturn(
         creep,
         (creepMemory.boostLab && creepMemory.boostLab.resource) ||
           (creepMemory.boostTask && creepMemory.boostTask.resource),

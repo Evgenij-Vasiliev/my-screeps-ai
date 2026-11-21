@@ -375,23 +375,20 @@ getObjectByIdCalls = 0;
 taskGenerators.generateRepairStructures(statsState);
 const repairQueue = repairQueueRef;
 check(
-  "задача repair на повреждённую дорогу",
-  repairQueue.some(t => t.targetId === "road1"),
+  "дороги воркерам больше не ставятся",
+  !repairQueue.some(t => t.targetId === "road1"),
   JSON.stringify(repairQueue),
 );
-// ext2 (10/1000 hits) из групп структур тоже ниже порога и тоже получает
-// задачу — это прежнее поведение, оно сохранено.
+// ext2 (10/1000 hits) из групп структур ниже порога и получает задачу.
 check(
   "группы структур по-прежнему дают задачи",
   repairQueue.some(t => t.targetId === "ext2"),
   JSON.stringify(repairQueue),
 );
-// Резолвятся только дорога-кандидат и группа-кандидат: ext2 (10/1000).
-// tow2 (500/1000) ровно на пороге и в задачи не идёт — резолва для него нет.
-// 366 объектов групп, среди которых целые, больше не резолвятся вовсе.
+// Дорога пропускается до резолва; резолвится только ext2 (10/1000).
 check(
-  "ниже порога: резолвы только по кандидатам",
-  getObjectByIdCalls === 2,
+  "ниже порога: резолв только структуры",
+  getObjectByIdCalls === 1,
   String(getObjectByIdCalls),
 );
 check(

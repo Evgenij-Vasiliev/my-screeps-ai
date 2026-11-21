@@ -53,7 +53,20 @@ function taskEnergyLimit(task) {
  * повторный CONTINUE не снимает полный бюджет заново.
  */
 function withdrawForTask(creep, task) {
-  const limit = taskEnergyLimit(task);
+  // Контракт уже исчерпан: повторно не набираем, иначе задача будет
+  // бесконечно пополняться после каждой доставки.
+  if (
+    task &&
+    typeof task.maxEnergy === "number" &&
+    (task.energyTaken || 0) >= task.maxEnergy
+  ) {
+    return false;
+  }
+
+  // Вместимость рюкзака важнее размера задачи. Любой крип — обычный или
+  // бустнутый — заправляется на всё свободное место, а не на 200/500/600
+  // из контракта. Излишек используется следующей задачей.
+  const limit = creep.store.getFreeCapacity(RESOURCE_ENERGY);
   if (limit <= 0) return false;
 
   const before = (creep.store && creep.store[RESOURCE_ENERGY]) || 0;

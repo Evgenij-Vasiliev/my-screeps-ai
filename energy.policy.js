@@ -190,9 +190,11 @@ function budgetState() {
         (income * BUDGET.SHARES[direction]) / 10000,
       ) + (direction === "factory" ? overflowFactory : 0);
       limits[direction] = limit;
-      // Новый период начинается с нуля: бюджет начисляется постепенно,
-      // а не выдаётся залпом в начале 300-тикового окна.
-      remaining[direction] = 0;
+      // Стартовый кредит — 1–3 штатные задачи, чтобы не было простоя
+      // на первых тиках. Дальше бюджет начисляется постепенно.
+      const start =
+        (BUDGET.START_CREDITS && BUDGET.START_CREDITS[direction]) || 0;
+      remaining[direction] = Math.min(limit, start);
       charged[direction] = 0;
     }
     state = {
@@ -286,6 +288,11 @@ function protectedBudget(direction) {
 
 /** Хватает ли остатка с учётом защищённой части для этой задачи. */
 function hasBudget(state, task, cost) {
+  // Жизненные направления не должны стоять из-за периода: физический
+  // тормоз — свободный остаток Storage в canReserve, а не счётчик задач.
+  if (BUDGET.CRITICAL && BUDGET.CRITICAL.includes(task.direction)) {
+    return true;
+  }
   const reserve = task.mandatory === true ? 0 : protectedBudget(task.direction);
   return (state.remaining[task.direction] || 0) - reserve >= cost;
 }
@@ -312,7 +319,11 @@ function tryChargeTaskBudget(task) {
   if (!hasBudget(state, task, cost)) return false;
   const left = state.remaining[task.direction] || 0;
 
-  state.remaining[task.direction] = left - cost;
+  // Критическая задача выдаётся и при исчерпанном периодном остатке:
+  // её реальный лимит — свободная энергия Storage (canReserve).
+  const critical =
+    BUDGET.CRITICAL && BUDGET.CRITICAL.includes(task.direction);
+  state.remaining[task.direction] = Math.max(0, left - cost);
   state.charged[task.direction] =
     (state.charged[task.direction] || 0) + cost;
   return true;
