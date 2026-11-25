@@ -28,6 +28,8 @@ const roleTowerSupplier = require("role.towerSupplier");
 const roleLinkWorker = require("role.linkWorker");
 const roleLabWorker = require("lab.worker");
 const roleMineralMiner = require("role.mineralMiner");
+const roleAttacker = require("role.attacker");
+const { getHostiles } = require("threat");
 const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
 const { TOWER, TASK_CONFIG, SPAWN } = require("./constants");
@@ -47,6 +49,11 @@ const ROLES = {
   linkWorker: roleLinkWorker,
   labWorker: roleLabWorker,
   mineralMiner: roleMineralMiner,
+  // Боевой крип: спавнится в каждой комнате (SPAWN_QUOTA.attacker = 1) и
+  // работает в ней же по homeRoom, даже когда физически стоит на точке сбора
+  // или в дальней комнате. Второго диспетчера для него нет — defense.manager
+  // только ставит Memory.attackAlert (см. его шапку).
+  attacker: roleAttacker,
   worker: workerRunner,
 };
 
@@ -492,9 +499,11 @@ function runTowerLogic(roomState) {
       );
     }
 
-    // Основной сигнал — присутствие враждебных крипов. room.find движок
-    // кэширует в пределах тика, и это дешевле JS-обхода списка id стен.
-    const hostiles = roomState.room.find(FIND_HOSTILE_CREEPS);
+    // Основной сигнал — присутствие враждебных крипов. Скан — через
+    // threat.getHostiles: defense.manager в этом же тике уже сканировал
+    // комнату (empire.js вызывает его раньше roomManager), и башни
+    // переиспользуют список без второго room.find.
+    const hostiles = getHostiles(roomState.room);
     let underAttack = hostiles.length > 0;
 
     // Резервный сигнал — падение hits стен и валов: стены могут бить и без

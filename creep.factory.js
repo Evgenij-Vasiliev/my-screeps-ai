@@ -17,12 +17,29 @@ function bodyCost(body) {
   return sum;
 }
 
-const prepareBody = ({ work = 0, carry = 0, move = 0, tough = 0 } = {}) => {
+const prepareBody = ({
+  work = 0,
+  carry = 0,
+  move = 0,
+  tough = 0,
+  attack = 0,
+  ranged_attack = 0,
+  heal = 0,
+  claim = 0,
+} = {}) => {
   const body = [];
 
   for (let i = 0; i < tough; i++) body.push(TOUGH);
   for (let i = 0; i < work; i++) body.push(WORK);
   for (let i = 0; i < carry; i++) body.push(CARRY);
+  // Боевые части — после рабочих и поклажи, MOVE последним. Это порядок
+  // старой ветки (origin/Новая-Империя:creep.factory.js:20-40): у атакующего
+  // RANGED_ATTACK идут раньше MOVE. У рабочих тел эти счётчики равны 0,
+  // поэтому их порядок частей не изменился.
+  for (let i = 0; i < attack; i++) body.push(ATTACK);
+  for (let i = 0; i < ranged_attack; i++) body.push(RANGED_ATTACK);
+  for (let i = 0; i < heal; i++) body.push(HEAL);
+  for (let i = 0; i < claim; i++) body.push(CLAIM);
   for (let i = 0; i < move; i++) body.push(MOVE);
 
   return body;
@@ -156,6 +173,15 @@ const factory = {
       memory: {
         working: false,
       },
+    }),
+
+    // Атакующий — тело из constants.js (10 RANGED_ATTACK + 10 MOVE, 2000
+    // энергии). Роль ему не нужна ни цель в памяти, ни рабочее место:
+    // Memory.attackAlert и Memory.rallyOverride — общие на империю, их читает
+    // role.attacker.js. homeRoom дописывает factory.run().
+    attacker: () => ({
+      body: prepareBody(CREEP_BODIES.attacker),
+      memory: {},
     }),
   },
 

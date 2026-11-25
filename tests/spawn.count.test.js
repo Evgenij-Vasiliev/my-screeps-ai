@@ -36,6 +36,13 @@ global.TOUGH = "tough";
 global.WORK = "work";
 global.CARRY = "carry";
 global.MOVE = "move";
+// Боевые части: с квотой attacker = 1 полный флот из SPAWN_QUOTA содержит
+// атакующего, и prepareBody обязан собрать его тело (как на шарде, где эти
+// константы есть всегда).
+global.ATTACK = "attack";
+global.RANGED_ATTACK = "ranged_attack";
+global.HEAL = "heal";
+global.CLAIM = "claim";
 // На шарде lodash доступен как глобал _ — в Node его нужно подставить.
 // creep.factory.blueprints.miner использует _.some.
 global._ = {
@@ -315,6 +322,9 @@ roomState.creeps = [
   creep("labWorker", 900),
   creep("worker", 1200),
   creep("worker", 1100),
+  // quota attacker = 1 добавлена 25.11.2026; без него «все квоты набраны»
+  // уже неверно, и тест читал бы список спавнов по делу.
+  creep("attacker", 1200),
 ];
 roomState.mineral = { id: "min1", extractorId: "ex1", amount: 0 }; // заблокирован
 resetGate();

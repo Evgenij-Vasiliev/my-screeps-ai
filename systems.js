@@ -12,6 +12,11 @@ module.exports = {
   roomManager: true, // вся комнатная логика
   terminalNetwork: true, // межкомнатная логистика
   marketManager: true, // рынок
+  // Военный блок. observer — обход дальних комнат (необязательная подсистема,
+  // пропускается при критичном bucket); defense — скан угроз и Memory.attackAlert
+  // (не пропускается). Роль атакующего выключается отдельно, в списке ролей.
+  observer: true,
+  defense: true,
 
   // ── комната ────────────────────────────────────────────────
   labManager: true, // лаборатории
@@ -33,6 +38,10 @@ module.exports = {
   labWorker: true,
   mineralMiner: true,
   worker: true,
+  // false — роли не работают, но спавн по квоте остаётся: чтобы полностью
+  // убрать атаккеров, нужно ещё SPAWN_QUOTA.attacker = 0 (см. точку отката
+  // в constants.js).
+  attacker: true,
 
   // ── генераторы задач (false — новые задачи не ставятся) ────
   // ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ (правка 05.10.2026). Раньше эти же 11 имён

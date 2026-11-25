@@ -23,6 +23,12 @@ global.TOUGH = "tough";
 global.WORK = "work";
 global.CARRY = "carry";
 global.MOVE = "move";
+// Боевые части: в SPAWN_QUOTA теперь attacker = 1, и полный состав флота
+// включает его тело (CREEP_BODIES.attacker).
+global.ATTACK = "attack";
+global.RANGED_ATTACK = "ranged_attack";
+global.HEAL = "heal";
+global.CLAIM = "claim";
 global.BODYPART_COST = {
   tough: 10,
   work: 100,
@@ -104,7 +110,16 @@ console.log("\n2. Живой крип — дубля нет");
   calls = [];
   const spawn = makeSpawn(200);
   resetGate();
-  const roles = ["worker", "miner", "linkWorker", "labWorker", "mineralMiner"];
+  const roles = [
+    "worker",
+    "miner",
+    "linkWorker",
+    "labWorker",
+    "mineralMiner",
+    // quota attacker = 1 добавлена 25.11.2026: без него тест 2 проверял бы
+    // уже не «дубля нет», а недобор атакующего.
+    "attacker",
+  ];
   const creeps = roles.map(role => ({ memory: { role }, ticksToLive: 1200 }));
   spawnManager.run({
     roomName: "W1N1",

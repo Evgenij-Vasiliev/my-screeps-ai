@@ -9,6 +9,9 @@ const marketManager = require("market.manager");
 const terminalNetwork = require("terminalNetwork");
 const cpuMonitor = require("cpuMonitor");
 const systems = require("systems");
+const observerManager = require("observer.manager");
+const defenseManager = require("defense.manager");
+const { CPU } = require("./constants");
 
 module.exports.run = function () {
   cpuMonitor.startTick();
@@ -41,19 +44,38 @@ module.exports.run = function () {
   // towerState переехал в heap (задание 5), structureCache — в scanner.
   if (Memory.towerState) delete Memory.towerState;
 
-  // 2. Уровень комнат — вся комнатная логика внутри roomManager
+  // 2. Разведка и оборона — ДО комнатной логики.
+  //
+  // Почему раньше roomManager: defense.manager ставит Memory.attackAlert,
+  // который в этом же тике читает role.attacker.js (роль запускает
+  // roomManager), а threat.getHostiles заполняет кэш скана, который затем
+  // переиспользуют башни (room.manager.js, runTowerLogic). Обратный порядок
+  // давал бы атакующему тревогу прошлого тика и второй room.find на комнату.
+  //
+  // Разведка — необязательная подсистема: при критичном bucket она
+  // пропускается (как в рабочей ветке origin/Новая-Империя:empire.js:104-116).
+  // Оборона не пропускается никогда: пропуск боя дороже CPU.
+  const bucketLow = Game.cpu.bucket < CPU.BUCKET_CRITICAL;
+  if (systems.observer && !bucketLow) {
+    cpuMonitor.trackRole("observerManager", () => observerManager.run());
+  }
+  if (systems.defense) {
+    cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
+  }
+
+  // 3. Уровень комнат — вся комнатная логика внутри roomManager
   if (systems.roomManager) roomManager.run();
 
-  // 3. TerminalNetwork — межкомнатная логистика (тумблер systems.terminalNetwork)
+  // 4. TerminalNetwork — межкомнатная логистика (тумблер systems.terminalNetwork)
   if (systems.terminalNetwork) {
     cpuMonitor.trackRole("terminalNetwork", () => terminalNetwork.run());
   }
-  // 4. Рынок империального уровня
+  // 5. Рынок империального уровня
   if (systems.marketManager) {
     cpuMonitor.trackRole("marketManager", () => marketManager.run());
   }
 
-  // 5. Сжатие очередей задач. Завершение задачи оставляет в массиве
+  // 6. Сжатие очередей задач. Завершение задачи оставляет в массиве
   // null-надгробие (чтобы не сдвигать массив и держать O(1)); дыры надо
   // убрать ДО конца тика, иначе они уедут в сериализованную Memory.
   cpuMonitor.trackRole("taskCompact", () => taskManager.compactAll());
