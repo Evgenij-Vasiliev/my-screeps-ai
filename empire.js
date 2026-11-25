@@ -11,6 +11,7 @@ const cpuMonitor = require("cpuMonitor");
 const systems = require("systems");
 const observerManager = require("observer.manager");
 const defenseManager = require("defense.manager");
+const remoteManager = require("remote.manager");
 const { CPU } = require("./constants");
 
 module.exports.run = function () {
@@ -61,6 +62,20 @@ module.exports.run = function () {
   }
   if (systems.defense) {
     cpuMonitor.trackRole("defenseManager", () => defenseManager.run());
+  }
+
+  // 2b. Дальний контур — назначение creep.memory.targetRoom.
+  //
+  // Почему ДО roomManager: роли исполняет roomManager (карта ROLES), и они
+  // должны видеть свежую комнату в ЭТОМ ЖЕ тике. Обратный порядок давал бы
+  // роли комнату прошлого тика, а на первом тике жизни замены — targetRoom
+  // null, то есть лишний тик простоя удалённой комнаты.
+  //
+  // Менеджер не обязателен для выживания (как разведка), но и не пропускается
+  // при низком bucket: он не делает ни одного room.find и стоит один проход по
+  // Game.creeps, а пропуск оставил бы замены без комнат.
+  if (systems.remote) {
+    cpuMonitor.trackRole("remoteManager", () => remoteManager.run());
   }
 
   // 3. Уровень комнат — вся комнатная логика внутри roomManager

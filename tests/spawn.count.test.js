@@ -56,7 +56,7 @@ global.Game = {
   cpu: { getUsed: () => 0, bucket: 10000, limit: 20 },
 };
 
-const { SPAWN_QUOTA, SPAWN, PRESPAWN_THRESHOLD } = require("../constants");
+const { SPAWN_QUOTA, SPAWN, PRESPAWN_THRESHOLD, REMOTE } = require("../constants");
 const spawnManager = require("../spawn.manager");
 const { countRoles } = spawnManager;
 
@@ -91,6 +91,13 @@ function legacyCountRole(creeps, role) {
 /* ── Фикстура ─────────────────────────────────────────────────────────── */
 function creep(role, ticksToLive) {
   return { memory: { role }, ticksToLive };
+}
+/**
+ * Дальний крип: у него квота считается по memory.homeRoom
+ * (spawn.manager.countRoleSlots), поэтому homeRoom в фикстуре обязателен.
+ */
+function remoteCreep(role, ticksToLive) {
+  return { memory: { role, homeRoom: REMOTE.HOME_ROOM }, ticksToLive };
 }
 
 const creeps = [
@@ -314,6 +321,11 @@ console.log("\n9. Ленивый find: при полных квотах спис
 const spawnReads = { n: 0 };
 const savedSpawns2 = roomState.spawns;
 roomState.spawns = countingArray([spawn], spawnReads);
+// РУЧНОЙ полный состав флота: по SPAWN_QUOTA[role] крипов каждой роли. Список
+// держим руками (а не через fullFleet()), чтобы тест ловил и обратную ошибку —
+// «квота есть, а роли в фикстуре нет». При добавлении роли в SPAWN_QUOTA её
+// надо добавить и сюда, иначе «все квоты набраны» перестанет быть правдой и
+// тест начнёт читать список спавнов по делу.
 roomState.creeps = [
   creep("mineralMiner", 1000),
   creep("miner", 1400),
@@ -325,6 +337,18 @@ roomState.creeps = [
   // quota attacker = 1 добавлена 25.11.2026; без него «все квоты набраны»
   // уже неверно, и тест читал бы список спавнов по делу.
   creep("attacker", 1200),
+  // Дальний контур (квоты 2/2/4, правка 25.11.2026): в комнате W1N1 роли
+  // дальнего контура не спавнятся вовсе (REMOTE.HOME_ROOM = E35S37), поэтому
+  // эти крипы фикстуре нужны только для полноты состава — квоту они держат
+  // по homeRoom, а не по физическому нахождению.
+  remoteCreep("reserver", 800),
+  remoteCreep("reserver", 800),
+  remoteCreep("remoteMiner", 1200),
+  remoteCreep("remoteMiner", 1200),
+  remoteCreep("remoteHauler", 1200),
+  remoteCreep("remoteHauler", 1200),
+  remoteCreep("remoteHauler", 1200),
+  remoteCreep("remoteHauler", 1200),
 ];
 roomState.mineral = { id: "min1", extractorId: "ex1", amount: 0 }; // заблокирован
 resetGate();

@@ -175,6 +175,45 @@ const factory = {
       },
     }),
 
+    // ── Дальний контур (REMOTE в constants.js, remote.manager.js) ──────────
+    // targetRoom: null — стартовое значение для ВСЕХ дальних ролей: комнату
+    // раздаёт только remote.manager (assignTargetRoom) и только при живой
+    // связке замены или свободном слоте. Крип с targetRoom = null ждёт в
+    // домашней комнате и ничего не делает — это штатное состояние, а не ошибка.
+    //
+    // working: false — стартовый режим хайлера/майнера (собирать, а не везти);
+    // резерверу поле не нужно, но оно есть у всех трёх ролей одним списком,
+    // чтобы память дальнего крипа читалась одинаково (и чтобы будущее поле не
+    // пришлось дописывать трём ролям по отдельности).
+    //
+    // homeRoom дописывает run(): без него крип не попадёт ни в одну квоту
+    // (spawn.manager.countRoles считает по homeRoom).
+    // Связку handoffFrom/handoffAt пишет run(), и только когда это замена
+    // конкретного уходящего крипа (replacement handoff, remote.handoff.js).
+    reserver: () => ({
+      body: prepareBody(CREEP_BODIES.reserver),
+      memory: {
+        working: false,
+        targetRoom: null,
+      },
+    }),
+
+    remoteMiner: () => ({
+      body: prepareBody(CREEP_BODIES.remoteMiner),
+      memory: {
+        working: false,
+        targetRoom: null,
+      },
+    }),
+
+    remoteHauler: () => ({
+      body: prepareBody(CREEP_BODIES.remoteHauler),
+      memory: {
+        working: false,
+        targetRoom: null,
+      },
+    }),
+
     // Атакующий — тело из constants.js (10 RANGED_ATTACK + 10 MOVE, 2000
     // энергии). Роль ему не нужна ни цель в памяти, ни рабочее место:
     // Memory.attackAlert и Memory.rallyOverride — общие на империю, их читает
@@ -213,22 +252,36 @@ const factory = {
   },
 
   /**
+   * Имя, под которым будет создан крип.
+   *
+   * Вынесено отдельной функцией, потому что имя нужно ЗАРАНЕЕ: spawn.manager
+   * записывает его уходящему крипу в memory.handoffTo ещё до вызова spawnCreep
+   * (replacement handoff, remote.handoff.js) — иначе связку некуда записать.
+   *
+   * @param {string} role
+   * @param {string} roomName
+   * @returns {string}
+   */
+  creepName: function (role, roomName) {
+    return `${role}_${roomName}_${Game.time}`;
+  },
+
+  /**
    * @param {StructureSpawn} spawn
    * @param {string} role
    * @param {string} roomName
+   * @param {number} [threshold] порог пре-спавна роли (PRESPAWN_THRESHOLD)
+   * @param {string} [handoffFrom] имя уходящего крипа, если это его замена
    * @returns {ScreepsReturnCode}
    */
-  run: function (spawn, role, roomName, threshold) {
+  run: function (spawn, role, roomName, threshold, handoffFrom) {
     const blueprintFn = this.blueprints[role];
 
     if (!blueprintFn) {
       return ERR_INVALID_ARGS;
     }
 
-    // Имя и threshold передаются в blueprint: threshold используют роли с
-    // предспавном (PRESPAWN_THRESHOLD), имя — для отладки. Минеру с 01.10.2026
-    // ни то, ни другое не нужно: место он берёт сам (role.miner.js).
-    const name = `${role}_${roomName}_${Game.time}`;
+    const name = this.creepName(role, roomName);
     const blueprint = blueprintFn(spawn, threshold, name);
 
     if (!blueprint || !blueprint.body || blueprint.body.length === 0) {
@@ -244,6 +297,15 @@ const factory = {
       { role, homeRoom: roomName },
       blueprint.memory,
     );
+
+    // Связка «уходящий → замена»: память замены. Пишется только когда рядом
+    // есть уходящий предшественник (spawn.manager передаёт его имя), иначе поле
+    // в памяти отсутствует — «нет связки» читается как отсутствие ключа
+    // (remote.handoff.js), а не как null, который надо отличать от имени.
+    if (handoffFrom) {
+      memory.handoffFrom = handoffFrom;
+      memory.handoffAt = Game.time;
+    }
 
     return spawn.spawnCreep(blueprint.body, name, { memory });
   },

@@ -29,6 +29,12 @@ const roleLinkWorker = require("role.linkWorker");
 const roleLabWorker = require("lab.worker");
 const roleMineralMiner = require("role.mineralMiner");
 const roleAttacker = require("role.attacker");
+// Дальний контур: роли исполняются здесь же, как все остальные. Второго
+// диспетчера нет — remote.manager только раздаёт targetRoom (empire.js вызывает
+// его ДО roomManager.run, чтобы роли в этом же тике видели свежую комнату).
+const roleReserver = require("role.reserver");
+const roleRemoteMiner = require("role.remoteMiner");
+const roleRemoteHauler = require("role.remoteHauler");
 const { getHostiles } = require("threat");
 const workerRunner = require("worker.runner");
 const cpuMonitor = require("cpuMonitor");
@@ -54,6 +60,13 @@ const ROLES = {
   // или в дальней комнате. Второго диспетчера для него нет — defense.manager
   // только ставит Memory.attackAlert (см. его шапку).
   attacker: roleAttacker,
+  // Дальние роли. targetRoom им раздаёт remote.manager (assignTargetRoom) —
+  // вызывается в empire.js ДО roomManager.run(), поэтому здесь память уже
+  // свежая. Ключи совпадают с memory.role, значит systems.remoteMiner и т.д.
+  // выключают и роль, и её спавн не трогают (квота остаётся).
+  reserver: roleReserver,
+  remoteMiner: roleRemoteMiner,
+  remoteHauler: roleRemoteHauler,
   worker: workerRunner,
 };
 

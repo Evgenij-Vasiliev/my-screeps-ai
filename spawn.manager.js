@@ -36,12 +36,31 @@
 const creepFactory = require("creep.factory");
 const cpuMonitor = require("cpuMonitor");
 const systems = require("systems");
+const { preSpawnCandidates, bindHandoff } = require("remote.handoff");
 const {
   SPAWN_QUOTA,
   SPAWN,
   MINERAL_MIN_AMOUNT_TO_SPAWN,
   PRESPAWN_THRESHOLD,
+  REMOTE,
 } = require("./constants");
+
+/**
+ * Роли дальнего контура (remote.manager.js, role.reserver/remoteMiner/remoteHauler).
+ *
+ * Их крипы работают в УДАЛЁННОЙ комнате, поэтому:
+ *  - квота считается по memory.homeRoom, а не по физическому нахождению
+ *    (room.manager.js собирает roomState.creeps по homeRoom, room.manager.js:743-754);
+ *  - спавнятся они ТОЛЬКО в REMOTE.HOME_ROOM — see проверку в run();
+ *  - их пре-спавн — не просто «поставить замену заранее», а replacement handoff:
+ *    замену связывают с уходящим крипом (remote.handoff), чтобы она сразу
+ *    получила его удалённую комнату и пошла в неё, пока он ещё жив.
+ */
+const REMOTE_ROLES = {
+  reserver: true,
+  remoteMiner: true,
+  remoteHauler: true,
+};
 
 /**
  * Счётчики крипов по ролям — ОДИН проход по списку (задание 8 плана).
@@ -112,6 +131,45 @@ function countExtras(creeps) {
     counts[key] = (counts[key] || 0) + 1;
   }
   return counts;
+}
+
+/**
+ * Сколько крипов роли числится за комнатой — ВСЕ, включая спавнящихся и тех,
+ * кто уже на пороге пре-спавна.
+ *
+ * countRoles отвечает на вопрос «сколько крипов держат квоту»: крип на пороге
+ * квоту не держит, поэтому на его место разрешён пре-спавн замены. Здесь другой
+ * вопрос — «занят ли слот квоты». Спавняющийся крип (ticksToLive ещё нет)
+ * занимает слот СРАЗУ, поэтому недостающий слот квоты восстанавливается ровно
+ * один раз, а не каждый тик: 0 → 1 → 2 и стоп, без 2 → 3 → 4.
+ *
+ * Правила счёта те же, что у countRoles (extra-крипы квоту не занимают), плюс
+ * фильтр по homeRoom: у дальних ролей крип может физически быть в другой
+ * комнате, и без фильтра квота домашней комнаты считала бы чужих.
+ *
+ * @param {Array} creeps
+ * @param {string} role
+ * @param {string} roomName
+ * @returns {number}
+ */
+function countRoleSlots(creeps, role, roomName) {
+  let n = 0;
+
+  for (let i = 0; i < creeps.length; i++) {
+    const creep = creeps[i];
+    if (!creep || !creep.memory) continue;
+    if (creep.memory.role !== role) continue;
+    if (creep.memory.homeRoom !== roomName) continue;
+    if (
+      creep.memory.extra !== undefined ||
+      (typeof creep.name === "string" && /_e$/.test(creep.name))
+    ) {
+      continue;
+    }
+    n++;
+  }
+
+  return n;
 }
 
 /**
@@ -284,6 +342,48 @@ function run(roomState) {
       if (roomState.mineral.amount < MINERAL_MIN_AMOUNT_TO_SPAWN) continue;
     }
 
+    // ── Дальний контур: гейт по домашней комнате и выбор уходящего ────────
+    // Читается ОДИН раз на роль и только когда роль действительно недобрана:
+    // до этой строки доходит редко (квоты обычно набраны), а
+    // preSpawnCandidates делает проход по крипам комнаты.
+    const isRemote = REMOTE_ROLES[role] === true;
+    let leaving = null;
+
+    if (isRemote) {
+      // Дальние роли спавним ТОЛЬКО в домашней комнате (REMOTE.HOME_ROOM).
+      // В остальных комнатах империи роль дальнего контура бессмысленна: её
+      // крип работает в чужой комнате, квота считается по homeRoom, а линка-
+      // приёмника у границы в этой комнате нет.
+      if (roomName !== REMOTE.HOME_ROOM) continue;
+
+      // Уходящего выбираем ДО запуска спавна: он может умереть, пока замена
+      // спавнится (18-84 тика), и тогда связка должна быть уже записана в его
+      // памяти — иначе замена не узнает, чью комнату наследовать
+      // (remote.handoff.bindHandoff).
+      const candidates = preSpawnCandidates(roomState.creeps, role);
+
+      for (let c = 0; c < candidates.length; c++) {
+        // Связку ставим только уходящему из СВОЕЙ комнаты: кандидат из чужой
+        // homeRoom не должен тянуть за собой комнату замены.
+        if (candidates[c].memory.homeRoom !== roomName) continue;
+        leaving = candidates[c];
+        break;
+      }
+
+      // Два разных случая, которые нельзя связывать одним условием:
+      //  1) штатная ЗАМЕНА уходящего (leaving найден) — ставим её, даже если
+      //     квота формально набрана: уходящий квоту уже не держит (countRoles);
+      //  2) ВОССТАНОВЛЕНИЕ недостающего слота (leaving нет) — слот не должен
+      //     требовать наличия уходящего, иначе роль, потерявшая всех крипов, не
+      //     поднимется никогда (живой shard3 21.09.2026 в старой ветке: 0 ×
+      //     reserver/remoteMiner/remoteHauler при квоте 2, спавны простаивали).
+      // Но если заменять некого, а слоты уже заняты — в том числе спавнящейся
+      // заменой, которая занимает слот СРАЗУ, — третьего крипа не ставим.
+      if (!leaving && countRoleSlots(roomState.creeps, role, roomName) >= quota) {
+        continue;
+      }
+    }
+
     roomWants = true;
 
     // ЛЕНИВЫЙ ПОИСК спавна: до этой строки доходит только комната, которой крип
@@ -307,10 +407,29 @@ function run(roomState) {
       role,
       roomName,
       PRESPAWN_THRESHOLD[role],
+      // Пятый аргумент — имя уходящего, если это его замена. Тогда память
+      // замены получит handoffFrom, а удалённую комнату она унаследует через
+      // remote.manager (assignTargetRoom, шаг «наследование»).
+      leaving ? leaving.name : null,
     );
     // break, а не return: выход ровно тот же (после цикла в функции ничего
     // нет, кроме шлюза и профиля), но шлюз успевает записать следующий срок.
-    if (result === OK) break;
+    if (result === OK) {
+      // Связку фиксируем ТОЛЬКО при OK: неудачный спавн (не хватило энергии)
+      // не должен «бронировать» имя замены. Имя берём тем же creepName, по
+      // которому спавнил factory — иначе связка указывала бы в пустоту.
+      if (leaving) {
+        const name = creepFactory.creepName(role, roomName);
+        bindHandoff(leaving, name);
+        // Одна строка на замену (не на тик) — живое доказательство handoff-а:
+        // связка поставлена ДО выхода замены из спавна.
+        console.log(
+          `PRE-SPAWN: ${name} — замена ${leaving.name} ` +
+            `(${role}, ttl ${leaving.ticksToLive}, порог ${PRESPAWN_THRESHOLD[role]})`,
+        );
+      }
+      break;
+    }
   }
 
   // Дополнительные крипы комнаты (systems.extraCreeps), сверх квоты.
@@ -360,3 +479,7 @@ function run(roomState) {
 module.exports.run = run;
 // Экспортируется для офлайн-тестов (tests/spawn.count.test.js).
 module.exports.countRoles = countRoles;
+// Экспортируется для офлайн-тестов (tests/remote.manager.test.js): защита от
+// двойного спавна в паре «уходящий + замена».
+module.exports.countRoleSlots = countRoleSlots;
+module.exports.REMOTE_ROLES = REMOTE_ROLES;

@@ -47,7 +47,7 @@ global.Game = {
   cpu: { getUsed: () => 0, bucket: 10000, limit: 20 },
 };
 
-const { SPAWN_QUOTA } = require("../constants");
+const { SPAWN_QUOTA, REMOTE } = require("../constants");
 const spawnManager = require("../spawn.manager");
 
 let passed = 0;
@@ -121,6 +121,16 @@ console.log("\n2. Живой крип — дубля нет");
     "attacker",
   ];
   const creeps = roles.map(role => ({ memory: { role }, ticksToLive: 1200 }));
+  // Дальний контур (квоты 2/2/4, правка 25.11.2026). Состав — по квотам, как у
+  // остальных ролей; homeRoom обязателен: квота дальних ролей считается по нему
+  // (spawn.manager.countRoleSlots). В комнате W1N1 (не REMOTE.HOME_ROOM) эти
+  // роли не спавнятся вовсе, так что тест проверяет и это: если бы гейт сняли,
+  // здесь появился бы лишний спавн.
+  for (const role of ["reserver", "remoteMiner", "remoteHauler"]) {
+    for (let i = 0; i < SPAWN_QUOTA[role]; i++) {
+      creeps.push({ memory: { role, homeRoom: REMOTE.HOME_ROOM }, ticksToLive: 1200 });
+    }
+  }
   spawnManager.run({
     roomName: "W1N1",
     room: spawn.room,
@@ -128,6 +138,7 @@ console.log("\n2. Живой крип — дубля нет");
     creeps,
   });
   check("аварийный спавн не вызван", calls.length === 0, calls.length);
+  check("дальние роли вне HOME не спавнятся", calls.length === 0, JSON.stringify(calls.map(c => c.name)));
 }
 
 console.log("\n2b. Есть linkWorker, но нет worker — аварийный рабочий создаётся");
