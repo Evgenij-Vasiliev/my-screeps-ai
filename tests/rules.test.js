@@ -463,17 +463,31 @@ for (const f of FILES) {
 }
 
 check("политика MOVE объявлена в constants.js", declaredMove.size >= 4, [...declaredMove].join(","));
+// Почему порог 25 заменён на сверку reuseSites === moveCalls (замер 2026-11-24):
+// движение переведено на Traveler — `creep.travelTo(...)` (traveler.js:180,
+// 33 вхождения `.travelTo(` в рантайм-модулях, из них 20 — task.executors.js),
+// а литеральных `.moveTo(` осталось ровно 8, и все 8 несут reusePath: MOVE.*.
+// Прежний порог 25 стал ложным красным, но сама защита от ложной зелени нужна:
+// сломанный regex молча нашёл бы 0 вызовов. Теперь guard сверяет число опций с
+// числом вызовов (каждая опция стоит на своём moveTo) и требует не меньше 8 —
+// факт `grep -rn "\.moveTo("` по корневым модулям на 2026-11-24. У travelTo
+// reusePath нет и быть не может: Traveler кэширует путь сам, опции reusePath в
+// traveler.js не существует (`grep -n reusePath traveler.js` → 0 совпадений).
 check(
   "reusePath-опций найдено (защита от ложной зелени)",
-  reuseSites >= 25,
-  String(reuseSites),
+  reuseSites === moveCalls && moveCalls >= 8,
+  `reusePath ${reuseSites}, moveTo ${moveCalls}`,
 );
 check("нет литеральных reusePath", reuseLiterals.length === 0, reuseLiterals.join(", "));
 check("reusePath берётся только из MOVE.*", reuseUnknown.length === 0, reuseUnknown.join(", "));
+// Порог приведён к факту по той же причине: 8 — все оставшиеся литеральные
+// moveTo (остальные 40 переходов делает Traveler через creep.travelTo).
+// Полнота проверки не потеряна: строкой ниже каждый moveTo обязан нести
+// reusePath, а он может быть только MOVE.* (проверки выше).
 check(
   "moveTo-вызовов найдено (защита от ложной зелени)",
-  moveCalls >= 25,
-  String(moveCalls),
+  moveCalls >= 8,
+  `${moveCalls} (остальные переходы — travelTo)`,
 );
 check("каждый moveTo задаёт reusePath", missingReuse.length === 0, missingReuse.join(", "));
 

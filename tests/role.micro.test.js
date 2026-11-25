@@ -8,7 +8,8 @@
  *   2) все moveTo в ролях идут с reusePath — путь не пересчитывается каждый тик;
  *   3) role.mineralMiner не использует lodash и Object.keys(creep.store);
  *   4) memory.working пишется только при смене режима (нет лишних записей);
- *   5) empire.js не тянет неиспользуемую заглушку terminalNetwork;
+ *   5) empire.js подключает terminalNetwork и вызывает его под тумблером
+ *      systems.terminalNetwork (модуль давно не заглушка, а подсистема);
  *   6) поведение ролей не изменилось: сбор энергии, ремонт, стройка, апгрейд.
  *
  * Запуск: node tests/role.micro.test.js
@@ -74,10 +75,22 @@ check("нет _.sum", !/_\.sum/.test(mm));
 check("нет Object.keys(creep.store)", !/Object\.keys\(creep\.store\)/.test(mm));
 check("используется getUsedCapacity", /getUsedCapacity\(\)/.test(mm));
 
-console.log("\n4. empire.js не тянет заглушку terminalNetwork");
+// Почему проверка переформулирована (замер 2026-11-24): terminalNetwork больше
+// не заглушка, а реальная подсистема межкомнатной логистики (1006 строк), её
+// подключение и вызов — штатная проводка empire.js:9 и empire.js:47-50.
+// Проверять «нет require» больше нечего: это закрепляло бы устаревшее
+// состояние. Эквивалент по смыслу — модуль действительно подключён и его run
+// стоит под тумблером, а не вызывается безусловно.
+console.log("\n4. empire.js подключает terminalNetwork под тумблером systems.terminalNetwork");
 const empire = fs.readFileSync(path.join(ROOT, "empire.js"), "utf8");
-check("нет require(\"terminalNetwork\")", !/require\("terminalNetwork"\)/.test(empire));
-check("нет активного вызова terminalNetwork.run", !/^\s*[^/]*terminalNetwork\.run/m.test(empire));
+check(
+  "terminalNetwork подключён в empire.js",
+  /const terminalNetwork = require\("terminalNetwork"\)/.test(empire),
+);
+check(
+  "terminalNetwork.run вызывается под тумблером systems.terminalNetwork",
+  /if \(systems\.terminalNetwork\)[\s\S]{0,200}?terminalNetwork\.run\(\)/.test(empire),
+);
 
 /* ── 5. Поведение ролей ───────────────────────────────────────────────── */
 global.RESOURCE_ENERGY = "energy";
@@ -242,6 +255,10 @@ function creepWithStore(energy, extra) {
       store: makeStore(0, energy, energy),
       room: { name: "W1N1", storage },
       moveTo: () => global.OK,
+      // Исполнители ходят через Traveler (`creep.travelTo`, task.executors.js:100
+      // и далее), а не moveTo: без этого метода мок падал бы TypeError, как
+      // только ветка выгрузки дойдёт до движения (латентный дефект мока).
+      travelTo: () => global.OK,
       withdraw: () => global.OK,
       transfer: () => global.OK,
     },
@@ -377,21 +394,41 @@ check(
   offPolicy.length === 0,
   offPolicy.join(", "),
 );
+// Порог приведён к факту (замер 2026-11-24): движение переведено на Traveler,
+// литеральных `.moveTo(..., { reusePath })` в рантайме осталось 8 и все 8
+// берут значение из MOVE.* (ровно это проверяют две проверки выше, они и есть
+// содержательная часть). Прежние 30 были верны до миграции и давали ложный
+// красный. Guard сохранён: он ловит ситуацию, когда regex молча не находит
+// ничего (например, после очередного рефакторинга движения). Полноту держит
+// tests/rules.test.js — «каждый moveTo задаёт reusePath» (rules.test.js:478).
 check(
-  "политика покрывает все вызовы moveTo с reusePath (не меньше 30)",
-  callSites.length >= 30,
+  "политика покрывает все вызовы moveTo с reusePath (не меньше 8)",
+  callSites.length >= 8,
   String(callSites.length),
 );
 
 const constantsSrc = fs.readFileSync(path.join(ROOT, "constants.js"), "utf8");
 check("MOVE экспортируется из constants.js", /^\s*MOVE,$/m.test(constantsSrc));
+// Комментарии вырезаем до поиска MOVE.: в lab.worker.js:120 есть фраза
+// «политика MOVE.* здесь больше не применяется» — это текст, а не вызов, и
+// проверка на нём ложно падала. Тот же приём, что stripComments в
+// tests/load.shed.test.js:332; строковые литералы НЕ вырезаем — иначе regex
+// импорта `require("constants")` перестал бы совпадать.
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+const moveUsers = RUNTIME.filter(f => /MOVE\./.test(stripComments(fs.readFileSync(path.join(ROOT, f), "utf8"))));
 check(
   "файлы, использующие MOVE, импортируют его из constants",
-  RUNTIME.filter(f => /MOVE\./.test(fs.readFileSync(path.join(ROOT, f), "utf8"))).every(f =>
-    /const \{[^}]*MOVE[^}]*\} = require\("(\.\/)?constants"\)/.test(
-      fs.readFileSync(path.join(ROOT, f), "utf8"),
+  moveUsers.length > 0 &&
+    moveUsers.every(f =>
+      /const \{[^}]*MOVE[^}]*\} = require\("(\.\/)?constants"\)/.test(
+        stripComments(fs.readFileSync(path.join(ROOT, f), "utf8")),
+      ),
     ),
-  ),
+  moveUsers.join(","),
 );
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);

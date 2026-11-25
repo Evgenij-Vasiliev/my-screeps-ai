@@ -56,6 +56,85 @@ global.OK = 0;
 global.Memory = { rooms: {} };
 global.Game = { time: 0, getObjectById: () => null };
 
+// RoomPosition на шарде — глобальный конструктор; роль зовёт его напрямую при
+// переходе на соседнее место: `new RoomPosition(...)` (role.miner.js:189).
+global.RoomPosition = class RoomPosition {
+  constructor(x, y, roomName) {
+    this.x = x;
+    this.y = y;
+    this.roomName = roomName;
+  }
+  isEqualTo(x, y) {
+    return this.x === x && this.y === y;
+  }
+};
+
+/**
+ * Store-мок по модели движкового Store (screeps/engine src/game/store.js:20-90):
+ *   • ресурсы — собственные enumerable-свойства и ТОЛЬКО при ненулевом
+ *     количестве: в движке они копируются из `Object.entries(object.store)`
+ *     под условием `if (resourceAmount)`, поэтому перебор
+ *     `for (const resource in creep.store)` (role.miner.js:120) видит ресурсы,
+ *     а не служебные поля;
+ *   • методы (getFreeCapacity/getUsedCapacity/getCapacity) — non-enumerable
+ *     (в движке объявлены через Object.defineProperties), в for..in не
+ *     попадают;
+ *   • чтение отсутствующего ресурса даёт 0, а не undefined (Proxy в движке).
+ * Прежний мок был объектным литералом с enumerable-полями `cap` и
+ * getFreeCapacity — перебор role.miner.js:120 принимал `cap` за чужой ресурс и
+ * уводил роль в аварийный return ДО добычи (поэтому падали все сценарии).
+ */
+class StoreMock {
+  constructor(capacity, amounts) {
+    Object.defineProperty(this, "cap", { value: capacity, writable: true, enumerable: false });
+    Object.defineProperty(this, "_amounts", { value: Object.create(null), enumerable: false });
+
+    const proxy = new Proxy(this, {
+      get(target, name) {
+        if (name in target) return target[name];
+        return typeof name === "string" ? 0 : undefined;
+      },
+      set(target, name, value) {
+        if (name === "cap" || name === "_amounts") return false;
+        const amount = Number(value) || 0;
+        if (amount > 0) {
+          target._amounts[name] = amount;
+          Object.defineProperty(target, name, {
+            value: amount,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+        } else {
+          delete target._amounts[name];
+          delete target[name];
+        }
+        return true;
+      },
+    });
+    for (const resource of Object.keys(amounts || {})) proxy[resource] = amounts[resource];
+    return proxy;
+  }
+
+  getCapacity() {
+    return this.cap;
+  }
+
+  getUsedCapacity(resource) {
+    if (resource === undefined) {
+      let sum = 0;
+      for (const r in this._amounts) sum += this._amounts[r];
+      return sum;
+    }
+    return this._amounts[resource] || 0;
+  }
+
+  /** У универсального store (creep/link) свободно = ёмкость минус ВСЁ занятое. */
+  getFreeCapacity() {
+    return this.cap - this.getUsedCapacity();
+  }
+}
+
 const roleMiner = require("../role.miner");
 
 let passed = 0;
@@ -96,13 +175,7 @@ function makeWorld(o) {
 
   const mkLink = id => ({
     id,
-    store: {
-      energy: 0,
-      cap: 800,
-      getFreeCapacity() {
-        return this.cap - this.energy;
-      },
-    },
+    store: new StoreMock(800, { energy: 0 }),
   });
   const linkA = mkLink("lA");
   const linkB = mkLink("lB");
@@ -113,13 +186,7 @@ function makeWorld(o) {
     [distance + ",0"]: { source: srcB, link: linkB },
   };
 
-  const store = {
-    energy: o.carried || 0,
-    cap: 500,
-    getFreeCapacity() {
-      return this.cap - this.energy;
-    },
-  };
+  const store = new StoreMock(500, { energy: o.carried || 0 });
 
   const world = {
     time: o.time || 0,
@@ -132,7 +199,10 @@ function makeWorld(o) {
     // Сколько раз transfer поставила бы ПРЕЖНЯЯ логика слива
     // (`free + freeEnergy >= take`): каждый тик, когда есть груз и линк не полон.
     oldTransfers: 0,
-    calls: { harvest: 0, transfer: 0, moveTo: 0 },
+    // Сколько интентов движения поставила роль. Роль ходит через Traveler:
+    // `creep.travelTo(...)` (role.miner.js:141,189); moveTo оставлен, чтобы
+    // будущий литеральный вызов не потерялся молча.
+    calls: { harvest: 0, transfer: 0, move: 0 },
     target: null,
     linkAt(x, y) {
       const at = bySpot[x + "," + y];
@@ -169,8 +239,13 @@ function makeWorld(o) {
       },
     },
     getActiveBodyparts: () => 23,
+    // Движение ставит Traveler: аргумент — RoomPosition(цель).
+    travelTo(target) {
+      world.calls.move++;
+      world.target = { x: target.x, y: target.y };
+    },
     moveTo(x, y) {
-      world.calls.moveTo++;
+      world.calls.move++;
       world.target = { x, y };
     },
     harvest(src) {
@@ -261,7 +336,7 @@ check("harvest вызван 19 раз (удар каждый тик)", w1.calls.
 check("transfer вызван 1 раз, а не 18", w1.calls.transfer === 1, String(w1.calls.transfer));
 check("прежняя логика дала бы 18 сливов", w1.oldTransfers === 18, String(w1.oldTransfers));
 check("снято 874 энергии", w1.harvested === 874, String(w1.harvested));
-check("движения не было (майнер на месте)", w1.calls.moveTo === 0, String(w1.calls.moveTo));
+check("движения не было (майнер на месте)", w1.calls.move === 0, String(w1.calls.move));
 check("потерь в drop нет", w1.dropped === 0, String(w1.dropped));
 
 // ── 2. Удар не влезает в рюкзак — harvest не зовётся ───────────────────
@@ -294,12 +369,12 @@ console.log("\n5. Симуляция 900 тиков: два источника, 
 const sim = makeWorld({ time: 0, distance: 20 });
 for (let i = 0; i < 900; i++) tick(sim, true);
 
-const intentsNow = sim.calls.harvest + sim.calls.transfer + sim.calls.moveTo;
-const intentsOld = sim.calls.harvest + sim.oldTransfers + sim.calls.moveTo;
+const intentsNow = sim.calls.harvest + sim.calls.transfer + sim.calls.move;
+const intentsOld = sim.calls.harvest + sim.oldTransfers + sim.calls.move;
 console.log(
   `    добыто ${sim.harvested} (потолок 20/тик = 18000)` +
     ` | интентов сейчас ${intentsNow} (harvest ${sim.calls.harvest},` +
-    ` transfer ${sim.calls.transfer}, moveTo ${sim.calls.moveTo})` +
+    ` transfer ${sim.calls.transfer}, travelTo ${sim.calls.move})` +
     ` | было бы ${intentsOld} (сливов ${sim.oldTransfers})`,
 );
 
@@ -321,8 +396,8 @@ check(
 );
 check(
   "майнер не простаивает: источник вычерпывается (переходы были)",
-  sim.calls.moveTo > 0,
-  String(sim.calls.moveTo),
+  sim.calls.move > 0,
+  String(sim.calls.move),
 );
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);

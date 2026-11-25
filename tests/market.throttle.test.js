@@ -58,27 +58,52 @@ global.RESOURCES_ALL = [
 
 global.Memory = {};
 
-const { MARKET } = require("../constants");
+const { MARKET, TERMINAL_SUPPLY, TASK_ENERGY_LIMITS } = require("../constants");
 
 /** Журнал обращений к рынку. */
 let orderCalls = [];
 let dealCalls = [];
 
-function makeTerminal(roomName, store) {
-  return {
-    my: true,
-    room: { name: roomName },
-    store,
-  };
-}
+// Фикстура обязана быть ЛЕГАЛЬНОЙ по текущим правилам рынка: иначе проход
+// до getAllOrders не доходит, и «положительные» разделы проверяют 0 против 0.
+// Причины, по которым прежняя фикстура (U в терминале) не торговала:
+//   • продаётся только то, что в MARKET.SELL_LIST — сейчас это ["battery"]
+//     (constants.js:546, market.manager.js:427); U лежит в BUY_LIST
+//     (constants.js:544) и отсекается на market.manager.js:426;
+//   • излишек для батареек считается сверх MARKET.BATTERY_SELL_RESERVE = 0
+//     (constants.js:527, market.manager.js:428-429), т.е. продаётся весь
+//     запас терминала;
+//   • комиссия для battery не опускает терминал ниже
+//     TERMINAL_SUPPLY.ENERGY_MIN = 100000 (constants.js:20,
+//     market.manager.js:216-226) — в фикстуре комиссия 0
+//     (calcTransactionCost), значит энергия терминала должна быть ≥ порога;
+//   • в комнате есть storage с энергией выше порога marketSell = 240000
+//     (constants.js:146, energy.policy.js:452). Для группы BATTERY гейт
+//     marketSell не применяется (market.manager.js:419-425), но фикстура
+//     держит исправным и этот путь — поведение не зависит от частностей.
+const TERMINAL_BATTERY = 12000; // излишек: 12000 − резерв 0 = 12000
+const TERMINAL_ENERGY = TERMINAL_SUPPLY.ENERGY_MIN + 20000; // 120000
+const STORAGE_ENERGY = TASK_ENERGY_LIMITS.marketSell + 60000; // 300000
+const STORAGE_FREE = 300000;
 
-function makeRoom(roomName, terminal) {
-  return { name: roomName, terminal };
+function makeRoom(roomName) {
+  const room = { name: roomName };
+  room.terminal = {
+    my: true,
+    // market.manager читает terminal.room.name и terminal.room.storage
+    // (market.manager.js:206-209, 386, 416) — ссылка на тот же объект комнаты.
+    room,
+    store: { battery: TERMINAL_BATTERY, energy: TERMINAL_ENERGY },
+  };
+  room.storage = {
+    store: { energy: STORAGE_ENERGY, getFreeCapacity: () => STORAGE_FREE },
+  };
+  return room;
 }
 
 /**
  * Собирает фейковый Game на заданном тике.
- * Три терминала с избытком утрия — чтобы проверить именно дедупликацию
+ * Три терминала с избытком батареек — чтобы проверить именно дедупликацию
  * запросов: без кэша было бы три обращения вместо одного.
  *
  * @param {number} time игровой тик
@@ -101,16 +126,16 @@ function setupGame(time, bucket = 10000) {
     time,
     cpu: { bucket },
     rooms: {
-      W1N1: makeRoom("W1N1", makeTerminal("W1N1", { U: 12000, energy: 50000 })),
-      W2N1: makeRoom("W2N1", makeTerminal("W2N1", { U: 12000, energy: 50000 })),
-      W3N1: makeRoom("W3N1", makeTerminal("W3N1", { U: 12000, energy: 50000 })),
+      W1N1: makeRoom("W1N1"),
+      W2N1: makeRoom("W2N1"),
+      W3N1: makeRoom("W3N1"),
     },
     market: {
       credits: 0,
       orders: {},
       getAllOrders(opts) {
         orderCalls.push(opts.type + "|" + opts.resourceType);
-        if (opts.type === global.ORDER_BUY && opts.resourceType === "U") {
+        if (opts.type === global.ORDER_BUY && opts.resourceType === "battery") {
           return [
             { id: "order1", price: 1.0, amount: 100, roomName: "W5N5" },
             { id: "order2", price: 0.5, amount: 100, roomName: "W5N5" },
@@ -150,9 +175,13 @@ check("сделок нет", dealCalls.length === 0, String(dealCalls.length));
 console.log("\n2. Тик кратен интервалу — один запрос на пару (тип, ресурс)");
 setupGame(MARKET.INTERVAL);
 marketManager.run();
-const buyU = orderCalls.filter(k => k === "buy|U").length;
-check("buy|U запрошен ровно 1 раз на 3 терминала", buyU === 1, String(buyU));
-check("энергия не запрашивалась (нет избытка)", !orderCalls.includes("buy|energy"), orderCalls.join(","));
+const batteryOrders = orderCalls.filter(k => k === "buy|battery").length;
+check("buy|battery запрошен ровно 1 раз на 3 терминала", batteryOrders === 1, String(batteryOrders));
+check(
+  "запрошена только продаваемая пара; энергия не запрашивалась (SELL_LIST = [battery])",
+  orderCalls.length === 1 && !orderCalls.includes("buy|energy"),
+  orderCalls.join(","),
+);
 check("сделки заключены (3 терминала)", dealCalls.length === 3, String(dealCalls.length));
 check(
   "выбран лучший ордер (order1, цена 1.0)",
@@ -162,13 +191,20 @@ check(
 
 console.log("\n3. Повторный проход в том же тике — кэш, новых запросов нет");
 const before = orderCalls.length;
+// Раздел не должен проходить вхолостую: сравниваем не 0 с 0, а реальный
+// запрос, сделанный разделом 2.
+check("к этому моменту рынок уже запрашивал ордера", before === 1, String(before));
 marketManager.run();
 check("новых запросов нет", orderCalls.length === before, String(orderCalls.length - before));
 
 console.log("\n4. Следующий проход (следующее окно) — кэш обновляется");
 setupGame(MARKET.INTERVAL * 2);
 marketManager.run();
-check("buy|U запрошен снова", orderCalls.filter(k => k === "buy|U").length === 1, orderCalls.join(","));
+check(
+  "buy|battery запрошен снова",
+  orderCalls.filter(k => k === "buy|battery").length === 1,
+  orderCalls.join(","),
+);
 
 console.log("\n5. Игрок без терминалов — рынок не трогается");
 orderCalls = [];
@@ -187,7 +223,7 @@ console.log("\n7. Bucket ровно на пороге (9000) — рынок ра
 // Порог в loadShed строгий (`bucket < lite`), поэтому 9000 — ещё off.
 setupGame(MARKET.INTERVAL * 4, 9000);
 marketManager.run();
-check("getAllOrders вызван", orderCalls.includes("buy|U"), orderCalls.join(","));
+check("getAllOrders вызван", orderCalls.includes("buy|battery"), orderCalls.join(","));
 check("сделки заключены", dealCalls.length === 3, String(dealCalls.length));
 
 console.log("\n8. Порог переопределяется из консоли (Memory.loadShedThresholds)");
@@ -200,14 +236,14 @@ check("сделок нет", dealCalls.length === 0, String(dealCalls.length));
 console.log("\n9. Полный bucket — рынок работает как раньше");
 setupGame(MARKET.INTERVAL * 6, 10000);
 marketManager.run();
-check("getAllOrders вызван", orderCalls.includes("buy|U"), orderCalls.join(","));
+check("getAllOrders вызван", orderCalls.includes("buy|battery"), orderCalls.join(","));
 check("сделки заключены", dealCalls.length === 3, String(dealCalls.length));
 
 console.log("\n10. Без Game.cpu (симулятор) гейт не срабатывает");
 setupGame(MARKET.INTERVAL * 7, 10000);
 delete global.Game.cpu;
 marketManager.run();
-check("getAllOrders вызван", orderCalls.includes("buy|U"), orderCalls.join(","));
+check("getAllOrders вызван", orderCalls.includes("buy|battery"), orderCalls.join(","));
 
 console.log("\n11. Ручной Memory.loadShed в bucket-гейте не участвует");
 // Гейт шага 6 — только по bucket. Ручное глушение рынка (Memory.loadShed
@@ -215,7 +251,7 @@ console.log("\n11. Ручной Memory.loadShed в bucket-гейте не уча
 setupGame(MARKET.INTERVAL * 8, 10000);
 Memory.loadShed = "hard";
 marketManager.run();
-check("ручной hard при полном bucket рынок не глушит", orderCalls.includes("buy|U"), orderCalls.join(","));
+check("ручной hard при полном bucket рынок не глушит", orderCalls.includes("buy|battery"), orderCalls.join(","));
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);
 process.exit(failed === 0 ? 0 : 1);

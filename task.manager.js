@@ -1,4 +1,5 @@
 const { TASK_CONFIG } = require("./constants");
+const energyPolicy = require("./energy.policy");
 
 const TASK_CHAIN = [
   "fillSpawnsExtensions",
@@ -469,7 +470,14 @@ function reserveTask(roomName, taskType, task, creepName) {
   const queued = index === undefined ? null : entry.queue[index];
 
   if (!queued) return false;
-  if (queued.expiresAt && queued.expiresAt <= Game.time) return false;
+  if (queued.expiresAt && queued.expiresAt <= Game.time) {
+    // Просроченная задача больше не выполнится: её резерв бюджета и бронь
+    // крипа снимаются, иначе бюджет направления удерживался бы вечно.
+    if (queued.reservedBy) entry.free++;
+    delete queued.reservedBy;
+    energyPolicy.releaseTaskBudget(queued);
+    return false;
+  }
 
   if (!queued.reservedBy) entry.free--;
   queued.reservedBy = creepName;
@@ -487,6 +495,7 @@ function releaseTask(roomName, taskType, task) {
 
   if (queued.reservedBy) entry.free++;
   delete queued.reservedBy;
+  energyPolicy.releaseTaskBudget(queued);
   return true;
 }
 
@@ -503,6 +512,9 @@ function completeTask(roomName, taskType, task) {
 
   if (queued.reservedBy) entry.free++;
   delete queued.reservedBy;
+  // Возвращается только неизрасходованная часть резерва; снятая крипом
+  // энергия (energyTaken) остаётся списанной. Повторный вызов безопасен.
+  energyPolicy.releaseTaskBudget(queued);
 
   // НАДГРОБИЕ вместо splice: массив не сдвигается, поэтому позиции в
   // indexById (уже построенном ensureIndex) остаются верными до конца тика,

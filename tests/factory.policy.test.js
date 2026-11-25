@@ -139,11 +139,11 @@ console.log("\n3. Производство не зависит от стока")
 
 console.log("\n4. Бюджет: полная стоимость и недостаток");
 {
-  const savedCritical = BUDGET.CRITICAL;
-  BUDGET.CRITICAL = [];
+  // Обхода лимита у направлений больше нет (BUDGET.CRITICAL удалён):
+  // фабрика упирается в свой остаток, как и любое другое направление.
   delete Memory.energyBudget;
   const state = energyPolicy.budgetStatus();
-  check("лимит factory 7 416", state.limits.factory === 7416, state.limits.factory);
+  check("лимит factory 14 082", state.limits.factory === 14082, state.limits.factory);
   state.remaining.factory = 600;
   state.remaining.spawn = 8010;
   const t = { direction: "factory", maxEnergy: 600 };
@@ -151,7 +151,6 @@ console.log("\n4. Бюджет: полная стоимость и недост�
   check("остаток 0", energyPolicy.budgetStatus().remaining.factory === 0);
   check("недостаточный бюджет не списывает", energyPolicy.tryChargeTaskBudget({ direction: "factory", maxEnergy: 600 }) === false);
   check("spawn не затронут", energyPolicy.budgetStatus().remaining.spawn === 8010, energyPolicy.budgetStatus().remaining.spawn);
-  BUDGET.CRITICAL = savedCritical;
 }
 
 console.log("\n5. Несколько фабрик — общий бюджет");
@@ -163,7 +162,7 @@ console.log("\n5. Несколько фабрик — общий бюджет");
   check("задача A создана", tasks(a.roomName, "fillFactoryEnergy").length === 1);
   check("задача B создана", tasks(b.roomName, "fillFactoryEnergy").length === 1);
   const budget = energyPolicy.budgetStatus();
-  check("бюджет factory общий", budget.limits.factory === 7416);
+  check("бюджет factory общий", budget.limits.factory === 14082);
 }
 
 console.log(`\nИтого: ${passed} PASS, ${failed} FAIL, ${passed + failed} всего`);

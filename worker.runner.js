@@ -181,14 +181,12 @@ function run(creep) {
   const roomName = creep.room.name;
   const room = Game.rooms && Game.rooms[roomName];
 
-  // Бюджет распространяется только на штатных крипов SPAWN_QUOTA.
-  // extraCreeps (memory.extra) — целевые исполнители: их работа не должна
-  // блокироваться периодным лимитом, иначе factory/build-воркеры стоят при
-  // исчерпанном бюджете. Физический резерв Storage (canReserve) остаётся.
-  const isExtra = creep.memory.extra !== undefined;
+  // Бюджет распространяется на ВСЕХ исполнителей: extraCreeps больше не
+  // обходят периодный лимит, иначе через них направление тратило бы энергию
+  // без резерва (дыра в лимите). Физический резерв Storage (canReserve)
+  // действует на всех одинаково.
   const acceptTask = task =>
-    energyPolicy.canReserve(room, task) &&
-    (isExtra || energyPolicy.budgetAvailable(task));
+    energyPolicy.canReserve(room, task) && energyPolicy.budgetAvailable(task);
 
   // Состояние «грузен/пуст» читается один раз на тик и передаётся в rangeFn:
   // до исполнителя стор не меняется (см. комментарий к isFull).
@@ -303,9 +301,9 @@ function run(creep) {
     }
 
     // Бюджет списывается только после успешного reserveTask. Если бюджета
-    // не хватило, задача освобождается и остаётся доступной в FIFO;
-    // стоимость не теряется. extraCreeps бюджет не расходуют вовсе.
-    if (!isExtra && !energyPolicy.tryChargeTaskBudget(candidate)) {
+    // не хватило, задача освобождается (резерв возвращается в бюджет) и
+    // остаётся доступной в FIFO; стоимость не теряется.
+    if (!energyPolicy.tryChargeTaskBudget(candidate)) {
       taskManager.releaseTask(roomName, currentTaskType, candidate);
       return;
     }

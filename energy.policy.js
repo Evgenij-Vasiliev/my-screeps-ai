@@ -286,13 +286,18 @@ function protectedBudget(direction) {
   return (BUDGET.PROTECTED && BUDGET.PROTECTED[direction]) || 0;
 }
 
-/** Хватает ли остатка с учётом защищённой части для этой задачи. */
+/**
+ * Хватает ли остатка с учётом защищённой части для этой задачи.
+ *
+ * Лимит направления ДЕЙСТВУЕТ для всех направлений, включая жизненные
+ * (spawn, factory, towers, ...): раньше список BUDGET.CRITICAL давал им
+ * безусловное право обхода, и бюджет был только учётным. Теперь
+ * единственная поблажка — защищённая часть PROTECTED: обычная задача не
+ * может опустить остаток ниже неё, обязательная (mandatory) может, но и она
+ * не выходит за остаток направления. Физический тормоз расхода — по-прежнему
+ * свободная энергия Storage в canReserve.
+ */
 function hasBudget(state, task, cost) {
-  // Жизненные направления не должны стоять из-за периода: физический
-  // тормоз — свободный остаток Storage в canReserve, а не счётчик задач.
-  if (BUDGET.CRITICAL && BUDGET.CRITICAL.includes(task.direction)) {
-    return true;
-  }
   const reserve = task.mandatory === true ? 0 : protectedBudget(task.direction);
   return (state.remaining[task.direction] || 0) - reserve >= cost;
 }
@@ -306,9 +311,16 @@ function budgetAvailable(task) {
 }
 
 /**
- * Списывает полную стоимость задачи с бюджета направления при успешном
- * назначении. Никаких бюджетных полей на задаче не хранится: период и
- * остаток — свойство направления, а не задачи.
+ * Атомарно резервирует стоимость задачи в бюджете её направления.
+ *
+ * Проверка и списание идут в одном вызове без переключений тика, поэтому две
+ * задачи не могут получить один и тот же остаток: вторая увидит уже
+ * уменьшенный remaining и получит false.
+ *
+ * Резерв хранится НА ЗАДАЧЕ (`budgetPeriod` + `budgetCharged`): по нему
+ * releaseTaskBudget знает, сколько вернуть при отмене, и не возвращает
+ * дважды. Поля живут в объекте задачи в Memory.rooms[].tasks, то есть
+ * переживают тик вместе с очередью.
  */
 function tryChargeTaskBudget(task) {
   if (!task || !task.direction) return true;
@@ -316,17 +328,63 @@ function tryChargeTaskBudget(task) {
   if (cost <= 0) return true;
 
   const state = budgetState();
-  if (!hasBudget(state, task, cost)) return false;
-  const left = state.remaining[task.direction] || 0;
 
-  // Критическая задача выдаётся и при исчерпанном периодном остатке:
-  // её реальный лимит — свободная энергия Storage (canReserve).
-  const critical =
-    BUDGET.CRITICAL && BUDGET.CRITICAL.includes(task.direction);
+  // Повторная обработка той же задачи в том же периоде не списывает дважды.
+  if (task.budgetPeriod === state.period) return true;
+
+  if (!hasBudget(state, task, cost)) return false;
+
+  const left = state.remaining[task.direction] || 0;
   state.remaining[task.direction] = Math.max(0, left - cost);
   state.charged[task.direction] =
     (state.charged[task.direction] || 0) + cost;
+  task.budgetPeriod = state.period;
+  task.budgetCharged = cost;
   return true;
+}
+
+/**
+ * Возвращает в бюджет НЕИЗРАСХОДОВАННУЮ часть резерва задачи.
+ *
+ * Вызывается при отмене, освобождении, завершении и снятии задачи. Возврат
+ * идемпотентен: поля снимаются в первом же вызове, повторно возвращать нечего.
+ * Израсходованное (`energyTaken`) не возвращается никогда — бюджет тратится
+ * по факту снятия энергии крипом. Резерв прошлого периода не возвращается в
+ * текущий: остаток между периодами не переносится.
+ *
+ * @param {Object} task
+ * @returns {number} сколько энергии вернулось в бюджет направления
+ */
+function releaseTaskBudget(task) {
+  if (!task || task.budgetPeriod === undefined) return 0;
+
+  const reservedPeriod = task.budgetPeriod;
+  const direction = task.direction;
+  const charged =
+    typeof task.budgetCharged === "number" ? task.budgetCharged : 0;
+  const spent = typeof task.energyTaken === "number" ? task.energyTaken : 0;
+
+  delete task.budgetPeriod;
+  delete task.budgetCharged;
+
+  // Резерв прошлого периода новый бюджет не искажает.
+  if (reservedPeriod !== budgetPeriod() || !direction) return 0;
+
+  const unused = Math.max(0, charged - spent);
+  if (unused <= 0) return 0;
+
+  const state = budgetState();
+  const cap = state.limits[direction] || 0;
+  state.remaining[direction] = Math.min(
+    cap,
+    (state.remaining[direction] || 0) + unused,
+  );
+  // charged — счётчик фактически израсходованного: возврат его уменьшает.
+  state.charged[direction] = Math.max(
+    0,
+    (state.charged[direction] || 0) - unused,
+  );
+  return unused;
 }
 
 /** Диагностика: Memory.__budget = JSON.stringify(energyPolicy.budgetStatus()) */
@@ -431,6 +489,7 @@ module.exports = {
   normalizeTaskBudget,
   budgetAvailable,
   tryChargeTaskBudget,
+  releaseTaskBudget,
   budgetStatus,
   status,
   BANDS,

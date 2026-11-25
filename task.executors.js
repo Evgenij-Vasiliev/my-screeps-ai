@@ -39,12 +39,21 @@ function resolveTarget(id) {
   return target;
 }
 
-/** Остаток бюджета задачи. Нет контракта — без ограничения (старое поведение). */
+/**
+ * Остаток контракта задачи. Нет контракта — без ограничения (старое поведение).
+ * Если задача получила резерв энергии в бюджете направления (budgetCharged),
+ * он дополнительно ограничивает контракт: задача не может израсходовать
+ * больше, чем ей выделено.
+ */
 function taskEnergyLimit(task) {
   if (!task || typeof task.maxEnergy !== "number") return Infinity;
   const spent =
     typeof task.energyTaken === "number" ? task.energyTaken : 0;
-  return Math.max(0, task.maxEnergy - spent);
+  const contract =
+    typeof task.budgetCharged === "number"
+      ? Math.min(task.maxEnergy, task.budgetCharged)
+      : task.maxEnergy;
+  return Math.max(0, contract - spent);
 }
 
 /**
@@ -55,11 +64,7 @@ function taskEnergyLimit(task) {
 function withdrawForTask(creep, task) {
   // Контракт уже исчерпан: повторно не набираем, иначе задача будет
   // бесконечно пополняться после каждой доставки.
-  if (
-    task &&
-    typeof task.maxEnergy === "number" &&
-    (task.energyTaken || 0) >= task.maxEnergy
-  ) {
+  if (task && typeof task.maxEnergy === "number" && taskEnergyLimit(task) <= 0) {
     return false;
   }
 
@@ -76,10 +81,11 @@ function withdrawForTask(creep, task) {
   const after = (creep.store && creep.store[RESOURCE_ENERGY]) || 0;
   const delta = after - before;
   if (delta > 0 && typeof task.maxEnergy === "number") {
-    task.energyTaken = Math.min(
-      task.maxEnergy,
-      (task.energyTaken || 0) + delta,
-    );
+    const contract =
+      typeof task.budgetCharged === "number"
+        ? Math.min(task.maxEnergy, task.budgetCharged)
+        : task.maxEnergy;
+    task.energyTaken = Math.min(contract, (task.energyTaken || 0) + delta);
   }
   return true;
 }

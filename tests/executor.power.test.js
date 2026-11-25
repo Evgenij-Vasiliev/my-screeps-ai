@@ -16,7 +16,7 @@
  *   3) фаза забора (пустой крип) — withdraw из source;
  *   4) груз доставлен — DONE и очистка памяти;
  *   5) source исчез — аккуратный SKIP без исключения;
- *   6) ERR_NOT_IN_RANGE при сбросе — moveTo к source с reusePath.
+ *   6) ERR_NOT_IN_RANGE при сбросе — travelTo к source.
  *
  * Живой шард здесь не нужен: ветка зависит только от стора крипа, состояния
  * цели и памяти, а все игровые объекты подменяются. Что локально НЕ
@@ -133,6 +133,15 @@ function makeCreep(opts) {
       intents.push(["withdraw", obj.id, resourceType]);
       return OK;
     },
+    // Все ветки исполнителя (task.executors.js:729, 741, 765) ходят через
+    // travelTo: на шарде метод ставится на прототип в main.js:6 →
+    // traveler.js:542-559 (`Creep.prototype.travelTo`). Без него фикстура
+    // падала на TypeError вместо проверки интента. moveTo оставлен как у
+    // настоящего Creep, но исполнитель его здесь не вызывает.
+    travelTo: obj => {
+      intents.push(["travelTo", obj.id]);
+      return OK;
+    },
     moveTo: obj => {
       intents.push(["moveTo", obj.id]);
       return OK;
@@ -235,8 +244,8 @@ console.log("\n6. Target недостижим при сбросе: едем к s
   });
   check("результат CONTINUE", f.result === "CONTINUE", f.result);
   check(
-    "интент: transfer + moveTo к storage",
-    JSON.stringify(f.intents) === '[["transfer","store1","energy"],["moveTo","store1"]]',
+    "интент: transfer + travelTo к storage",
+    JSON.stringify(f.intents) === '[["transfer","store1","energy"],["travelTo","store1"]]',
     JSON.stringify(f.intents),
   );
   check("груз остался в рюкзаке", f.creep.store.energy === 50, String(f.creep.store.energy));
