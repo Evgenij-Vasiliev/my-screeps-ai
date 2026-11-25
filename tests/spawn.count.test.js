@@ -213,7 +213,7 @@ function fullFleet() {
 
 const spawnCalls = [];
 const spawn = {
-  room: { name: "W1N1" },
+  room: { name: "W1N1", energyAvailable: 6000, energyCapacityAvailable: 6000 },
   spawning: null,
   spawnCreep(body, name, opts) {
     spawnCalls.push(name.split("_")[0]);
@@ -223,7 +223,11 @@ const spawn = {
 
 const roomState = {
   roomName: "W1N1",
-  room: { controller: { ticksToDowngrade: 50000 } },
+  room: {
+    controller: { ticksToDowngrade: 50000 },
+    energyAvailable: 6000,
+    energyCapacityAvailable: 6000,
+  },
   spawns: [spawn],
   // Все ненулевые квоты набраны — спавнить некого. Состав собран ПО КВОТАМ из
   // constants.js, а не руками: квоты меняются (01.10.2026 miner 2 -> 1,
@@ -266,7 +270,7 @@ check(
 console.log("\n8. Берётся ПЕРВЫЙ свободный спавн, а не любой");
 const freeSpawnLabel = [];
 const busy = {
-  room: { name: "W1N1" },
+  room: { name: "W1N1", energyAvailable: 6000, energyCapacityAvailable: 6000 },
   spawning: { name: "worker_W1N1_1" },
   spawnCreep() {
     freeSpawnLabel.push("busy");
@@ -274,7 +278,7 @@ const busy = {
   },
 };
 const free = {
-  room: { name: "W1N1" },
+  room: { name: "W1N1", energyAvailable: 6000, energyCapacityAvailable: 6000 },
   spawning: null,
   spawnCreep() {
     freeSpawnLabel.push("free");

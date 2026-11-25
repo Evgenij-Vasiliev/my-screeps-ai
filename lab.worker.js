@@ -389,11 +389,10 @@ module.exports = {
           break;
         }
 
-        if (
-          curEnergy >= target ||
-          (!carriesEnergy && target - curEnergy < freeCapacity)
-        )
-          continue;
+        // Заполняем энергию до цели, даже если дефицит меньше рюкзака.
+        // Иначе 300/1000 при свободных 800 навсегда остаётся 300, и до
+        // KH/UO labWorker не доходит.
+        if (curEnergy >= target) continue;
 
         const energySrc = this.findSource(
           creep.room,

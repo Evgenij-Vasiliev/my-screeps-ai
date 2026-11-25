@@ -163,6 +163,12 @@ const factory = {
   emergencyBody: function () {
     return prepareBody(SPAWN.EMERGENCY_BODY);
   },
+  /** Стоимость обычного worker-тела для этой комнаты/спавна. */
+  normalWorkerCost: function (spawn) {
+    const blueprint = this.blueprints.worker(spawn);
+    return blueprint ? bodyCost(blueprint.body) : 0;
+  },
+
   emergencyCost: function () {
     return bodyCost(this.emergencyBody());
   },

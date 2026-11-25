@@ -226,14 +226,25 @@ function run(roomState) {
         emergencySpawn && emergencySpawn.room
           ? emergencySpawn.room.energyAvailable
           : 0;
-      if (!emergencySpawn || energy < creepFactory.emergencyCost()) {
-        // Не пытаемся создать невозможное полное тело; ждём энергию/спавн.
+      if (!emergencySpawn) {
         gate[roomName] = now + 1;
         return;
       }
-      creepFactory.runEmergency(emergencySpawn, roomName);
-      gate[roomName] = now + 1;
-      return;
+      // Аварийное тело нужно только тогда, когда на обычное не хватает.
+      // Иначе сначала даём шанс обычному worker'у; иначе комната с полными
+      // расширениями всё равно спавнит 1W/1C/1M и никогда не выходит из
+      // аварийного режима.
+      const normalCost = creepFactory.normalWorkerCost(emergencySpawn);
+      if (energy >= normalCost) {
+        // энергии достаточно — падаем в общий цикл спавна обычного worker'а
+      } else if (energy >= creepFactory.emergencyCost()) {
+        creepFactory.runEmergency(emergencySpawn, roomName);
+        gate[roomName] = now + 1;
+        return;
+      } else {
+        gate[roomName] = now + 1;
+        return;
+      }
     }
   }
 
